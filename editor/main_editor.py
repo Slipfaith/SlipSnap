@@ -6,14 +6,14 @@ from PIL import Image, ImageQt
 
 from PySide6.QtCore import Qt, QRectF, QPointF, QLineF, QTimer
 from PySide6.QtGui import (
-    QPainter, QPen, QColor, QImage, QKeySequence, QPixmap, QAction, QFont,
+    QPainter, QPen, QColor, QImage, QKeySequence, QPixmap, QAction,
     QCursor, QTextCursor, QTextCharFormat
 )
 from PySide6.QtWidgets import (
     QMainWindow, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsItem,
     QFileDialog, QMessageBox, QToolBar, QLabel, QWidget, QHBoxLayout,
-    QToolButton, QApplication, QColorDialog, QFontDialog, QGraphicsItemGroup,
-    QGraphicsTextItem
+    QToolButton, QApplication, QGraphicsItemGroup, QGraphicsTextItem,
+    QDialog, QGridLayout
 )
 
 from logic import pil_to_qpixmap, qimage_to_pil, HISTORY_DIR, save_history
@@ -301,6 +301,44 @@ class ColorButton(QToolButton):
         self.update_color()
 
 
+class HexColorDialog(QDialog):
+    """Миниатюрная гексагональная палитра цветов"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.Popup)
+        self.selected = None
+
+        colors = [
+            "#000000", "#808080", "#FF0000",
+            "#FFA500", "#FFFF00", "#008000", "#00FFFF",
+            "#0000FF", "#800080", "#FFFFFF"
+        ]
+        positions = [
+            (0, 1), (0, 2), (0, 3),
+            (1, 0), (1, 1), (1, 2), (1, 3),
+            (2, 1), (2, 2), (2, 3)
+        ]
+
+        layout = QGridLayout(self)
+        layout.setSpacing(2)
+        layout.setContentsMargins(4, 4, 4, 4)
+
+        for pos, col in zip(positions, colors):
+            btn = QToolButton()
+            btn.setFixedSize(20, 20)
+            btn.setStyleSheet(
+                f"QToolButton{{background:{col}; border:1px solid #555; border-radius:10px;}}"
+                "QToolButton:hover{border:2px solid #0d6efd;}"
+            )
+            btn.clicked.connect(lambda _=None, c=col: self._choose(c))
+            layout.addWidget(btn, *pos)
+
+    def _choose(self, color_str):
+        self.selected = QColor(color_str)
+        self.accept()
+
+
 class EditorWindow(QMainWindow):
     """Главное окно редактора"""
 
@@ -394,32 +432,11 @@ class EditorWindow(QMainWindow):
         create_tool("Карандаш", "free", sc="F")
         create_tool("Текст", "text", sc="T")
 
-        # Кнопка выбора цвета линии
+        # Кнопка выбора цвета
         self.color_btn = ColorButton(QColor(255, 80, 80))
-        self.color_btn.setToolTip("Цвет линии")
-        self.color_btn.clicked.connect(self.choose_draw_color)
+        self.color_btn.setToolTip("Цвет")
+        self.color_btn.clicked.connect(self.choose_color)
         tb.addWidget(self.color_btn)
-
-        # Кнопка выбора шрифта
-        font_action, font_btn = add_action(tb, "Шрифт", self.choose_font)
-        font_btn.setMinimumWidth(80)
-        font_btn.setStyleSheet("""
-            QToolButton {
-                font-weight: bold;
-                background: #f0f8ff;
-                border: 1px solid #87ceeb;
-            }
-            QToolButton:hover {
-                background: #e6f3ff;
-                border: 1px solid #4682b4;
-            }
-        """)
-
-        # Цвет текста
-        self.text_color_btn = ColorButton(QColor(40, 40, 40))
-        self.text_color_btn.setToolTip("Цвет текста")
-        self.text_color_btn.clicked.connect(self.choose_text_color)
-        tb.addWidget(self.text_color_btn)
 
         tb.addSeparator()
 
@@ -438,32 +455,19 @@ class EditorWindow(QMainWindow):
         if hasattr(self, 'act_collage'):
             self._update_collage_enabled()
 
-    def choose_draw_color(self):
-        """Выбрать цвет для рисования"""
-        color = QColorDialog.getColor(self.color_btn.color, self, "Выберите цвет для рисования")
-        if color.isValid():
-            self.color_btn.set_color(color)
-            self.canvas.set_pen_color(color)
-
-    def choose_text_color(self):
-        """Выбрать цвет текста"""
+    def choose_color(self):
+        """Выбрать цвет"""
         selected_items = list(self.canvas.scene.selectedItems())
         focus_item = self.canvas.scene.focusItem()
 
-        color = QColorDialog.getColor(self.text_color_btn.color, self, "Выберите цвет текста")
-        if color.isValid():
-            self.text_color_btn.set_color(color)
-            self.text_manager.set_text_color(color)
-            self.text_manager.apply_color_to_selected(selected_items, focus_item)
-
-    def choose_font(self):
-        """Выбрать шрифт"""
-        selected_items = list(self.canvas.scene.selectedItems())
-        focus_item = self.canvas.scene.focusItem()
-
-        if self.text_manager.choose_font(self, selected_items, focus_item):
-            # Шрифт был изменен успешно
-            pass
+        dlg = HexColorDialog(self)
+        if dlg.exec():
+            color = dlg.selected
+            if color and color.isValid():
+                self.color_btn.set_color(color)
+                self.canvas.set_pen_color(color)
+                self.text_manager.set_text_color(color)
+                self.text_manager.apply_color_to_selected(selected_items, focus_item)
 
     def copy_to_clipboard(self):
         """Копировать в буфер обмена"""

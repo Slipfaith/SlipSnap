@@ -2,7 +2,7 @@
 from typing import Optional
 from PySide6.QtCore import QPointF, Qt, QRectF
 from PySide6.QtGui import QFont, QColor, QTextCursor, QTextCharFormat, QPen, QPainter
-from PySide6.QtWidgets import (QGraphicsItem, QGraphicsTextItem, QFontDialog,
+from PySide6.QtWidgets import (QGraphicsItem, QGraphicsTextItem,
                                QGraphicsRectItem, QGraphicsItemGroup)
 
 
@@ -11,8 +11,8 @@ class EditableTextItem(QGraphicsTextItem):
 
     def __init__(self, text="", parent=None):
         super().__init__(text, parent)
-        self._text_color = QColor(40, 40, 40)
-        self._font = QFont("Arial", 18)
+        self._text_color = QColor(255, 80, 80)
+        self._font = QFont("Montserrat", 18)
         self._is_editing = False
         self._placeholder_text = "Введите текст..."
         self._ignore_content_changes = False  # Флаг для предотвращения рекурсии
@@ -188,17 +188,9 @@ class TextManager:
 
     def __init__(self, canvas):
         self.canvas = canvas
-        self._font = QFont("Arial", 18)
-        self._text_color = QColor(40, 40, 40)
+        self._font = QFont("Montserrat", 18)
+        self._text_color = QColor(255, 80, 80)
         self._current_text_item = None
-
-    def set_font(self, font: QFont):
-        """Установить шрифт для нового текста"""
-        self._font = font
-
-        # Применяем к текущему редактируемому элементу
-        if self._current_text_item:
-            self._current_text_item.set_font(font)
 
     def set_text_color(self, color: QColor):
         """Установить цвет для нового текста"""
@@ -232,19 +224,6 @@ class TextManager:
 
         return item
 
-    def apply_font_to_selected(self, selected_items, focus_item=None):
-        """Применить текущий шрифт к выделенным текстовым элементам"""
-        targets = list(selected_items)
-        if isinstance(focus_item, EditableTextItem) and focus_item not in targets:
-            targets.append(focus_item)
-
-        for item in targets:
-            if isinstance(item, (QGraphicsTextItem, EditableTextItem)):
-                if hasattr(item, 'set_font'):
-                    item.set_font(self._font)
-                else:
-                    item.setFont(self._font)
-
     def apply_color_to_selected(self, selected_items, focus_item=None):
         """Применить текущий цвет к выделенным текстовым элементам"""
         targets = list(selected_items)
@@ -267,14 +246,6 @@ class TextManager:
                     except Exception as e:
                         print(f"Ошибка при применении цвета к элементу: {e}")
 
-    def choose_font(self, parent_widget, selected_items, focus_item=None):
-        """Показать диалог выбора шрифта и применить к выделенным элементам"""
-        font, ok = QFontDialog.getFont(self._font, parent_widget, "Выберите шрифт")
-        if ok:
-            self.set_font(font)
-            self.apply_font_to_selected(selected_items, focus_item)
-            return True
-        return False
 
     def finish_current_editing(self):
         """Завершить редактирование текущего текстового элемента"""
