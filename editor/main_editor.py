@@ -17,8 +17,8 @@ from PySide6.QtWidgets import (
 )
 
 from logic import pil_to_qpixmap, qimage_to_pil, HISTORY_DIR, save_history
-from .text_tools import TextManager
-from .ocr_tools import OCRManager
+from editor.text_tools import TextManager, EditableTextItem
+from editor.ocr_tools import OCRManager
 
 
 class Canvas(QGraphicsView):
@@ -108,6 +108,10 @@ class Canvas(QGraphicsView):
 
     def set_tool(self, tool: str):
         """Установить текущий инструмент"""
+        # Завершаем редактирование текста при смене инструмента
+        if hasattr(self, '_text_manager') and self._text_manager:
+            self._text_manager.finish_current_editing()
+
         self._tool = tool
         if tool == "select":
             self.viewport().setCursor(self._select_cursor)
@@ -120,6 +124,10 @@ class Canvas(QGraphicsView):
         else:
             self.viewport().setCursor(Qt.ArrowCursor)
         self._apply_lock_state()
+
+    def set_text_manager(self, text_manager):
+        """Установить менеджер текста"""
+        self._text_manager = text_manager
 
     def set_pen_width(self, w: int):
         """Установить толщину пера"""
@@ -173,10 +181,9 @@ class Canvas(QGraphicsView):
         if event.button() == Qt.LeftButton and self._tool not in ("none", "select"):
             self._start = self.mapToScene(event.position().toPoint())
             if self._tool == "text":
-                # Получаем текстовый менеджер из родительского окна
-                parent_window = self.window()
-                if hasattr(parent_window, 'text_manager'):
-                    item = parent_window.text_manager.prompt_and_add_text(self._start, parent_window)
+                # Создаем текстовый элемент на месте клика
+                if hasattr(self, '_text_manager') and self._text_manager:
+                    item = self._text_manager.create_text_item(self._start)
                     if item:
                         self._undo.append(item)
                 event.accept()
@@ -200,7 +207,7 @@ class Canvas(QGraphicsView):
                     line.setFlag(QGraphicsItem.ItemIsSelectable, True)
                     self._undo.append(line)
                     self._last_point = pos
-            else:
+            elif self._tool != "text":  # Не обрабатываем движение для текста
                 if self._tmp:
                     self.scene.removeItem(self._tmp)
                 self._tmp = self._preview_item(self._tool, self._start, pos, self._pen)
@@ -210,7 +217,7 @@ class Canvas(QGraphicsView):
 
     def mouseReleaseEvent(self, event):
         """Обработка отпускания мыши"""
-        if event.button() == Qt.LeftButton and self._tool not in ("none", "select"):
+        if event.button() == Qt.LeftButton and self._tool not in ("none", "select", "text"):
             if self._tool == "free":
                 self._last_point = None
             else:
@@ -307,6 +314,7 @@ class EditorWindow(QMainWindow):
         # Инициализация компонентов
         self.canvas = Canvas(qimg)
         self.text_manager = TextManager(self.canvas)
+        self.canvas.set_text_manager(self.text_manager)
         self.ocr_manager = OCRManager(cfg)
 
         self.setCentralWidget(self.canvas)
@@ -371,13 +379,13 @@ class EditorWindow(QMainWindow):
             return action, btn
 
         # Добавляем инструмент выделения первым
-        create_tool("Выделение", "select", "➤", "S")
+        create_tool("Выделение", "select", "→", "S")
         create_tool("Прямоуг.", "rect", "▭", "R")
-        create_tool("Эллипс", "ellipse", "◯", "E")
+        create_tool("Эллипс", "ellipse", "○", "E")
         create_tool("Линия", "line", "ｌ", "L")
-        create_tool("Стрелка", "arrow", "➤", "A")
+        create_tool("Стрелка", "arrow", "→", "A")
         create_tool("Карандаш", "free", "✎", "F")
-        create_tool("Текст", "text", "🔤", "T")
+        create_tool("Текст", "text", "T", "T")
 
         tb.addSeparator()
 
@@ -397,9 +405,23 @@ class EditorWindow(QMainWindow):
 
         tb.addSeparator()
 
-        # Настройки текста
-        add_action("Шрифт", self.choose_font, icon_text="🔤")
+        # ИСПРАВЛЕННАЯ СЕКЦИЯ НАСТРОЕК ТЕКСТА
+        # Кнопка выбора шрифта - делаем её более заметной
+        font_action, font_btn = add_action("Шрифт", self.choose_font, icon_text="Аa")
+        font_btn.setMinimumWidth(80)  # Устанавливаем минимальную ширину
+        font_btn.setStyleSheet("""
+            QToolButton {
+                font-weight: bold;
+                background: #f0f8ff;
+                border: 1px solid #87ceeb;
+            }
+            QToolButton:hover {
+                background: #e6f3ff;
+                border: 1px solid #4682b4;
+            }
+        """)
 
+        # Цвет текста
         tb.addWidget(QLabel("Цвет текста:"))
         self.text_color_btn = ColorButton(QColor(40, 40, 40))
         self.text_color_btn.clicked.connect(self.choose_text_color)
@@ -417,7 +439,7 @@ class EditorWindow(QMainWindow):
         add_action("Сохранить", self.save_image, sc="Ctrl+S", icon_text="💾")
         tb.addSeparator()
         self.act_new, _ = add_action("Новый снимок", self.add_screenshot, sc="Ctrl+N", icon_text="📸")
-        self.act_ocr, _ = add_action("OCR", self.ocr_current, sc="Ctrl+Alt+O", icon_text="🔍")
+        self.act_ocr, _ = add_action("OCR", self.ocr_current, sc="Ctrl+Alt+O", icon_text="📄")
         self.act_collage, _ = add_action("Коллаж", self.open_collage, sc="Ctrl+K", icon_text="🧩")
         tb.addSeparator()
         if hasattr(self, 'act_collage'):
