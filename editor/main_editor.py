@@ -2,57 +2,56 @@
 import math
 from typing import Optional, List
 from pathlib import Path
-import pytesseract
 from PIL import Image, ImageQt
 
 from PySide6.QtCore import Qt, QRectF, QPointF, QLineF, QTimer
 from PySide6.QtGui import (
-    QPainter,
-    QPen,
-    QColor,
-    QImage,
-    QKeySequence,
-    QPixmap,
-    QAction,
-    QFont,
-    QCursor,
-    QTextCursor,
-    QTextCharFormat,
+    QPainter, QPen, QColor, QImage, QKeySequence, QPixmap, QAction, QFont,
+    QCursor, QTextCursor, QTextCharFormat
 )
 from PySide6.QtWidgets import (
     QMainWindow, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsItem,
     QFileDialog, QMessageBox, QToolBar, QLabel, QSpinBox, QWidget, QHBoxLayout,
-    QToolButton, QApplication, QColorDialog, QFontDialog
+    QToolButton, QApplication, QColorDialog, QFontDialog, QGraphicsItemGroup,
+    QGraphicsTextItem
 )
 
 from logic import pil_to_qpixmap, qimage_to_pil, HISTORY_DIR, save_history
+from .text_tools import TextManager
+from .ocr_tools import OCRManager
 
 
 class Canvas(QGraphicsView):
+    """Холст для рисования и редактирования изображений"""
+
     def __init__(self, image: QImage):
         super().__init__()
         self.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
         self.scene = QGraphicsScene(self)
         self.setScene(self.scene)
+
+        # Основное изображение
         self.pixmap_item = QGraphicsPixmapItem(QPixmap.fromImage(image))
         self.pixmap_item.setFlag(QGraphicsItem.ItemIsMovable, True)
         self.pixmap_item.setFlag(QGraphicsItem.ItemIsSelectable, True)
         self.pixmap_item.setFlag(QGraphicsItem.ItemIsFocusable, True)
         self.pixmap_item.setZValue(0)
         self.scene.addItem(self.pixmap_item)
+
+        # Настройки UI
         self.setDragMode(QGraphicsView.ScrollHandDrag)
         self.setStyleSheet("""
             QGraphicsView { background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; }
             QGraphicsView:focus { border: 2px solid #0d6efd; outline: none; }
         """)
+
+        # Инициализация инструментов
         self._tool = "none"
         self._start = QPointF()
         self._tmp: Optional[QGraphicsItem] = None
         self._pen = QPen(QColor(255, 80, 80), 3)
         self._pen.setCapStyle(Qt.RoundCap)
         self._pen.setJoinStyle(Qt.RoundJoin)
-        self._font = QFont("Arial", 18)
-        self._text_color = QColor(40, 40, 40)
         self._undo: List[QGraphicsItem] = []
         self._last_point: Optional[QPointF] = None
 
@@ -85,13 +84,8 @@ class Canvas(QGraphicsView):
         painter.setBrush(QColor(0, 0, 0))
         # Рисуем стрелку
         points = [
-            QPointF(1, 1),
-            QPointF(1, 11),
-            QPointF(4, 8),
-            QPointF(7, 11),
-            QPointF(9, 9),
-            QPointF(6, 6),
-            QPointF(11, 1)
+            QPointF(1, 1), QPointF(1, 11), QPointF(4, 8), QPointF(7, 11),
+            QPointF(9, 9), QPointF(6, 6), QPointF(11, 1)
         ]
         painter.drawPolygon(points)
         painter.end()
@@ -113,9 +107,10 @@ class Canvas(QGraphicsView):
         self.setDragMode(QGraphicsView.NoDrag if lock else QGraphicsView.ScrollHandDrag)
 
     def set_tool(self, tool: str):
+        """Установить текущий инструмент"""
         self._tool = tool
         if tool == "select":
-            self.viewport().setCursor(self._select_cursor)  # Используем черный курсор
+            self.viewport().setCursor(self._select_cursor)
         elif tool in {"rect", "ellipse", "line", "arrow"}:
             self.viewport().setCursor(Qt.CrossCursor)
         elif tool == "free":
@@ -127,18 +122,15 @@ class Canvas(QGraphicsView):
         self._apply_lock_state()
 
     def set_pen_width(self, w: int):
+        """Установить толщину пера"""
         self._pen.setWidth(w)
 
     def set_pen_color(self, color: QColor):
+        """Установить цвет пера"""
         self._pen.setColor(color)
 
-    def set_font(self, font: QFont):
-        self._font = font
-
-    def set_text_color(self, color: QColor):
-        self._text_color = color
-
     def export_image(self) -> Image.Image:
+        """Экспортировать изображение"""
         rect = self.scene.itemsBoundingRect()
         dpr = getattr(self.window().windowHandle(), "devicePixelRatio", lambda: 1.0)()
         try:
@@ -159,11 +151,13 @@ class Canvas(QGraphicsView):
         return qimage_to_pil(img)
 
     def undo(self):
+        """Отменить последнее действие"""
         if self._undo:
             item = self._undo.pop()
             self.scene.removeItem(item)
 
     def wheelEvent(self, event):
+        """Обработка события колеса мыши для масштабирования"""
         if event.modifiers() & Qt.ControlModifier:
             selected = self.scene.selectedItems()
             if selected:
@@ -175,14 +169,16 @@ class Canvas(QGraphicsView):
         super().wheelEvent(event)
 
     def mousePressEvent(self, event):
+        """Обработка нажатия мыши"""
         if event.button() == Qt.LeftButton and self._tool not in ("none", "select"):
             self._start = self.mapToScene(event.position().toPoint())
             if self._tool == "text":
-                from PySide6.QtWidgets import QInputDialog
-                text, ok = QInputDialog.getText(self, "Текст", "Введите текст:")
-                if ok and text:
-                    item = self._add_text_item(text, self._start)
-                    self._undo.append(item)
+                # Получаем текстовый менеджер из родительского окна
+                parent_window = self.window()
+                if hasattr(parent_window, 'text_manager'):
+                    item = parent_window.text_manager.prompt_and_add_text(self._start, parent_window)
+                    if item:
+                        self._undo.append(item)
                 event.accept()
                 return
             elif self._tool == "free":
@@ -195,6 +191,7 @@ class Canvas(QGraphicsView):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
+        """Обработка движения мыши"""
         if (event.buttons() & Qt.LeftButton) and self._tool not in ("none", "select"):
             pos = self.mapToScene(event.position().toPoint())
             if self._tool == "free":
@@ -212,6 +209,7 @@ class Canvas(QGraphicsView):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
+        """Обработка отпускания мыши"""
         if event.button() == Qt.LeftButton and self._tool not in ("none", "select"):
             if self._tool == "free":
                 self._last_point = None
@@ -225,6 +223,7 @@ class Canvas(QGraphicsView):
         super().mouseReleaseEvent(event)
 
     def _preview_item(self, tool: str, start: QPointF, end: QPointF, pen: QPen) -> QGraphicsItem:
+        """Создать предварительный элемент для рисования"""
         if tool == "rect":
             r = QRectF(start, end).normalized()
             item = self.scene.addRect(r, pen)
@@ -240,8 +239,7 @@ class Canvas(QGraphicsView):
         return item
 
     def _add_arrow(self, start: QPointF, end: QPointF, pen: QPen) -> QGraphicsItem:
-        from PySide6.QtWidgets import QGraphicsItemGroup
-
+        """Создать стрелку"""
         # Создаем группу для всех частей стрелки
         group = QGraphicsItemGroup()
 
@@ -267,27 +265,10 @@ class Canvas(QGraphicsView):
         self.scene.addItem(group)
         return group
 
-    def _add_text_item(self, text: str, pos: QPointF) -> QGraphicsItem:
-        from PySide6.QtWidgets import QGraphicsTextItem
-        it = QGraphicsTextItem()
-        it.setFont(self._font)
-        it.setDefaultTextColor(self._text_color)
-        it.setPlainText(text)
-        # apply color to existing text explicitly
-        cursor = QTextCursor(it.document())
-        cursor.select(QTextCursor.Document)
-        fmt = QTextCharFormat()
-        fmt.setForeground(self._text_color)
-        cursor.mergeCharFormat(fmt)
-        it.setPos(pos)
-        it.setTextInteractionFlags(Qt.TextEditorInteraction)
-        it.setFlag(QGraphicsItem.ItemIsMovable, True)
-        it.setFlag(QGraphicsItem.ItemIsSelectable, True)
-        self.scene.addItem(it)
-        return it
-
 
 class ColorButton(QToolButton):
+    """Кнопка выбора цвета"""
+
     def __init__(self, color: QColor):
         super().__init__()
         self.color = color
@@ -295,6 +276,7 @@ class ColorButton(QToolButton):
         self.update_color()
 
     def update_color(self):
+        """Обновить отображение цвета"""
         self.setStyleSheet(f"""
             QToolButton {{
                 background-color: {self.color.name()};
@@ -307,17 +289,35 @@ class ColorButton(QToolButton):
         """)
 
     def set_color(self, color: QColor):
+        """Установить новый цвет"""
         self.color = color
         self.update_color()
 
 
 class EditorWindow(QMainWindow):
+    """Главное окно редактора"""
+
     def __init__(self, qimg: QImage, cfg: dict):
         super().__init__()
         self.cfg = cfg
         self.setWindowTitle("SlipSnap — Редактор")
         self.setMinimumSize(700, 500)
         self.resize(900, 650)
+
+        # Инициализация компонентов
+        self.canvas = Canvas(qimg)
+        self.text_manager = TextManager(self.canvas)
+        self.ocr_manager = OCRManager(cfg)
+
+        self.setCentralWidget(self.canvas)
+        self._setup_styles()
+        self._create_toolbar()
+
+        self.statusBar().showMessage(
+            "Готово | Ctrl+N: новый скриншот | Ctrl+K: коллаж | Ctrl+Alt+O: OCR | Del: удалить | Ctrl +/-: масштаб")
+
+    def _setup_styles(self):
+        """Настроить стили интерфейса"""
         self.setStyleSheet("""
             QMainWindow { background: #ffffff; }
             QToolBar { background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #ffffff, stop:1 #f8f9fa);
@@ -331,13 +331,9 @@ class EditorWindow(QMainWindow):
             QSpinBox:focus { border: 2px solid #0d6efd; outline: none; }
             QToolBar::separator { background: #e9ecef; width: 1px; margin: 4px 8px; }
         """)
-        self.canvas = Canvas(qimg)
-        self.setCentralWidget(self.canvas)
-        self._create_toolbar()
-        self.statusBar().showMessage(
-            "Готово | Ctrl+N: новый скриншот | Ctrl+K: коллаж | Ctrl+Alt+O: OCR | Del: удалить | Ctrl +/-: масштаб")
 
     def _create_toolbar(self):
+        """Создать панель инструментов"""
         tb = QToolBar("Tools")
         tb.setMovable(False)
         tb.setFloatable(False)
@@ -368,7 +364,7 @@ class EditorWindow(QMainWindow):
                             other.defaultAction().setChecked(False)
                     self.canvas.set_tool(tool)
                 elif all(not b.defaultAction().isChecked() for b in self._tool_buttons):
-                    self.canvas.set_tool("select")  # По умолчанию включаем выделение
+                    self.canvas.set_tool("select")
 
             action, btn = add_action(name, handler, True, sc, icon_text)
             self._tool_buttons.append(btn)
@@ -411,7 +407,7 @@ class EditorWindow(QMainWindow):
 
         # Активируем инструмент выделения по умолчанию
         if self._tool_buttons:
-            self._tool_buttons[0].defaultAction().setChecked(True)  # Первая кнопка - "Выделение"
+            self._tool_buttons[0].defaultAction().setChecked(True)
             self.canvas.set_tool("select")
 
         tb.addSeparator()
@@ -421,65 +417,48 @@ class EditorWindow(QMainWindow):
         add_action("Сохранить", self.save_image, sc="Ctrl+S", icon_text="💾")
         tb.addSeparator()
         self.act_new, _ = add_action("Новый снимок", self.add_screenshot, sc="Ctrl+N", icon_text="📸")
-        self.act_ocr, _ = add_action("OCR", self.ocr_current, sc="Ctrl+Alt+O", icon_text="🔎")
+        self.act_ocr, _ = add_action("OCR", self.ocr_current, sc="Ctrl+Alt+O", icon_text="🔍")
         self.act_collage, _ = add_action("Коллаж", self.open_collage, sc="Ctrl+K", icon_text="🧩")
         tb.addSeparator()
         if hasattr(self, 'act_collage'):
             self._update_collage_enabled()
 
     def choose_draw_color(self):
+        """Выбрать цвет для рисования"""
         color = QColorDialog.getColor(self.color_btn.color, self, "Выберите цвет для рисования")
         if color.isValid():
             self.color_btn.set_color(color)
             self.canvas.set_pen_color(color)
 
     def choose_text_color(self):
-        # Сохраняем выделенные/активные элементы до открытия диалога,
-        # так как при его появлении фокус и выделение могут сбрасываться
-        from PySide6.QtWidgets import QGraphicsTextItem
-        targets = list(self.canvas.scene.selectedItems())
+        """Выбрать цвет текста"""
+        selected_items = list(self.canvas.scene.selectedItems())
         focus_item = self.canvas.scene.focusItem()
-        if isinstance(focus_item, QGraphicsTextItem) and focus_item not in targets:
-            targets.append(focus_item)
 
         color = QColorDialog.getColor(self.text_color_btn.color, self, "Выберите цвет текста")
         if color.isValid():
             self.text_color_btn.set_color(color)
-            self.canvas.set_text_color(color)
-
-            # Применяем цвет к ранее выбранным текстовым элементам
-            for item in targets:
-                if isinstance(item, QGraphicsTextItem):
-                    item.setDefaultTextColor(color)
-                    cursor = QTextCursor(item.document())
-                    cursor.select(QTextCursor.Document)
-                    fmt = QTextCharFormat()
-                    fmt.setForeground(color)
-                    cursor.mergeCharFormat(fmt)
+            self.text_manager.set_text_color(color)
+            self.text_manager.apply_color_to_selected(selected_items, focus_item)
 
     def choose_font(self):
-        font, ok = QFontDialog.getFont(self.canvas._font, self, "Выберите шрифт")
-        if ok:
-            self.canvas.set_font(font)
-            # Применяем настройки к выделенным или активным текстовым элементам
-            from PySide6.QtWidgets import QGraphicsTextItem
-            targets = list(self.canvas.scene.selectedItems())
-            focus_item = self.canvas.scene.focusItem()
-            if isinstance(focus_item, QGraphicsTextItem) and focus_item not in targets:
-                targets.append(focus_item)
-            for item in targets:
-                if isinstance(item, QGraphicsTextItem):
-                    item.setFont(font)
-                    # Также обновляем цвет, если нужно
-                    item.setDefaultTextColor(self.canvas._text_color)
+        """Выбрать шрифт"""
+        selected_items = list(self.canvas.scene.selectedItems())
+        focus_item = self.canvas.scene.focusItem()
+
+        if self.text_manager.choose_font(self, selected_items, focus_item):
+            # Шрифт был изменен успешно
+            pass
 
     def copy_to_clipboard(self):
+        """Копировать в буфер обмена"""
         img = self.canvas.export_image()
         qim = ImageQt.ImageQt(img)
         QApplication.clipboard().setImage(qim)
         self.statusBar().showMessage("✅ Скопировано в буфер обмена", 2000)
 
     def save_image(self):
+        """Сохранить изображение"""
         img = self.canvas.export_image()
         path, _ = QFileDialog.getSaveFileName(self, "Сохранить изображение", "",
                                               "PNG (*.png);;JPEG (*.jpg);;Все файлы (*.*)")
@@ -489,7 +468,14 @@ class EditorWindow(QMainWindow):
             img.save(path)
             self.statusBar().showMessage(f"✅ Сохранено: {Path(path).name}", 3000)
 
+    def ocr_current(self):
+        """Выполнить OCR текущего изображения"""
+        img = self.canvas.export_image()
+        if self.ocr_manager.ocr_to_clipboard(img, self):
+            self.statusBar().showMessage("🔍 Текст распознан и скопирован", 3000)
+
     def _update_collage_enabled(self):
+        """Обновить доступность функции коллажа"""
         try:
             has_history = any(HISTORY_DIR.glob("*.png")) or any(HISTORY_DIR.glob("*.jpg")) or any(
                 HISTORY_DIR.glob("*.jpeg"))
@@ -498,19 +484,8 @@ class EditorWindow(QMainWindow):
         except Exception:
             pass
 
-    def ocr_current(self):
-        tpath = self.cfg.get("tesseract_path") or ""
-        if tpath:
-            pytesseract.pytesseract.tesseract_cmd = tpath
-        try:
-            text = pytesseract.image_to_string(self.canvas.export_image())
-        except Exception as e:
-            QMessageBox.warning(self, "OCR", f"Ошибка OCR: {e}\n\nПроверьте установку Tesseract.", QMessageBox.Ok)
-            return
-        QApplication.clipboard().setText(text or "")
-        self.statusBar().showMessage("🔎 Текст распознан и скопирован", 3000)
-
     def keyPressEvent(self, event):
+        """Обработка нажатий клавиш"""
         if event.key() == Qt.Key_Delete:
             selected_items = self.canvas.scene.selectedItems()
             for item in selected_items:
@@ -532,6 +507,7 @@ class EditorWindow(QMainWindow):
         super().keyPressEvent(event)
 
     def add_screenshot(self):
+        """Добавить новый скриншот"""
         try:
             from gui import OverlayManager
             self.setWindowState(self.windowState() | Qt.WindowMinimized)
@@ -545,6 +521,7 @@ class EditorWindow(QMainWindow):
             QMessageBox.critical(self, "Ошибка", f"Не удалось захватить скриншот: {e}")
 
     def _on_new_screenshot(self, qimg: QImage):
+        """Обработать новый скриншот"""
         try:
             self.overlay_manager.close_all()
         except Exception:
@@ -576,6 +553,7 @@ class EditorWindow(QMainWindow):
         self.statusBar().showMessage("📸 Новый скриншот добавлен (можно двигать и масштабировать)", 2500)
 
     def open_collage(self):
+        """Открыть диалог создания коллажа"""
         from collage import CollageDialog, compose_collage
         dlg = CollageDialog(self)
         if dlg.exec():
