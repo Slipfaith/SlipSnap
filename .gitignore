@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.so
+*.dll
+*.dylib
+
+# Venv
+.venv/
+venv/
+env/
+
+# Build/Dist
+build/
+dist/
+*.egg-info/
+
+# Tools caches
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# IDE
+.vscode/
+.idea/
+*.code-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs / temp
+*.log
+.tmp/
+temp/
+.tmp.*
+~$*
+
+# Local config (если добавишь)
+.env
+.env.*.local
+
+# Прочие артефакты
+*.orig
