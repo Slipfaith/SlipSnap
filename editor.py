@@ -269,9 +269,16 @@ class Canvas(QGraphicsView):
 
     def _add_text_item(self, text: str, pos: QPointF) -> QGraphicsItem:
         from PySide6.QtWidgets import QGraphicsTextItem
-        it = QGraphicsTextItem(text)
+        it = QGraphicsTextItem()
         it.setFont(self._font)
         it.setDefaultTextColor(self._text_color)
+        it.setPlainText(text)
+        # apply color to existing text explicitly
+        cursor = QTextCursor(it.document())
+        cursor.select(QTextCursor.Document)
+        fmt = QTextCharFormat()
+        fmt.setForeground(self._text_color)
+        cursor.mergeCharFormat(fmt)
         it.setPos(pos)
         it.setTextInteractionFlags(Qt.TextEditorInteraction)
         it.setFlag(QGraphicsItem.ItemIsMovable, True)
