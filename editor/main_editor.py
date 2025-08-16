@@ -38,8 +38,11 @@ class Canvas(QGraphicsView):
         self.pixmap_item.setZValue(0)
         self.scene.addItem(self.pixmap_item)
 
-        # Настройки UI
-        self.setDragMode(QGraphicsView.ScrollHandDrag)
+        # Настройки UI — без автоскролла, содержимое центрировано
+        self.setDragMode(QGraphicsView.NoDrag)
+        self.setAlignment(Qt.AlignCenter)
+        self.setResizeAnchor(QGraphicsView.AnchorViewCenter)
+        self.setTransformationAnchor(QGraphicsView.AnchorViewCenter)
         self.setStyleSheet("""
             QGraphicsView { background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; }
             QGraphicsView:focus { border: 2px solid #0d6efd; outline: none; }
@@ -101,10 +104,11 @@ class Canvas(QGraphicsView):
                     it.setSelected(False)
 
     def _apply_lock_state(self):
-        """Лочим фоновые картинки при активном инструменте рисования."""
+        """Лочим фоновые картинки при активном инструменте рисования.
+        Вьюшка никогда сама не скроллит (NoDrag всегда)."""
         lock = self._tool not in ("none", "select")
         self._set_pixmap_items_interactive(not lock)
-        self.setDragMode(QGraphicsView.NoDrag if lock else QGraphicsView.ScrollHandDrag)
+        self.setDragMode(QGraphicsView.NoDrag)
 
     def set_tool(self, tool: str):
         """Установить текущий инструмент"""
@@ -346,18 +350,19 @@ class EditorWindow(QMainWindow):
         super().__init__()
         self.cfg = cfg
         self.setWindowTitle("SlipSnap — Редактор")
-        self.setMinimumSize(800, 600)
-        self.resize(1000, 700)
+        self.setMinimumSize(360, 240)
 
         # Инициализация компонентов
         self.canvas = Canvas(qimg)
         self.text_manager = TextManager(self.canvas)
         self.canvas.set_text_manager(self.text_manager)
         self.ocr_manager = OCRManager(cfg)
-
         self.setCentralWidget(self.canvas)
         self._setup_styles()
         self._create_toolbar()
+
+        # Подогнать окно под картинку ПОСЛЕ создания сцены и тулбаров
+        QTimer.singleShot(0, lambda q=qimg: self._size_to_image(q))
 
         self.statusBar().showMessage(
             "Готово | Ctrl+N: новый скриншот | Ctrl+K: коллаж | Ctrl+Alt+O: OCR | Del: удалить | Ctrl +/-: масштаб")
@@ -374,6 +379,36 @@ class EditorWindow(QMainWindow):
             QLabel { color: #6c757d; font-size: 12px; font-weight: 500; margin: 0 4px; }
             QToolBar::separator { background: #e9ecef; width: 1px; margin: 4px 8px; }
         """)
+
+    def _size_to_image(self, qimg: QImage):
+        """Подогнать размер окна под размер картинки и центрировать."""
+        # Убедимся, что сцена знает свой bbox
+        self.canvas.scene.setSceneRect(self.canvas.scene.itemsBoundingRect())
+
+        # Размеры панели инструментов (слева) и верхней панели
+        toolbars = self.findChildren(QToolBar)
+        left_w = sum(tb.sizeHint().width() for tb in toolbars if tb.orientation() == Qt.Vertical)
+        top_h = sum(tb.sizeHint().height() for tb in toolbars if tb.orientation() == Qt.Horizontal)
+        status_h = self.statusBar().sizeHint().height() if self.statusBar() else 0
+
+        # Доступная область экрана
+        screen = self.screen() or QApplication.primaryScreen()
+        ag = screen.availableGeometry()
+
+        # Целевые размеры: картинка 1:1 + панели + небольшой запас
+        target_w = qimg.width() + left_w + 24
+        target_h = qimg.height() + top_h + status_h + 24
+
+        # Не раздуваем окно больше 90% экрана, и не меньше минимума
+        target_w = max(self.minimumWidth(), min(target_w, int(ag.width() * 0.9)))
+        target_h = max(self.minimumHeight(), min(target_h, int(ag.height() * 0.9)))
+
+        self.resize(target_w, target_h)
+
+        # Центрируем картинку во вью (на всякий случай) и окно на экране
+        self.canvas.centerOn(self.canvas.pixmap_item)
+        self.move(ag.x() + (ag.width() - self.width()) // 2,
+                  ag.y() + (ag.height() - self.height()) // 2)
 
     def _create_toolbar(self):
         """Создать панель инструментов — только иконки!"""
