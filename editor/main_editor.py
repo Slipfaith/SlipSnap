@@ -11,7 +11,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QMainWindow, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsItem,
-    QFileDialog, QMessageBox, QToolBar, QLabel, QSpinBox, QWidget, QHBoxLayout,
+    QFileDialog, QMessageBox, QToolBar, QLabel, QWidget, QHBoxLayout,
     QToolButton, QApplication, QColorDialog, QFontDialog, QGraphicsItemGroup,
     QGraphicsTextItem
 )
@@ -308,8 +308,8 @@ class EditorWindow(QMainWindow):
         super().__init__()
         self.cfg = cfg
         self.setWindowTitle("SlipSnap — Редактор")
-        self.setMinimumSize(700, 500)
-        self.resize(900, 650)
+        self.setMinimumSize(800, 600)
+        self.resize(1000, 700)
 
         # Инициализация компонентов
         self.canvas = Canvas(qimg)
@@ -334,20 +334,23 @@ class EditorWindow(QMainWindow):
             QToolButton:hover { background: #eef4ff; }
             QToolButton:checked { background: #0d6efd; color: white; border: 1px solid #0d47a1; }
             QLabel { color: #6c757d; font-size: 12px; font-weight: 500; margin: 0 4px; }
-            QSpinBox { background: white; border: 1px solid #ced4da; border-radius: 4px; padding: 4px 8px; color: #495057; font-size: 13px; min-width: 60px; }
-            QSpinBox:hover { border: 1px solid #80bdff; }
-            QSpinBox:focus { border: 2px solid #0d6efd; outline: none; }
             QToolBar::separator { background: #e9ecef; width: 1px; margin: 4px 8px; }
         """)
 
     def _create_toolbar(self):
         """Создать панель инструментов"""
-        tb = QToolBar("Tools")
+        tools_tb = QToolBar("Tools")
+        tools_tb.setMovable(False)
+        tools_tb.setFloatable(False)
+        tools_tb.setOrientation(Qt.Vertical)
+        self.addToolBar(Qt.LeftToolBarArea, tools_tb)
+
+        tb = QToolBar("Actions")
         tb.setMovable(False)
         tb.setFloatable(False)
         self.addToolBar(tb)
 
-        def add_action(text, fn, checkable=False, sc=None, icon_text=""):
+        def add_action(toolbar, text, fn, checkable=False, sc=None, icon_text="", show_text=True):
             a = QAction(text, self)
             a.setCheckable(checkable)
             if sc:
@@ -357,14 +360,18 @@ class EditorWindow(QMainWindow):
             a.triggered.connect(fn if checkable else (lambda _checked=False: fn()))
             btn = QToolButton()
             btn.setDefaultAction(a)
-            btn.setText(f"{icon_text} {text}" if icon_text else text)
+            if show_text:
+                btn.setText(f"{icon_text} {text}" if icon_text and text else (text or icon_text))
+            else:
+                btn.setText(icon_text)
+                btn.setToolTip(text)
             btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
-            tb.addWidget(btn)
+            toolbar.addWidget(btn)
             return a, btn
 
         self._tool_buttons = []
 
-        def create_tool(name, tool, icon_text="", sc=None):
+        def create_tool(name, tool, icon_text="", sc=None, show_text=True):
             def handler(checked):
                 if checked:
                     for other in self._tool_buttons:
@@ -374,41 +381,28 @@ class EditorWindow(QMainWindow):
                 elif all(not b.defaultAction().isChecked() for b in self._tool_buttons):
                     self.canvas.set_tool("select")
 
-            action, btn = add_action(name, handler, True, sc, icon_text)
+            action, btn = add_action(tools_tb, name, handler, True, sc, icon_text, show_text)
             self._tool_buttons.append(btn)
             return action, btn
 
-        # Добавляем инструмент выделения первым
+        # Инструменты на левой панели
         create_tool("Выделение", "select", "→", "S")
-        create_tool("Прямоуг.", "rect", "▭", "R")
-        create_tool("Эллипс", "ellipse", "○", "E")
-        create_tool("Линия", "line", "ｌ", "L")
+        create_tool("Прямоуг.", "rect", "▭", "R", show_text=False)
+        create_tool("Эллипс", "ellipse", "○", "E", show_text=False)
+        create_tool("Линия", "line", sc="L")
         create_tool("Стрелка", "arrow", "→", "A")
-        create_tool("Карандаш", "free", "✎", "F")
-        create_tool("Текст", "text", "T", "T")
+        create_tool("Карандаш", "free", sc="F")
+        create_tool("Текст", "text", sc="T")
 
-        tb.addSeparator()
-
-        # Выбор цвета для рисования
-        tb.addWidget(QLabel("Цвет:"))
+        # Кнопка выбора цвета линии
         self.color_btn = ColorButton(QColor(255, 80, 80))
+        self.color_btn.setToolTip("Цвет линии")
         self.color_btn.clicked.connect(self.choose_draw_color)
         tb.addWidget(self.color_btn)
 
-        # Толщина линии
-        tb.addWidget(QLabel("Толщина:"))
-        self.width_spin = QSpinBox()
-        self.width_spin.setRange(1, 20)
-        self.width_spin.setValue(3)
-        self.width_spin.valueChanged.connect(self.canvas.set_pen_width)
-        tb.addWidget(self.width_spin)
-
-        tb.addSeparator()
-
-        # ИСПРАВЛЕННАЯ СЕКЦИЯ НАСТРОЕК ТЕКСТА
-        # Кнопка выбора шрифта - делаем её более заметной
-        font_action, font_btn = add_action("Шрифт", self.choose_font, icon_text="Аa")
-        font_btn.setMinimumWidth(80)  # Устанавливаем минимальную ширину
+        # Кнопка выбора шрифта
+        font_action, font_btn = add_action(tb, "Шрифт", self.choose_font)
+        font_btn.setMinimumWidth(80)
         font_btn.setStyleSheet("""
             QToolButton {
                 font-weight: bold;
@@ -422,26 +416,25 @@ class EditorWindow(QMainWindow):
         """)
 
         # Цвет текста
-        tb.addWidget(QLabel("Цвет текста:"))
         self.text_color_btn = ColorButton(QColor(40, 40, 40))
+        self.text_color_btn.setToolTip("Цвет текста")
         self.text_color_btn.clicked.connect(self.choose_text_color)
         tb.addWidget(self.text_color_btn)
+
+        tb.addSeparator()
+
+        self.act_ocr, _ = add_action(tb, "OCR", self.ocr_current, sc="Ctrl+Alt+O", icon_text="📄", show_text=False)
+        self.act_new, _ = add_action(tb, "Новый снимок", self.add_screenshot, sc="Ctrl+N", icon_text="📸", show_text=False)
+        self.act_collage, _ = add_action(tb, "Коллаж", self.open_collage, sc="Ctrl+K", icon_text="🧩", show_text=False)
+        add_action(tb, "Копировать", self.copy_to_clipboard, sc="Ctrl+C", icon_text="📋", show_text=False)
+        add_action(tb, "Сохранить", self.save_image, sc="Ctrl+S", icon_text="💾", show_text=False)
+        add_action(tb, "Отмена", lambda: self.canvas.undo(), sc="Ctrl+Z", icon_text="↶", show_text=False)
 
         # Активируем инструмент выделения по умолчанию
         if self._tool_buttons:
             self._tool_buttons[0].defaultAction().setChecked(True)
             self.canvas.set_tool("select")
 
-        tb.addSeparator()
-        add_action("Отмена", lambda: self.canvas.undo(), sc="Ctrl+Z", icon_text="↶")
-        tb.addSeparator()
-        add_action("Копировать", self.copy_to_clipboard, sc="Ctrl+C", icon_text="📋")
-        add_action("Сохранить", self.save_image, sc="Ctrl+S", icon_text="💾")
-        tb.addSeparator()
-        self.act_new, _ = add_action("Новый снимок", self.add_screenshot, sc="Ctrl+N", icon_text="📸")
-        self.act_ocr, _ = add_action("OCR", self.ocr_current, sc="Ctrl+Alt+O", icon_text="📄")
-        self.act_collage, _ = add_action("Коллаж", self.open_collage, sc="Ctrl+K", icon_text="🧩")
-        tb.addSeparator()
         if hasattr(self, 'act_collage'):
             self._update_collage_enabled()
 
