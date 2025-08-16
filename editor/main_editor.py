@@ -4,10 +4,10 @@ from typing import Optional, List
 from pathlib import Path
 from PIL import Image, ImageQt
 
-from PySide6.QtCore import Qt, QRectF, QPointF, QLineF, QTimer
+from PySide6.QtCore import Qt, QRectF, QPointF, QLineF, QTimer, QSize
 from PySide6.QtGui import (
     QPainter, QPen, QColor, QImage, QKeySequence, QPixmap, QAction,
-    QCursor, QTextCursor, QTextCharFormat
+    QCursor, QTextCursor, QTextCharFormat, QIcon
 )
 from PySide6.QtWidgets import (
     QMainWindow, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsItem,
@@ -376,19 +376,124 @@ class EditorWindow(QMainWindow):
         """)
 
     def _create_toolbar(self):
-        """Создать панель инструментов"""
+        """Создать панель инструментов — только иконки!"""
         tools_tb = QToolBar("Tools")
         tools_tb.setMovable(False)
         tools_tb.setFloatable(False)
         tools_tb.setOrientation(Qt.Vertical)
         self.addToolBar(Qt.LeftToolBarArea, tools_tb)
 
+        # Минималистичные иконки для инструментов
+        def make_icon_rect():
+            pm = QPixmap(28, 28)
+            pm.fill(Qt.transparent)
+            p = QPainter(pm)
+            p.setRenderHint(QPainter.Antialiasing)
+            p.setPen(QColor(80, 80, 80))
+            p.drawRect(4, 4, 20, 20)
+            p.end()
+            return QIcon(pm)
+
+        def make_icon_ellipse():
+            pm = QPixmap(28, 28)
+            pm.fill(Qt.transparent)
+            p = QPainter(pm)
+            p.setRenderHint(QPainter.Antialiasing)
+            p.setPen(QColor(80, 80, 80))
+            p.drawEllipse(4, 4, 20, 20)
+            p.end()
+            return QIcon(pm)
+
+        def make_icon_line():
+            pm = QPixmap(28, 28)
+            pm.fill(Qt.transparent)
+            p = QPainter(pm)
+            p.setRenderHint(QPainter.Antialiasing)
+            p.setPen(QColor(80, 80, 80))
+            p.drawLine(6, 22, 22, 6)
+            p.end()
+            return QIcon(pm)
+
+        def make_icon_arrow():
+            pm = QPixmap(28, 28)
+            pm.fill(Qt.transparent)
+            p = QPainter(pm)
+            p.setRenderHint(QPainter.Antialiasing)
+            p.setPen(QColor(80, 80, 80))
+            p.drawLine(6, 22, 20, 8)
+            p.drawLine(20, 8, 15, 11)
+            p.drawLine(20, 8, 18, 14)
+            p.end()
+            return QIcon(pm)
+
+        def make_icon_pencil():
+            pm = QPixmap(28, 28)
+            pm.fill(Qt.transparent)
+            p = QPainter(pm)
+            p.setRenderHint(QPainter.Antialiasing)
+            p.setPen(QColor(80, 80, 80))
+            p.drawLine(6, 22, 22, 6)
+            p.setPen(QColor(200, 150, 100))
+            p.drawEllipse(20, 4, 3, 3)
+            p.end()
+            return QIcon(pm)
+
+        def make_icon_text():
+            pm = QPixmap(28, 28)
+            pm.fill(Qt.transparent)
+            p = QPainter(pm)
+            p.setRenderHint(QPainter.Antialiasing)
+            p.setPen(QColor(80, 80, 80))
+            font = p.font()
+            font.setBold(True)
+            font.setPointSize(18)
+            p.setFont(font)
+            p.drawText(pm.rect(), Qt.AlignCenter, "T")
+            p.end()
+            return QIcon(pm)
+
+        def make_icon_select():
+            pm = QPixmap(28, 28)
+            pm.fill(Qt.transparent)
+            p = QPainter(pm)
+            p.setRenderHint(QPainter.Antialiasing)
+            p.setPen(QColor(80, 80, 80))
+            p.drawPolygon([QPointF(6, 6), QPointF(6, 22), QPointF(12, 18), QPointF(18, 22), QPointF(22, 18), QPointF(14, 12), QPointF(22, 6)])
+            p.end()
+            return QIcon(pm)
+
+        self._tool_buttons = []
+        def add_tool(tool, icon, tooltip):
+            btn = QToolButton()
+            btn.setIcon(icon)
+            btn.setIconSize(QSize(28, 28))
+            btn.setToolTip(tooltip)
+            btn.setCheckable(True)
+            btn.setAutoExclusive(True)
+            btn.setFixedSize(36, 36)
+            btn.clicked.connect(lambda checked, t=tool: self.canvas.set_tool(t))
+            tools_tb.addWidget(btn)
+            self._tool_buttons.append(btn)
+            return btn
+
+        add_tool("select", make_icon_select(), "Выделение")
+        add_tool("rect", make_icon_rect(), "Прямоугольник")
+        add_tool("ellipse", make_icon_ellipse(), "Эллипс")
+        add_tool("line", make_icon_line(), "Линия")
+        add_tool("arrow", make_icon_arrow(), "Стрелка")
+        add_tool("free", make_icon_pencil(), "Карандаш")
+        add_tool("text", make_icon_text(), "Текст")
+
+        self._tool_buttons[0].setChecked(True)
+        self.canvas.set_tool("select")
+
+        # Остальная панель — как у тебя была, не меняю!
         tb = QToolBar("Actions")
         tb.setMovable(False)
         tb.setFloatable(False)
         self.addToolBar(tb)
 
-        def add_action(toolbar, text, fn, checkable=False, sc=None, icon_text="", show_text=True):
+        def add_action(toolbar, text, fn, checkable=False, sc=None, icon_text="", show_text=False):
             a = QAction(text, self)
             a.setCheckable(checkable)
             if sc:
@@ -407,32 +512,6 @@ class EditorWindow(QMainWindow):
             toolbar.addWidget(btn)
             return a, btn
 
-        self._tool_buttons = []
-
-        def create_tool(name, tool, icon_text="", sc=None, show_text=True):
-            def handler(checked):
-                if checked:
-                    for other in self._tool_buttons:
-                        if other is not btn:
-                            other.defaultAction().setChecked(False)
-                    self.canvas.set_tool(tool)
-                elif all(not b.defaultAction().isChecked() for b in self._tool_buttons):
-                    self.canvas.set_tool("select")
-
-            action, btn = add_action(tools_tb, name, handler, True, sc, icon_text, show_text)
-            self._tool_buttons.append(btn)
-            return action, btn
-
-        # Инструменты на левой панели
-        create_tool("Выделение", "select", "→", "S")
-        create_tool("Прямоуг.", "rect", "▭", "R", show_text=False)
-        create_tool("Эллипс", "ellipse", "○", "E", show_text=False)
-        create_tool("Линия", "line", sc="L")
-        create_tool("Стрелка", "arrow", "→", "A")
-        create_tool("Карандаш", "free", sc="F")
-        create_tool("Текст", "text", sc="T")
-
-        # Кнопка выбора цвета
         self.color_btn = ColorButton(QColor(255, 80, 80))
         self.color_btn.setToolTip("Цвет")
         self.color_btn.clicked.connect(self.choose_color)
@@ -447,13 +526,30 @@ class EditorWindow(QMainWindow):
         add_action(tb, "Сохранить", self.save_image, sc="Ctrl+S", icon_text="💾", show_text=False)
         add_action(tb, "Отмена", lambda: self.canvas.undo(), sc="Ctrl+Z", icon_text="↶", show_text=False)
 
-        # Активируем инструмент выделения по умолчанию
-        if self._tool_buttons:
-            self._tool_buttons[0].defaultAction().setChecked(True)
-            self.canvas.set_tool("select")
-
         if hasattr(self, 'act_collage'):
             self._update_collage_enabled()
+
+        # Минималистичный стиль только для тулбара инструментов!
+        tools_tb.setStyleSheet("""
+            QToolBar {
+                background: #f9f9fb;
+                border: none;
+                padding: 8px;
+            }
+            QToolButton {
+                background: transparent;
+                border: none;
+                border-radius: 8px;
+                margin: 2px 0;
+            }
+            QToolButton:checked {
+                background: #e7f0fa;
+                border: 1px solid #1976d2;
+            }
+            QToolButton:hover {
+                background: #e7f0fa;
+            }
+        """)
 
     def choose_color(self):
         """Выбрать цвет"""
