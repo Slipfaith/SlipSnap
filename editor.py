@@ -7,12 +7,12 @@ from PIL import Image, ImageQt
 
 from PySide6.QtCore import Qt, QRectF, QPointF, QLineF, QTimer
 from PySide6.QtGui import (
-    QPainter, QPen, QColor, QImage, QKeySequence, QPixmap, QAction, QFont
+    QPainter, QPen, QColor, QImage, QKeySequence, QPixmap, QAction, QFont, QCursor
 )
 from PySide6.QtWidgets import (
     QMainWindow, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsItem,
     QFileDialog, QMessageBox, QToolBar, QLabel, QSpinBox, QWidget, QHBoxLayout,
-    QToolButton, QApplication
+    QToolButton, QApplication, QColorDialog, QFontDialog
 )
 
 from logic import pil_to_qpixmap, qimage_to_pil, HISTORY_DIR, save_history
@@ -41,24 +41,92 @@ class Canvas(QGraphicsView):
         self._pen = QPen(QColor(255, 80, 80), 3)
         self._pen.setCapStyle(Qt.RoundCap)
         self._pen.setJoinStyle(Qt.RoundJoin)
-        self._font_px = 18
+        self._font = QFont("Arial", 18)
+        self._text_color = QColor(40, 40, 40)
         self._undo: List[QGraphicsItem] = []
         self._last_point: Optional[QPointF] = None
 
+        # Создаем кастомные курсоры
+        self._create_custom_cursors()
+        self._apply_lock_state()
+
+    def _create_custom_cursors(self):
+        """Создает кастомные курсоры для инструментов"""
+        # Курсор карандаша
+        pencil_pixmap = QPixmap(20, 20)
+        pencil_pixmap.fill(Qt.transparent)
+        painter = QPainter(pencil_pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(QPen(QColor(80, 80, 80), 2))
+        painter.drawLine(3, 16, 16, 3)
+        painter.setPen(QPen(QColor(200, 150, 100), 1))
+        painter.drawEllipse(15, 2, 4, 4)
+        painter.setPen(QPen(QColor(60, 60, 60), 1))
+        painter.drawLine(2, 17, 4, 15)
+        painter.end()
+        self._pencil_cursor = QCursor(pencil_pixmap, 3, 16)
+
+        # Черный курсор для выделения
+        select_pixmap = QPixmap(16, 16)
+        select_pixmap.fill(Qt.transparent)
+        painter = QPainter(select_pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(QPen(QColor(0, 0, 0), 1))
+        painter.setBrush(QColor(0, 0, 0))
+        # Рисуем стрелку
+        points = [
+            QPointF(1, 1),
+            QPointF(1, 11),
+            QPointF(4, 8),
+            QPointF(7, 11),
+            QPointF(9, 9),
+            QPointF(6, 6),
+            QPointF(11, 1)
+        ]
+        painter.drawPolygon(points)
+        painter.end()
+        self._select_cursor = QCursor(select_pixmap, 1, 1)
+
+    def _set_pixmap_items_interactive(self, enabled: bool):
+        """Включить/выключить перетаскивание и прием мыши у всех QGraphicsPixmapItem."""
+        for it in self.scene.items():
+            if isinstance(it, QGraphicsPixmapItem):
+                it.setFlag(QGraphicsItem.ItemIsMovable, enabled)
+                it.setAcceptedMouseButtons(Qt.AllButtons if enabled else Qt.NoButton)
+                if not enabled and it.isSelected():
+                    it.setSelected(False)
+
+    def _apply_lock_state(self):
+        """Лочим фоновые картинки при активном инструменте рисования."""
+        lock = self._tool not in ("none", "select")
+        self._set_pixmap_items_interactive(not lock)
+        self.setDragMode(QGraphicsView.NoDrag if lock else QGraphicsView.ScrollHandDrag)
+
     def set_tool(self, tool: str):
         self._tool = tool
-        if tool in {"rect", "ellipse", "line", "arrow", "free"}:
+        if tool == "select":
+            self.viewport().setCursor(self._select_cursor)  # Используем черный курсор
+        elif tool in {"rect", "ellipse", "line", "arrow"}:
             self.viewport().setCursor(Qt.CrossCursor)
+        elif tool == "free":
+            self.viewport().setCursor(self._pencil_cursor)
         elif tool == "text":
             self.viewport().setCursor(Qt.IBeamCursor)
         else:
             self.viewport().setCursor(Qt.ArrowCursor)
+        self._apply_lock_state()
 
     def set_pen_width(self, w: int):
         self._pen.setWidth(w)
 
-    def set_font_size(self, px: int):
-        self._font_px = px
+    def set_pen_color(self, color: QColor):
+        self._pen.setColor(color)
+
+    def set_font(self, font: QFont):
+        self._font = font
+
+    def set_text_color(self, color: QColor):
+        self._text_color = color
 
     def export_image(self) -> Image.Image:
         rect = self.scene.itemsBoundingRect()
@@ -97,7 +165,7 @@ class Canvas(QGraphicsView):
         super().wheelEvent(event)
 
     def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton and self._tool != "none":
+        if event.button() == Qt.LeftButton and self._tool not in ("none", "select"):
             self._start = self.mapToScene(event.position().toPoint())
             if self._tool == "text":
                 from PySide6.QtWidgets import QInputDialog
@@ -105,16 +173,19 @@ class Canvas(QGraphicsView):
                 if ok and text:
                     item = self._add_text_item(text, self._start)
                     self._undo.append(item)
+                event.accept()
                 return
             elif self._tool == "free":
                 self._last_point = self._start
                 self._tmp = None
             else:
                 self._tmp = None
+            event.accept()
+            return
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
-        if (event.buttons() & Qt.LeftButton) and self._tool != "none":
+        if (event.buttons() & Qt.LeftButton) and self._tool not in ("none", "select"):
             pos = self.mapToScene(event.position().toPoint())
             if self._tool == "free":
                 if self._last_point is not None:
@@ -126,10 +197,12 @@ class Canvas(QGraphicsView):
                 if self._tmp:
                     self.scene.removeItem(self._tmp)
                 self._tmp = self._preview_item(self._tool, self._start, pos, self._pen)
+            event.accept()
+            return
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
-        if event.button() == Qt.LeftButton and self._tool != "none":
+        if event.button() == Qt.LeftButton and self._tool not in ("none", "select"):
             if self._tool == "free":
                 self._last_point = None
             else:
@@ -137,6 +210,8 @@ class Canvas(QGraphicsView):
                     self._tmp.setFlag(QGraphicsItem.ItemIsSelectable, True)
                     self._undo.append(self._tmp)
                     self._tmp = None
+            event.accept()
+            return
         super().mouseReleaseEvent(event)
 
     def _preview_item(self, tool: str, start: QPointF, end: QPointF, pen: QPen) -> QGraphicsItem:
@@ -155,32 +230,68 @@ class Canvas(QGraphicsView):
         return item
 
     def _add_arrow(self, start: QPointF, end: QPointF, pen: QPen) -> QGraphicsItem:
+        from PySide6.QtWidgets import QGraphicsItemGroup
+
+        # Создаем группу для всех частей стрелки
+        group = QGraphicsItemGroup()
+
+        # Основная линия
         line = self.scene.addLine(QLineF(start, end), pen)
+        group.addToGroup(line)
+
+        # Наконечник стрелки
         v = end - start
         length = (v.x() ** 2 + v.y() ** 2) ** 0.5
-        if length < 1:
-            return line
-        ux, uy = v.x() / length, v.y() / length
-        head = 12
-        left = QPointF(end.x() - ux * head - uy * head * 0.5, end.y() - uy * head + ux * head * 0.5)
-        right = QPointF(end.x() - ux * head + uy * head * 0.5, end.y() - uy * head - ux * head * 0.5)
-        self.scene.addLine(QLineF(end, left), pen)
-        self.scene.addLine(QLineF(end, right), pen)
-        return line
+        if length >= 1:
+            ux, uy = v.x() / length, v.y() / length
+            head = 12
+            left = QPointF(end.x() - ux * head - uy * head * 0.5, end.y() - uy * head + ux * head * 0.5)
+            right = QPointF(end.x() - ux * head + uy * head * 0.5, end.y() - uy * head - ux * head * 0.5)
+
+            left_line = self.scene.addLine(QLineF(end, left), pen)
+            right_line = self.scene.addLine(QLineF(end, right), pen)
+
+            group.addToGroup(left_line)
+            group.addToGroup(right_line)
+
+        self.scene.addItem(group)
+        return group
 
     def _add_text_item(self, text: str, pos: QPointF) -> QGraphicsItem:
         from PySide6.QtWidgets import QGraphicsTextItem
         it = QGraphicsTextItem(text)
-        f = QFont()
-        f.setPointSize(self._font_px)
-        it.setFont(f)
-        it.setDefaultTextColor(QColor(40, 40, 40))
+        it.setFont(self._font)
+        it.setDefaultTextColor(self._text_color)
         it.setPos(pos)
         it.setTextInteractionFlags(Qt.TextEditorInteraction)
         it.setFlag(QGraphicsItem.ItemIsMovable, True)
         it.setFlag(QGraphicsItem.ItemIsSelectable, True)
         self.scene.addItem(it)
         return it
+
+
+class ColorButton(QToolButton):
+    def __init__(self, color: QColor):
+        super().__init__()
+        self.color = color
+        self.setFixedSize(32, 24)
+        self.update_color()
+
+    def update_color(self):
+        self.setStyleSheet(f"""
+            QToolButton {{
+                background-color: {self.color.name()};
+                border: 2px solid #ccc;
+                border-radius: 4px;
+            }}
+            QToolButton:hover {{
+                border: 2px solid #0d6efd;
+            }}
+        """)
+
+    def set_color(self, color: QColor):
+        self.color = color
+        self.update_color()
 
 
 class EditorWindow(QMainWindow):
@@ -206,7 +317,8 @@ class EditorWindow(QMainWindow):
         self.canvas = Canvas(qimg)
         self.setCentralWidget(self.canvas)
         self._create_toolbar()
-        self.statusBar().showMessage("Готово | Ctrl+N: новый скриншот | Ctrl+K: коллаж | Ctrl+Alt+O: OCR | Del: удалить | Ctrl +/-: масштаб")
+        self.statusBar().showMessage(
+            "Готово | Ctrl+N: новый скриншот | Ctrl+K: коллаж | Ctrl+Alt+O: OCR | Del: удалить | Ctrl +/-: масштаб")
 
     def _create_toolbar(self):
         tb = QToolBar("Tools")
@@ -239,17 +351,51 @@ class EditorWindow(QMainWindow):
                             other.defaultAction().setChecked(False)
                     self.canvas.set_tool(tool)
                 elif all(not b.defaultAction().isChecked() for b in self._tool_buttons):
-                    self.canvas.set_tool("none")
+                    self.canvas.set_tool("select")  # По умолчанию включаем выделение
+
             action, btn = add_action(name, handler, True, sc, icon_text)
             self._tool_buttons.append(btn)
             return action, btn
 
+        # Добавляем инструмент выделения первым
+        create_tool("Выделение", "select", "➤", "S")
         create_tool("Прямоуг.", "rect", "▭", "R")
         create_tool("Эллипс", "ellipse", "◯", "E")
-        create_tool("Линия", "line", "／", "L")
+        create_tool("Линия", "line", "ｌ", "L")
         create_tool("Стрелка", "arrow", "➤", "A")
         create_tool("Карандаш", "free", "✎", "F")
-        create_tool("Текст", "text", "📝", "T")
+        create_tool("Текст", "text", "🔤", "T")
+
+        tb.addSeparator()
+
+        # Выбор цвета для рисования
+        tb.addWidget(QLabel("Цвет:"))
+        self.color_btn = ColorButton(QColor(255, 80, 80))
+        self.color_btn.clicked.connect(self.choose_draw_color)
+        tb.addWidget(self.color_btn)
+
+        # Толщина линии
+        tb.addWidget(QLabel("Толщина:"))
+        self.width_spin = QSpinBox()
+        self.width_spin.setRange(1, 20)
+        self.width_spin.setValue(3)
+        self.width_spin.valueChanged.connect(self.canvas.set_pen_width)
+        tb.addWidget(self.width_spin)
+
+        tb.addSeparator()
+
+        # Настройки текста
+        add_action("Шрифт", self.choose_font, icon_text="🔤")
+
+        tb.addWidget(QLabel("Цвет текста:"))
+        self.text_color_btn = ColorButton(QColor(40, 40, 40))
+        self.text_color_btn.clicked.connect(self.choose_text_color)
+        tb.addWidget(self.text_color_btn)
+
+        # Активируем инструмент выделения по умолчанию
+        if self._tool_buttons:
+            self._tool_buttons[0].defaultAction().setChecked(True)  # Первая кнопка - "Выделение"
+            self.canvas.set_tool("select")
 
         tb.addSeparator()
         add_action("Отмена", lambda: self.canvas.undo(), sc="Ctrl+Z", icon_text="↶")
@@ -264,6 +410,36 @@ class EditorWindow(QMainWindow):
         if hasattr(self, 'act_collage'):
             self._update_collage_enabled()
 
+    def choose_draw_color(self):
+        color = QColorDialog.getColor(self.color_btn.color, self, "Выберите цвет для рисования")
+        if color.isValid():
+            self.color_btn.set_color(color)
+            self.canvas.set_pen_color(color)
+
+    def choose_text_color(self):
+        color = QColorDialog.getColor(self.text_color_btn.color, self, "Выберите цвет текста")
+        if color.isValid():
+            self.text_color_btn.set_color(color)
+            self.canvas.set_text_color(color)
+
+            # Применяем к выделенным текстовым элементам
+            from PySide6.QtWidgets import QGraphicsTextItem
+            for item in self.canvas.scene.selectedItems():
+                if isinstance(item, QGraphicsTextItem):
+                    item.setDefaultTextColor(color)
+
+    def choose_font(self):
+        font, ok = QFontDialog.getFont(self.canvas._font, self, "Выберите шрифт")
+        if ok:
+            self.canvas.set_font(font)
+            # Применяем к выделенным текстовым элементам
+            from PySide6.QtWidgets import QGraphicsTextItem
+            for item in self.canvas.scene.selectedItems():
+                if isinstance(item, QGraphicsTextItem):
+                    item.setFont(font)
+                    # Также обновляем цвет, если нужно
+                    item.setDefaultTextColor(self.canvas._text_color)
+
     def copy_to_clipboard(self):
         img = self.canvas.export_image()
         qim = ImageQt.ImageQt(img)
@@ -272,7 +448,8 @@ class EditorWindow(QMainWindow):
 
     def save_image(self):
         img = self.canvas.export_image()
-        path, _ = QFileDialog.getSaveFileName(self, "Сохранить изображение", "", "PNG (*.png);;JPEG (*.jpg);;Все файлы (*.*)")
+        path, _ = QFileDialog.getSaveFileName(self, "Сохранить изображение", "",
+                                              "PNG (*.png);;JPEG (*.jpg);;Все файлы (*.*)")
         if path:
             if path.lower().endswith((".jpg", ".jpeg")):
                 img = img.convert("RGB")
@@ -281,7 +458,8 @@ class EditorWindow(QMainWindow):
 
     def _update_collage_enabled(self):
         try:
-            has_history = any(HISTORY_DIR.glob("*.png")) or any(HISTORY_DIR.glob("*.jpg")) or any(HISTORY_DIR.glob("*.jpeg"))
+            has_history = any(HISTORY_DIR.glob("*.png")) or any(HISTORY_DIR.glob("*.jpg")) or any(
+                HISTORY_DIR.glob("*.jpeg"))
             if hasattr(self, "act_collage"):
                 self.act_collage.setEnabled(bool(has_history))
         except Exception:
@@ -361,6 +539,7 @@ class EditorWindow(QMainWindow):
         screenshot_item.setSelected(True)
         self.canvas.setFocus(Qt.OtherFocusReason)
         self._update_collage_enabled()
+        self.canvas._apply_lock_state()
         self.statusBar().showMessage("📸 Новый скриншот добавлен (можно двигать и масштабировать)", 2500)
 
     def open_collage(self):
