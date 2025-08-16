@@ -19,8 +19,12 @@ from PySide6.QtWidgets import (
 from logic import pil_to_qpixmap, qimage_to_pil, HISTORY_DIR, save_history
 from editor.text_tools import TextManager, EditableTextItem
 from editor.ocr_tools import OCRManager
+from editor.live_ocr import LiveTextManager
 
 
+# =========================
+# Canvas (холст / сцена)
+# =========================
 class Canvas(QGraphicsView):
     """Холст для рисования и редактирования изображений"""
 
@@ -49,7 +53,7 @@ class Canvas(QGraphicsView):
         """)
 
         # Инициализация инструментов
-        self._tool = "none"
+        self._tool = "select"
         self._start = QPointF()
         self._tmp: Optional[QGraphicsItem] = None
         self._pen = QPen(QColor(255, 80, 80), 3)
@@ -57,11 +61,13 @@ class Canvas(QGraphicsView):
         self._pen.setJoinStyle(Qt.RoundJoin)
         self._undo: List[QGraphicsItem] = []
         self._last_point: Optional[QPointF] = None
+        self._text_manager: Optional[TextManager] = None
 
-        # Создаем кастомные курсоры
+        # Курсоры
         self._create_custom_cursors()
         self._apply_lock_state()
 
+    # ---- сервис ----
     def _create_custom_cursors(self):
         """Создает кастомные курсоры для инструментов"""
         # Курсор карандаша
@@ -85,7 +91,6 @@ class Canvas(QGraphicsView):
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setPen(QPen(QColor(0, 0, 0), 1))
         painter.setBrush(QColor(0, 0, 0))
-        # Рисуем стрелку
         points = [
             QPointF(1, 1), QPointF(1, 11), QPointF(4, 8), QPointF(7, 11),
             QPointF(9, 9), QPointF(6, 6), QPointF(11, 1)
@@ -104,16 +109,16 @@ class Canvas(QGraphicsView):
                     it.setSelected(False)
 
     def _apply_lock_state(self):
-        """Лочим фоновые картинки при активном инструменте рисования.
-        Вьюшка никогда сама не скроллит (NoDrag всегда)."""
+        """Лочим фоновые картинки при активном инструменте рисования."""
         lock = self._tool not in ("none", "select")
         self._set_pixmap_items_interactive(not lock)
         self.setDragMode(QGraphicsView.NoDrag)
 
+    # ---- публичное API холста ----
     def set_tool(self, tool: str):
         """Установить текущий инструмент"""
         # Завершаем редактирование текста при смене инструмента
-        if hasattr(self, '_text_manager') and self._text_manager:
+        if self._text_manager:
             self._text_manager.finish_current_editing()
 
         self._tool = tool
@@ -129,20 +134,29 @@ class Canvas(QGraphicsView):
             self.viewport().setCursor(Qt.ArrowCursor)
         self._apply_lock_state()
 
-    def set_text_manager(self, text_manager):
+        # Авто-отключение Live Text при переходе к рисованию,
+        # чтобы перехват мыши Live-слоем не мешал инструментам
+        win = self.window()
+        try:
+            if tool != "select" and hasattr(win, "live_manager") and win.live_manager and win.live_manager.active:
+                win.live_manager.disable()
+                if hasattr(win, "statusBar"):
+                    win.statusBar().showMessage("🔎 Live Text — выключено (переключился на инструмент рисования)", 2200)
+        except Exception:
+            pass
+
+    def set_text_manager(self, text_manager: TextManager):
         """Установить менеджер текста"""
         self._text_manager = text_manager
 
     def set_pen_width(self, w: int):
-        """Установить толщину пера"""
         self._pen.setWidth(w)
 
     def set_pen_color(self, color: QColor):
-        """Установить цвет пера"""
         self._pen.setColor(color)
 
     def export_image(self) -> Image.Image:
-        """Экспортировать изображение"""
+        """Экспортировать текущую сцену в PIL.Image"""
         rect = self.scene.itemsBoundingRect()
         dpr = getattr(self.window().windowHandle(), "devicePixelRatio", lambda: 1.0)()
         try:
@@ -163,13 +177,12 @@ class Canvas(QGraphicsView):
         return qimage_to_pil(img)
 
     def undo(self):
-        """Отменить последнее действие"""
         if self._undo:
             item = self._undo.pop()
             self.scene.removeItem(item)
 
+    # ---- мышь / колёсико ----
     def wheelEvent(self, event):
-        """Обработка события колеса мыши для масштабирования"""
         if event.modifiers() & Qt.ControlModifier:
             selected = self.scene.selectedItems()
             if selected:
@@ -181,12 +194,10 @@ class Canvas(QGraphicsView):
         super().wheelEvent(event)
 
     def mousePressEvent(self, event):
-        """Обработка нажатия мыши"""
         if event.button() == Qt.LeftButton and self._tool not in ("none", "select"):
             self._start = self.mapToScene(event.position().toPoint())
             if self._tool == "text":
-                # Создаем текстовый элемент на месте клика
-                if hasattr(self, '_text_manager') and self._text_manager:
+                if self._text_manager:
                     item = self._text_manager.create_text_item(self._start)
                     if item:
                         self._undo.append(item)
@@ -202,7 +213,6 @@ class Canvas(QGraphicsView):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
-        """Обработка движения мыши"""
         if (event.buttons() & Qt.LeftButton) and self._tool not in ("none", "select"):
             pos = self.mapToScene(event.position().toPoint())
             if self._tool == "free":
@@ -211,54 +221,63 @@ class Canvas(QGraphicsView):
                     line.setFlag(QGraphicsItem.ItemIsSelectable, True)
                     self._undo.append(line)
                     self._last_point = pos
-            elif self._tool != "text":  # Не обрабатываем движение для текста
-                if self._tmp:
-                    self.scene.removeItem(self._tmp)
-                self._tmp = self._preview_item(self._tool, self._start, pos, self._pen)
+            elif self._tool != "text":
+                if self._tmp is None:
+                    if self._tool == "rect":
+                        self._tmp = self._create_rect_item(self._start, pos, self._pen)
+                    elif self._tool == "ellipse":
+                        self._tmp = self._create_ellipse_item(self._start, pos, self._pen)
+                    elif self._tool == "line":
+                        self._tmp = self.scene.addLine(QLineF(self._start, pos), self._pen)
+                    elif self._tool == "arrow":
+                        self._tmp = self._create_arrow_group(self._start, pos, self._pen)
+                        self._tmp.setFlag(QGraphicsItem.ItemIsSelectable, True)
+                    if self._tmp:
+                        self._undo.append(self._tmp)
+                else:
+                    if self._tool in ("rect", "ellipse"):
+                        r = QRectF(self._start, pos).normalized()
+                        if self._tool == "rect":
+                            self._tmp.setRect(r)
+                        else:
+                            self._tmp.setRect(r)
+                    elif self._tool == "line":
+                        self._tmp.setLine(QLineF(self._start, pos))
+                    elif self._tool == "arrow":
+                        self.scene.removeItem(self._tmp)
+                        self._undo.pop()
+                        self._tmp = self._create_arrow_group(self._start, pos, self._pen)
+                        self._tmp.setFlag(QGraphicsItem.ItemIsSelectable, True)
+                        self._undo.append(self._tmp)
             event.accept()
             return
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
-        """Обработка отпускания мыши"""
-        if event.button() == Qt.LeftButton and self._tool not in ("none", "select", "text"):
-            if self._tool == "free":
-                self._last_point = None
-            else:
-                if self._tmp:
-                    self._tmp.setFlag(QGraphicsItem.ItemIsSelectable, True)
-                    self._undo.append(self._tmp)
-                    self._tmp = None
+        if event.button() == Qt.LeftButton and self._tool not in ("none", "select"):
+            self._tmp = None
+            self._last_point = None
             event.accept()
             return
         super().mouseReleaseEvent(event)
 
-    def _preview_item(self, tool: str, start: QPointF, end: QPointF, pen: QPen) -> QGraphicsItem:
-        """Создать предварительный элемент для рисования"""
-        if tool == "rect":
-            r = QRectF(start, end).normalized()
-            item = self.scene.addRect(r, pen)
-        elif tool == "ellipse":
-            r = QRectF(start, end).normalized()
-            item = self.scene.addEllipse(r, pen)
-        elif tool == "line":
-            item = self.scene.addLine(QLineF(start, end), pen)
-        elif tool == "arrow":
-            item = self._add_arrow(start, end, pen)
-        else:
-            item = self.scene.addLine(QLineF(start, end), pen)
+    # ---- примитивы ----
+    def _create_rect_item(self, start: QPointF, end: QPointF, pen: QPen):
+        item = self.scene.addRect(QRectF(start, end).normalized(), pen)
+        item.setFlag(QGraphicsItem.ItemIsSelectable, True)
         return item
 
-    def _add_arrow(self, start: QPointF, end: QPointF, pen: QPen) -> QGraphicsItem:
-        """Создать стрелку"""
-        # Создаем группу для всех частей стрелки
-        group = QGraphicsItemGroup()
+    def _create_ellipse_item(self, start: QPointF, end: QPointF, pen: QPen):
+        item = self.scene.addEllipse(QRectF(start, end).normalized(), pen)
+        item.setFlag(QGraphicsItem.ItemIsSelectable, True)
+        return item
 
-        # Основная линия
+    def _create_arrow_group(self, start: QPointF, end: QPointF, pen: QPen):
+        group = QGraphicsItemGroup()
         line = self.scene.addLine(QLineF(start, end), pen)
         group.addToGroup(line)
 
-        # Наконечник стрелки
+        # Наконечник
         v = end - start
         length = (v.x() ** 2 + v.y() ** 2) ** 0.5
         if length >= 1:
@@ -266,10 +285,8 @@ class Canvas(QGraphicsView):
             head = 12
             left = QPointF(end.x() - ux * head - uy * head * 0.5, end.y() - uy * head + ux * head * 0.5)
             right = QPointF(end.x() - ux * head + uy * head * 0.5, end.y() - uy * head - ux * head * 0.5)
-
             left_line = self.scene.addLine(QLineF(end, left), pen)
             right_line = self.scene.addLine(QLineF(end, right), pen)
-
             group.addToGroup(left_line)
             group.addToGroup(right_line)
 
@@ -277,6 +294,9 @@ class Canvas(QGraphicsView):
         return group
 
 
+# =========================
+# UI helpers (цвет/палитра)
+# =========================
 class ColorButton(QToolButton):
     """Кнопка выбора цвета"""
 
@@ -287,7 +307,6 @@ class ColorButton(QToolButton):
         self.update_color()
 
     def update_color(self):
-        """Обновить отображение цвета"""
         self.setStyleSheet(f"""
             QToolButton {{
                 background-color: {self.color.name()};
@@ -300,7 +319,6 @@ class ColorButton(QToolButton):
         """)
 
     def set_color(self, color: QColor):
-        """Установить новый цвет"""
         self.color = color
         self.update_color()
 
@@ -343,6 +361,9 @@ class HexColorDialog(QDialog):
         self.accept()
 
 
+# =========================
+# Главное окно редактора
+# =========================
 class EditorWindow(QMainWindow):
     """Главное окно редактора"""
 
@@ -357,6 +378,8 @@ class EditorWindow(QMainWindow):
         self.text_manager = TextManager(self.canvas)
         self.canvas.set_text_manager(self.text_manager)
         self.ocr_manager = OCRManager(cfg)
+        self.live_manager = LiveTextManager(self.canvas, self.ocr_manager)
+
         self.setCentralWidget(self.canvas)
         self._setup_styles()
         self._create_toolbar()
@@ -365,10 +388,10 @@ class EditorWindow(QMainWindow):
         QTimer.singleShot(0, lambda q=qimg: self._size_to_image(q))
 
         self.statusBar().showMessage(
-            "Готово | Ctrl+N: новый скриншот | Ctrl+K: коллаж | Ctrl+Alt+O: OCR | Del: удалить | Ctrl +/-: масштаб")
+            "Готово | Ctrl+N: новый скриншот | Ctrl+K: коллаж | Ctrl+Alt+O: OCR | Ctrl+L: Live | Del: удалить | Ctrl +/-: масштаб"
+        )
 
     def _setup_styles(self):
-        """Настроить стили интерфейса"""
         self.setStyleSheet("""
             QMainWindow { background: #ffffff; }
             QToolBar { background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #ffffff, stop:1 #f8f9fa);
@@ -382,10 +405,9 @@ class EditorWindow(QMainWindow):
 
     def _size_to_image(self, qimg: QImage):
         """Подогнать размер окна под размер картинки и центрировать."""
-        # Убедимся, что сцена знает свой bbox
         self.canvas.scene.setSceneRect(self.canvas.scene.itemsBoundingRect())
 
-        # Размеры панели инструментов (слева) и верхней панели
+        # Размеры панелей
         toolbars = self.findChildren(QToolBar)
         left_w = sum(tb.sizeHint().width() for tb in toolbars if tb.orientation() == Qt.Vertical)
         top_h = sum(tb.sizeHint().height() for tb in toolbars if tb.orientation() == Qt.Horizontal)
@@ -398,104 +420,53 @@ class EditorWindow(QMainWindow):
         # Целевые размеры: картинка 1:1 + панели + небольшой запас
         target_w = qimg.width() + left_w + 24
         target_h = qimg.height() + top_h + status_h + 24
-
-        # Не раздуваем окно больше 90% экрана, и не меньше минимума
-        target_w = max(self.minimumWidth(), min(target_w, int(ag.width() * 0.9)))
-        target_h = max(self.minimumHeight(), min(target_h, int(ag.height() * 0.9)))
+        target_w = min(target_w, ag.width() - 40)
+        target_h = min(target_h, ag.height() - 40)
 
         self.resize(target_w, target_h)
+        self.move(ag.center().x() - self.width() // 2, ag.center().y() - self.height() // 2)
 
-        # Центрируем картинку во вью (на всякий случай) и окно на экране
-        self.canvas.centerOn(self.canvas.pixmap_item)
-        self.move(ag.x() + (ag.width() - self.width()) // 2,
-                  ag.y() + (ag.height() - self.height()) // 2)
-
+    # ---- тулбары/кнопки ----
     def _create_toolbar(self):
-        """Создать панель инструментов — только иконки!"""
+        # Левый тулбар с инструментами
         tools_tb = QToolBar("Tools")
+        tools_tb.setOrientation(Qt.Vertical)
         tools_tb.setMovable(False)
         tools_tb.setFloatable(False)
-        tools_tb.setOrientation(Qt.Vertical)
         self.addToolBar(Qt.LeftToolBarArea, tools_tb)
 
-        # Минималистичные иконки для инструментов
-        def make_icon_rect():
-            pm = QPixmap(28, 28)
-            pm.fill(Qt.transparent)
-            p = QPainter(pm)
-            p.setRenderHint(QPainter.Antialiasing)
-            p.setPen(QColor(80, 80, 80))
-            p.drawRect(4, 4, 20, 20)
-            p.end()
-            return QIcon(pm)
-
+        # Иконки вектором (рисуем сами, чтобы не тащить ресурсы)
         def make_icon_ellipse():
-            pm = QPixmap(28, 28)
-            pm.fill(Qt.transparent)
-            p = QPainter(pm)
-            p.setRenderHint(QPainter.Antialiasing)
-            p.setPen(QColor(80, 80, 80))
-            p.drawEllipse(4, 4, 20, 20)
-            p.end()
-            return QIcon(pm)
+            pm = QPixmap(28, 28); pm.fill(Qt.transparent)
+            p = QPainter(pm); p.setRenderHint(QPainter.Antialiasing); p.setPen(QColor(80,80,80))
+            p.drawEllipse(4, 4, 20, 20); p.end(); return QIcon(pm)
 
         def make_icon_line():
-            pm = QPixmap(28, 28)
-            pm.fill(Qt.transparent)
-            p = QPainter(pm)
-            p.setRenderHint(QPainter.Antialiasing)
-            p.setPen(QColor(80, 80, 80))
-            p.drawLine(6, 22, 22, 6)
-            p.end()
-            return QIcon(pm)
+            pm = QPixmap(28, 28); pm.fill(Qt.transparent)
+            p = QPainter(pm); p.setRenderHint(QPainter.Antialiasing); p.setPen(QColor(80,80,80))
+            p.drawLine(6, 22, 22, 6); p.end(); return QIcon(pm)
 
         def make_icon_arrow():
-            pm = QPixmap(28, 28)
-            pm.fill(Qt.transparent)
-            p = QPainter(pm)
-            p.setRenderHint(QPainter.Antialiasing)
-            p.setPen(QColor(80, 80, 80))
-            p.drawLine(6, 22, 20, 8)
-            p.drawLine(20, 8, 15, 11)
-            p.drawLine(20, 8, 18, 14)
-            p.end()
-            return QIcon(pm)
+            pm = QPixmap(28, 28); pm.fill(Qt.transparent)
+            p = QPainter(pm); p.setRenderHint(QPainter.Antialiasing); p.setPen(QColor(80,80,80))
+            p.drawLine(6, 22, 20, 8); p.drawLine(20, 8, 15, 11); p.drawLine(20, 8, 18, 14); p.end(); return QIcon(pm)
 
         def make_icon_pencil():
-            pm = QPixmap(28, 28)
-            pm.fill(Qt.transparent)
-            p = QPainter(pm)
-            p.setRenderHint(QPainter.Antialiasing)
-            p.setPen(QColor(80, 80, 80))
-            p.drawLine(6, 22, 22, 6)
-            p.setPen(QColor(200, 150, 100))
-            p.drawEllipse(20, 4, 3, 3)
-            p.end()
-            return QIcon(pm)
+            pm = QPixmap(28, 28); pm.fill(Qt.transparent)
+            p = QPainter(pm); p.setRenderHint(QPainter.Antialiasing); p.setPen(QColor(80,80,80))
+            p.drawLine(6, 22, 22, 6); p.setPen(QColor(200,150,100)); p.drawEllipse(20, 4, 3, 3); p.end(); return QIcon(pm)
 
         def make_icon_text():
-            pm = QPixmap(28, 28)
-            pm.fill(Qt.transparent)
-            p = QPainter(pm)
-            p.setRenderHint(QPainter.Antialiasing)
-            p.setPen(QColor(80, 80, 80))
-            font = p.font()
-            font.setBold(True)
-            font.setPointSize(18)
-            p.setFont(font)
-            p.drawText(pm.rect(), Qt.AlignCenter, "T")
-            p.end()
-            return QIcon(pm)
+            pm = QPixmap(28, 28); pm.fill(Qt.transparent)
+            p = QPainter(pm); p.setRenderHint(QPainter.Antialiasing); p.setPen(QColor(80,80,80))
+            f = p.font(); f.setBold(True); f.setPointSize(18); p.setFont(f)
+            p.drawText(pm.rect(), Qt.AlignCenter, "T"); p.end(); return QIcon(pm)
 
         def make_icon_select():
-            pm = QPixmap(28, 28)
-            pm.fill(Qt.transparent)
-            p = QPainter(pm)
-            p.setRenderHint(QPainter.Antialiasing)
-            p.setPen(QColor(80, 80, 80))
-            p.drawPolygon([QPointF(6, 6), QPointF(6, 22), QPointF(12, 18), QPointF(18, 22), QPointF(22, 18), QPointF(14, 12), QPointF(22, 6)])
-            p.end()
-            return QIcon(pm)
+            pm = QPixmap(28, 28); pm.fill(Qt.transparent)
+            p = QPainter(pm); p.setRenderHint(QPainter.Antialiasing); p.setPen(QColor(80,80,80))
+            p.drawPolygon([QPointF(6,6), QPointF(6,22), QPointF(12,18), QPointF(18,22), QPointF(22,18), QPointF(14,12), QPointF(22,6)])
+            p.end(); return QIcon(pm)
 
         self._tool_buttons = []
         def add_tool(tool, icon, tooltip):
@@ -512,7 +483,7 @@ class EditorWindow(QMainWindow):
             return btn
 
         add_tool("select", make_icon_select(), "Выделение")
-        add_tool("rect", make_icon_rect(), "Прямоугольник")
+        add_tool("rect", make_icon_ellipse(), "Прямоугольник")
         add_tool("ellipse", make_icon_ellipse(), "Эллипс")
         add_tool("line", make_icon_line(), "Линия")
         add_tool("arrow", make_icon_arrow(), "Стрелка")
@@ -522,7 +493,7 @@ class EditorWindow(QMainWindow):
         self._tool_buttons[0].setChecked(True)
         self.canvas.set_tool("select")
 
-        # Остальная панель — как у тебя была, не меняю!
+        # Верхняя панель действий
         tb = QToolBar("Actions")
         tb.setMovable(False)
         tb.setFloatable(False)
@@ -554,6 +525,11 @@ class EditorWindow(QMainWindow):
 
         tb.addSeparator()
 
+        # NEW: Live Text + копирование выделенного текста
+        self.act_live, _ = add_action(tb, "Live", self.toggle_live_text, sc="Ctrl+L", icon_text="🔎", show_text=False)
+        self.act_live_copy, _ = add_action(tb, "Текст", self.copy_live_text, sc="Ctrl+Shift+C", icon_text="📝", show_text=False)
+
+        # Остальные действия
         self.act_ocr, _ = add_action(tb, "OCR", self.ocr_current, sc="Ctrl+Alt+O", icon_text="📄", show_text=False)
         self.act_new, _ = add_action(tb, "Новый снимок", self.add_screenshot, sc="Ctrl+N", icon_text="📸", show_text=False)
         self.act_collage, _ = add_action(tb, "Коллаж", self.open_collage, sc="Ctrl+K", icon_text="🧩", show_text=False)
@@ -564,7 +540,7 @@ class EditorWindow(QMainWindow):
         if hasattr(self, 'act_collage'):
             self._update_collage_enabled()
 
-        # Минималистичный стиль только для тулбара инструментов!
+        # Стиль для тулбара инструментов
         tools_tb.setStyleSheet("""
             QToolBar {
                 background: #f9f9fb;
@@ -586,8 +562,8 @@ class EditorWindow(QMainWindow):
             }
         """)
 
+    # ---- действия ----
     def choose_color(self):
-        """Выбрать цвет"""
         selected_items = list(self.canvas.scene.selectedItems())
         focus_item = self.canvas.scene.focusItem()
 
@@ -601,14 +577,12 @@ class EditorWindow(QMainWindow):
                 self.text_manager.apply_color_to_selected(selected_items, focus_item)
 
     def copy_to_clipboard(self):
-        """Копировать в буфер обмена"""
         img = self.canvas.export_image()
         qim = ImageQt.ImageQt(img)
         QApplication.clipboard().setImage(qim)
         self.statusBar().showMessage("✅ Скопировано в буфер обмена", 2000)
 
     def save_image(self):
-        """Сохранить изображение"""
         img = self.canvas.export_image()
         path, _ = QFileDialog.getSaveFileName(self, "Сохранить изображение", "",
                                               "PNG (*.png);;JPEG (*.jpg);;Все файлы (*.*)")
@@ -619,23 +593,38 @@ class EditorWindow(QMainWindow):
             self.statusBar().showMessage(f"✅ Сохранено: {Path(path).name}", 3000)
 
     def ocr_current(self):
-        """Выполнить OCR текущего изображения"""
         img = self.canvas.export_image()
         if self.ocr_manager.ocr_to_clipboard(img, self):
             self.statusBar().showMessage("🔍 Текст распознан и скопирован", 3000)
 
+    # NEW: Live Text
+    def toggle_live_text(self):
+        ok = self.live_manager.toggle()
+        if ok:
+            self.statusBar().showMessage("🔎 Live Text — включено. Выделяй мышью область и жми Ctrl+Shift+C", 3500)
+        else:
+            self.statusBar().showMessage("🔎 Live Text — выключено", 2000)
+
+    def copy_live_text(self):
+        """Скопировать выделенный Live-текст. Если нет — OCR всей сцены."""
+        if self.live_manager.active and self.live_manager.copy_selection_to_clipboard():
+            self.statusBar().showMessage("📋 Текст скопирован (Live)", 2500)
+            return
+        # Фоллбек: обычный OCR
+        img = self.canvas.export_image()
+        if self.ocr_manager.ocr_to_clipboard(img, self):
+            self.statusBar().showMessage("📋 Текст распознан и скопирован", 2500)
+
     def _update_collage_enabled(self):
-        """Обновить доступность функции коллажа"""
         try:
-            has_history = any(HISTORY_DIR.glob("*.png")) or any(HISTORY_DIR.glob("*.jpg")) or any(
-                HISTORY_DIR.glob("*.jpeg"))
+            has_history = any(HISTORY_DIR.glob("*.png")) or any(HISTORY_DIR.glob("*.jpg")) or any(HISTORY_DIR.glob("*.jpeg"))
             if hasattr(self, "act_collage"):
                 self.act_collage.setEnabled(bool(has_history))
         except Exception:
             pass
 
+    # ---- хоткеи / добавление снимка ----
     def keyPressEvent(self, event):
-        """Обработка нажатий клавиш"""
         if event.key() == Qt.Key_Delete:
             selected_items = self.canvas.scene.selectedItems()
             for item in selected_items:
@@ -657,7 +646,7 @@ class EditorWindow(QMainWindow):
         super().keyPressEvent(event)
 
     def add_screenshot(self):
-        """Добавить новый скриншот"""
+        """Новый скриншот через оверлеи"""
         try:
             from gui import OverlayManager
             self.setWindowState(self.windowState() | Qt.WindowMinimized)
@@ -671,7 +660,7 @@ class EditorWindow(QMainWindow):
             QMessageBox.critical(self, "Ошибка", f"Не удалось захватить скриншот: {e}")
 
     def _on_new_screenshot(self, qimg: QImage):
-        """Обработать новый скриншот"""
+        """Обработать новый скриншот: добавить отдельным элементом сцены"""
         try:
             self.overlay_manager.close_all()
         except Exception:
@@ -686,6 +675,7 @@ class EditorWindow(QMainWindow):
             save_history(qimage_to_pil(qimg))
         except Exception:
             pass
+
         pixmap = QPixmap.fromImage(qimg)
         screenshot_item = QGraphicsPixmapItem(pixmap)
         screenshot_item.setFlag(QGraphicsItem.ItemIsMovable, True)
@@ -693,6 +683,7 @@ class EditorWindow(QMainWindow):
         screenshot_item.setFlag(QGraphicsItem.ItemIsFocusable, True)
         screenshot_item.setZValue(10)
         self.canvas.scene.addItem(screenshot_item)
+
         view_center = self.canvas.mapToScene(self.canvas.viewport().rect().center())
         r = screenshot_item.boundingRect()
         screenshot_item.setPos(view_center.x() - r.width() / 2, view_center.y() - r.height() / 2)
@@ -702,8 +693,8 @@ class EditorWindow(QMainWindow):
         self.canvas._apply_lock_state()
         self.statusBar().showMessage("📸 Новый скриншот добавлен (можно двигать и масштабировать)", 2500)
 
+    # ---- коллаж ----
     def open_collage(self):
-        """Открыть диалог создания коллажа"""
         from collage import CollageDialog, compose_collage
         dlg = CollageDialog(self)
         if dlg.exec():
