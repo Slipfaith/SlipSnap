@@ -7,7 +7,17 @@ from PIL import Image, ImageQt
 
 from PySide6.QtCore import Qt, QRectF, QPointF, QLineF, QTimer
 from PySide6.QtGui import (
-    QPainter, QPen, QColor, QImage, QKeySequence, QPixmap, QAction, QFont, QCursor
+    QPainter,
+    QPen,
+    QColor,
+    QImage,
+    QKeySequence,
+    QPixmap,
+    QAction,
+    QFont,
+    QCursor,
+    QTextCursor,
+    QTextCharFormat,
 )
 from PySide6.QtWidgets import (
     QMainWindow, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsItem,
@@ -431,6 +441,11 @@ class EditorWindow(QMainWindow):
             for item in targets:
                 if isinstance(item, QGraphicsTextItem):
                     item.setDefaultTextColor(color)
+                    cursor = QTextCursor(item.document())
+                    cursor.select(QTextCursor.Document)
+                    fmt = QTextCharFormat()
+                    fmt.setForeground(color)
+                    cursor.mergeCharFormat(fmt)
 
     def choose_font(self):
         font, ok = QFontDialog.getFont(self.canvas._font, self, "Выберите шрифт")
