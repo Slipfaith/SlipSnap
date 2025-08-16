@@ -427,17 +427,20 @@ class EditorWindow(QMainWindow):
             self.canvas.set_pen_color(color)
 
     def choose_text_color(self):
+        # Сохраняем выделенные/активные элементы до открытия диалога,
+        # так как при его появлении фокус и выделение могут сбрасываться
+        from PySide6.QtWidgets import QGraphicsTextItem
+        targets = list(self.canvas.scene.selectedItems())
+        focus_item = self.canvas.scene.focusItem()
+        if isinstance(focus_item, QGraphicsTextItem) and focus_item not in targets:
+            targets.append(focus_item)
+
         color = QColorDialog.getColor(self.text_color_btn.color, self, "Выберите цвет текста")
         if color.isValid():
             self.text_color_btn.set_color(color)
             self.canvas.set_text_color(color)
 
-            # Применяем цвет к выделенным или активным текстовым элементам
-            from PySide6.QtWidgets import QGraphicsTextItem
-            targets = list(self.canvas.scene.selectedItems())
-            focus_item = self.canvas.scene.focusItem()
-            if isinstance(focus_item, QGraphicsTextItem) and focus_item not in targets:
-                targets.append(focus_item)
+            # Применяем цвет к ранее выбранным текстовым элементам
             for item in targets:
                 if isinstance(item, QGraphicsTextItem):
                     item.setDefaultTextColor(color)
