@@ -422,9 +422,13 @@ class EditorWindow(QMainWindow):
             self.text_color_btn.set_color(color)
             self.canvas.set_text_color(color)
 
-            # Применяем к выделенным текстовым элементам
+            # Применяем цвет к выделенным или активным текстовым элементам
             from PySide6.QtWidgets import QGraphicsTextItem
-            for item in self.canvas.scene.selectedItems():
+            targets = list(self.canvas.scene.selectedItems())
+            focus_item = self.canvas.scene.focusItem()
+            if isinstance(focus_item, QGraphicsTextItem) and focus_item not in targets:
+                targets.append(focus_item)
+            for item in targets:
                 if isinstance(item, QGraphicsTextItem):
                     item.setDefaultTextColor(color)
 
@@ -432,9 +436,13 @@ class EditorWindow(QMainWindow):
         font, ok = QFontDialog.getFont(self.canvas._font, self, "Выберите шрифт")
         if ok:
             self.canvas.set_font(font)
-            # Применяем к выделенным текстовым элементам
+            # Применяем настройки к выделенным или активным текстовым элементам
             from PySide6.QtWidgets import QGraphicsTextItem
-            for item in self.canvas.scene.selectedItems():
+            targets = list(self.canvas.scene.selectedItems())
+            focus_item = self.canvas.scene.focusItem()
+            if isinstance(focus_item, QGraphicsTextItem) and focus_item not in targets:
+                targets.append(focus_item)
+            for item in targets:
                 if isinstance(item, QGraphicsTextItem):
                     item.setFont(font)
                     # Также обновляем цвет, если нужно
