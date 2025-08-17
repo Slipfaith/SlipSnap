@@ -98,12 +98,15 @@ class SelectionOverlayBase(QWidget):
             if gr.width() > 5 and gr.height() > 5:
                 left, top, w, h = self._map_rect_to_image_coords(gr)
                 crop = self.base_img.crop((left, top, left + w, top + h))
+                mask = Image.new("L", (w, h), 0)
+                draw = ImageDraw.Draw(mask)
                 if self.shape == "ellipse":
-                    mask = Image.new("L", (w, h), 0)
-                    ImageDraw.Draw(mask).ellipse((0, 0, w, h), fill=255)
-                    out = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-                    out.paste(crop, (0, 0), mask)
-                    crop = out
+                    draw.ellipse((0, 0, w, h), fill=255)
+                else:
+                    draw.rounded_rectangle((0, 0, w, h), radius=12, fill=255)
+                out = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+                out.paste(crop, (0, 0), mask)
+                crop = out
                 self.captured.emit(ImageQt.ImageQt(crop))
         self.releaseKeyboard()
         self.cancel_all.emit()
