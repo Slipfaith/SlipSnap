@@ -79,7 +79,6 @@ class Canvas(QGraphicsView):
         }
         self.active_tool = self.tools["select"]
 
-        # cursors
         self._pencil_cursor = create_pencil_cursor()
         self._select_cursor = create_select_cursor()
         self._apply_lock_state()
@@ -97,15 +96,21 @@ class Canvas(QGraphicsView):
         self._set_pixmap_items_interactive(not lock)
         self.setDragMode(QGraphicsView.NoDrag)
 
-    # public API
     def set_tool(self, tool: str):
         if self._text_manager:
             self._text_manager.finish_current_editing()
 
         self._tool = tool
+        self.active_tool = self.tools.get(tool)
+
         if tool == "select":
             self.viewport().setCursor(self._select_cursor)
-        elif tool in {"rect", "ellipse", "line", "arrow", "blur", "erase"}:
+        elif tool == "erase":
+            if self.active_tool and hasattr(self.active_tool, 'cursor'):
+                self.viewport().setCursor(self.active_tool.cursor)
+            else:
+                self.viewport().setCursor(Qt.ArrowCursor)
+        elif tool in {"rect", "ellipse", "line", "arrow", "blur"}:
             self.viewport().setCursor(Qt.CrossCursor)
         elif tool == "free":
             self.viewport().setCursor(self._pencil_cursor)
@@ -113,10 +118,9 @@ class Canvas(QGraphicsView):
             self.viewport().setCursor(Qt.IBeamCursor)
         else:
             self.viewport().setCursor(Qt.ArrowCursor)
-        self.active_tool = self.tools.get(tool)
+
         self._apply_lock_state()
 
-        # auto-disable live text when drawing
         win = self.window()
         try:
             if tool != "select" and hasattr(win, "live_manager") and win.live_manager and win.live_manager.active:
@@ -163,6 +167,12 @@ class Canvas(QGraphicsView):
         self.undo_stack.redo()
 
     def wheelEvent(self, event):
+        if self._tool == "erase" and hasattr(self.active_tool, 'wheel_event'):
+            pos = self.mapToScene(event.position().toPoint())
+            self.active_tool.wheel_event(event.angleDelta().y(), pos)
+            event.accept()
+            return
+
         if event.modifiers() & Qt.ControlModifier:
             selected = self.scene.selectedItems()
             if selected:
@@ -178,6 +188,13 @@ class Canvas(QGraphicsView):
                 event.accept()
                 return
         super().wheelEvent(event)
+
+    def keyPressEvent(self, event):
+        if self._tool == "erase" and hasattr(self.active_tool, 'key_press'):
+            self.active_tool.key_press(event.key())
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:

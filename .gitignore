@@ -1,4 +1,6 @@
+# =========================
 # Python
+# =========================
 __pycache__/
 *.py[cod]
 *.pyo
@@ -6,41 +8,112 @@ __pycache__/
 *.dll
 *.dylib
 
-# Venv
+# Byte-compiled / optimized / etc
+*$py.class
+
+# =========================
+# Virtual environments
+# =========================
 .venv/
 venv/
 env/
+ENV/
+.conda/
+.conda_env/
+.ipynb_checkpoints/
 
-# Build/Dist
+# =========================
+# Build / Distribution
+# =========================
 build/
 dist/
 *.egg-info/
+.eggs/
+*.egg
+wheels/
+pip-wheel-metadata/
+*.manifest
+*.spec
 
+# Nuitka / PyInstaller / cx_Freeze / etc
+*.build/
+*.dist/
+__nuitka_build__/
+*.exe
+*.app
+
+# =========================
 # Tools caches
+# =========================
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.cache/
+.pyre/
+.dmypy.json
+dmypy.json
 
-# IDE
+# =========================
+# IDE / Editors
+# =========================
 .vscode/
 .idea/
 *.code-workspace
+*.sublime-project
+*.sublime-workspace
 
-# OS
+# =========================
+# OS files
+# =========================
 .DS_Store
+.DS_Store?
 Thumbs.db
+Desktop.ini
+ehthumbs.db
+Icon?
+*.lnk
 
-# Logs / temp
+# =========================
+# Logs / Temp files
+# =========================
 *.log
-.tmp/
+tmp/
 temp/
-.tmp.*
+*.tmp
 ~$*
+*.bak
+*.swp
+*.swo
+*.orig
 
-# Local config (если добавишь)
+# =========================
+# Local configs / Secrets
+# =========================
 .env
 .env.*.local
+*.secret
+*.key
+*.pem
+*.crt
 
-# Прочие артефакты
-*.orig
+# =========================
+# Archives / Misc
+# =========================
 *.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+*.rar
+
+# =========================
+# Images / Assets (unnecessary in repo)
+# =========================
+*.ico
+*.icns
+*.db
