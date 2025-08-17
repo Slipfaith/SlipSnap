@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# editor/live_ocr.py — «Live Text» поверх скриншота: выделение слов прямоугольником и копирование
+# editor/live_ocr.py — «Live Text» поверх скриншота: выделение слов прямоугольником
 from __future__ import annotations
 
 from typing import List, Dict, Optional
@@ -223,16 +223,6 @@ class LiveTextManager:
         self.layer = None
         self.pixmap_item = None
         self.active = False
-
-    def copy_selection_to_clipboard(self) -> bool:
-        if not self.active or not self.layer:
-            return False
-        txt = self.layer.selected_text()
-        if not txt:
-            return False
-        from PySide6.QtWidgets import QApplication
-        QApplication.clipboard().setText(txt)
-        return True
 
     # ---------- helpers ----------
     @staticmethod
