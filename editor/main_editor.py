@@ -7,7 +7,7 @@ from PIL import Image, ImageQt
 from PySide6.QtCore import Qt, QRectF, QPointF, QLineF, QTimer, QSize
 from PySide6.QtGui import (
     QPainter, QPen, QColor, QImage, QKeySequence, QPixmap, QAction,
-    QCursor, QTextCursor, QTextCharFormat, QIcon
+    QCursor, QTextCursor, QTextCharFormat, QIcon, QBrush, QLinearGradient
 )
 from PySide6.QtWidgets import (
     QMainWindow, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsItem,
@@ -20,6 +20,35 @@ from logic import pil_to_qpixmap, qimage_to_pil, HISTORY_DIR, save_history
 from editor.text_tools import TextManager, EditableTextItem
 from editor.ocr_tools import OCRManager
 from editor.live_ocr import LiveTextManager
+
+
+# =========================
+# Modern Color Scheme
+# =========================
+class ModernColors:
+    # Primary colors
+    PRIMARY = "#2563eb"  # Modern blue
+    PRIMARY_HOVER = "#1d4ed8"
+    PRIMARY_LIGHT = "#dbeafe"
+
+    # Surface colors
+    SURFACE = "#ffffff"
+    SURFACE_VARIANT = "#f8fafc"
+    SURFACE_HOVER = "#f1f5f9"
+
+    # Border colors
+    BORDER = "#e2e8f0"
+    BORDER_FOCUS = "#3b82f6"
+
+    # Text colors
+    TEXT_PRIMARY = "#0f172a"
+    TEXT_SECONDARY = "#64748b"
+    TEXT_MUTED = "#94a3b8"
+
+    # Status colors
+    SUCCESS = "#10b981"
+    WARNING = "#f59e0b"
+    ERROR = "#ef4444"
 
 
 # =========================
@@ -47,16 +76,26 @@ class Canvas(QGraphicsView):
         self.setAlignment(Qt.AlignCenter)
         self.setResizeAnchor(QGraphicsView.AnchorViewCenter)
         self.setTransformationAnchor(QGraphicsView.AnchorViewCenter)
-        self.setStyleSheet("""
-            QGraphicsView { background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; }
-            QGraphicsView:focus { border: 2px solid #0d6efd; outline: none; }
+
+        # Modern canvas styling
+        self.setStyleSheet(f"""
+            QGraphicsView {{
+                background: {ModernColors.SURFACE_VARIANT};
+                border: 1px solid {ModernColors.BORDER};
+                border-radius: 12px;
+                padding: 2px;
+            }}
+            QGraphicsView:focus {{
+                border: 2px solid {ModernColors.BORDER_FOCUS};
+                outline: none;
+            }}
         """)
 
         # Инициализация инструментов
         self._tool = "select"
         self._start = QPointF()
         self._tmp: Optional[QGraphicsItem] = None
-        self._pen = QPen(QColor(255, 80, 80), 3)
+        self._pen = QPen(QColor(ModernColors.PRIMARY), 3)
         self._pen.setCapStyle(Qt.RoundCap)
         self._pen.setJoinStyle(Qt.RoundJoin)
         self._undo: List[QGraphicsItem] = []
@@ -70,34 +109,44 @@ class Canvas(QGraphicsView):
     # ---- сервис ----
     def _create_custom_cursors(self):
         """Создает кастомные курсоры для инструментов"""
-        # Курсор карандаша
-        pencil_pixmap = QPixmap(20, 20)
+        # Курсор карандаша - более современный дизайн
+        pencil_pixmap = QPixmap(24, 24)
         pencil_pixmap.fill(Qt.transparent)
         painter = QPainter(pencil_pixmap)
         painter.setRenderHint(QPainter.Antialiasing)
-        painter.setPen(QPen(QColor(80, 80, 80), 2))
-        painter.drawLine(3, 16, 16, 3)
-        painter.setPen(QPen(QColor(200, 150, 100), 1))
-        painter.drawEllipse(15, 2, 4, 4)
-        painter.setPen(QPen(QColor(60, 60, 60), 1))
-        painter.drawLine(2, 17, 4, 15)
+        painter.setPen(QPen(QColor(ModernColors.TEXT_PRIMARY), 2.5))
+        painter.drawLine(4, 19, 19, 4)
+        painter.setPen(QPen(QColor(ModernColors.PRIMARY), 1.5))
+        painter.drawEllipse(17, 2, 5, 5)
+        painter.setPen(QPen(QColor(ModernColors.TEXT_SECONDARY), 1.5))
+        painter.drawLine(2, 21, 5, 18)
         painter.end()
-        self._pencil_cursor = QCursor(pencil_pixmap, 3, 16)
+        self._pencil_cursor = QCursor(pencil_pixmap, 4, 19)
 
-        # Черный курсор для выделения
-        select_pixmap = QPixmap(16, 16)
+        # Современный курсор для выделения - более изящный
+        select_pixmap = QPixmap(24, 24)
         select_pixmap.fill(Qt.transparent)
         painter = QPainter(select_pixmap)
         painter.setRenderHint(QPainter.Antialiasing)
-        painter.setPen(QPen(QColor(0, 0, 0), 1))
-        painter.setBrush(QColor(0, 0, 0))
+
+        # Основная стрелка с градиентом
+        painter.setPen(QPen(QColor(ModernColors.TEXT_PRIMARY), 1.8))
+        painter.setBrush(QBrush(QColor(ModernColors.TEXT_PRIMARY)))
+
+        # Более элегантная форма стрелки
         points = [
-            QPointF(1, 1), QPointF(1, 11), QPointF(4, 8), QPointF(7, 11),
-            QPointF(9, 9), QPointF(6, 6), QPointF(11, 1)
+            QPointF(3, 3), QPointF(3, 17), QPointF(8, 13),
+            QPointF(12, 18), QPointF(15, 16), QPointF(10, 10), QPointF(18, 3)
         ]
         painter.drawPolygon(points)
+
+        # Добавляем тонкую белую обводку для контраста
+        painter.setPen(QPen(QColor(255, 255, 255, 180), 1))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawPolygon(points)
+
         painter.end()
-        self._select_cursor = QCursor(select_pixmap, 1, 1)
+        self._select_cursor = QCursor(select_pixmap, 3, 3)
 
     def _set_pixmap_items_interactive(self, enabled: bool):
         """Включить/выключить перетаскивание и прием мыши у всех QGraphicsPixmapItem."""
@@ -141,7 +190,7 @@ class Canvas(QGraphicsView):
             if tool != "select" and hasattr(win, "live_manager") and win.live_manager and win.live_manager.active:
                 win.live_manager.disable()
                 if hasattr(win, "statusBar"):
-                    win.statusBar().showMessage("🔎 Live Text — выключено (переключился на инструмент рисования)", 2200)
+                    win.statusBar().showMessage("🔍 Live Text — выключено (переключился на инструмент рисования)", 2200)
         except Exception:
             pass
 
@@ -303,18 +352,24 @@ class ColorButton(QToolButton):
     def __init__(self, color: QColor):
         super().__init__()
         self.color = color
-        self.setFixedSize(32, 24)
+        self.setFixedSize(24, 20)
         self.update_color()
 
     def update_color(self):
         self.setStyleSheet(f"""
             QToolButton {{
                 background-color: {self.color.name()};
-                border: 2px solid #ccc;
-                border-radius: 4px;
+                border: 1px solid {ModernColors.BORDER};
+                border-radius: 6px;
+                min-width: 20px;
+                min-height: 16px;
             }}
             QToolButton:hover {{
-                border: 2px solid #0d6efd;
+                border: 2px solid {ModernColors.PRIMARY};
+                transform: scale(1.05);
+            }}
+            QToolButton:pressed {{
+                transform: scale(0.95);
             }}
         """)
 
@@ -330,11 +385,19 @@ class HexColorDialog(QDialog):
         super().__init__(parent)
         self.setWindowFlags(Qt.Popup)
         self.selected = None
+        self.setStyleSheet(f"""
+            QDialog {{
+                background: {ModernColors.SURFACE};
+                border: 1px solid {ModernColors.BORDER};
+                border-radius: 12px;
+                padding: 8px;
+            }}
+        """)
 
         colors = [
-            "#000000", "#808080", "#FF0000",
-            "#FFA500", "#FFFF00", "#008000", "#00FFFF",
-            "#0000FF", "#800080", "#FFFFFF"
+            "#1e293b", "#64748b", "#dc2626",
+            "#ea580c", "#eab308", "#16a34a", "#0891b2",
+            "#2563eb", "#7c3aed", "#ffffff"
         ]
         positions = [
             (0, 1), (0, 2), (0, 3),
@@ -343,16 +406,26 @@ class HexColorDialog(QDialog):
         ]
 
         layout = QGridLayout(self)
-        layout.setSpacing(2)
-        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(4)
+        layout.setContentsMargins(8, 8, 8, 8)
 
         for pos, col in zip(positions, colors):
             btn = QToolButton()
-            btn.setFixedSize(20, 20)
-            btn.setStyleSheet(
-                f"QToolButton{{background:{col}; border:1px solid #555; border-radius:10px;}}"
-                "QToolButton:hover{border:2px solid #0d6efd;}"
-            )
+            btn.setFixedSize(24, 24)
+            btn.setStyleSheet(f"""
+                QToolButton{{
+                    background: {col};
+                    border: 2px solid {ModernColors.BORDER};
+                    border-radius: 12px;
+                }}
+                QToolButton:hover{{
+                    border: 2px solid {ModernColors.PRIMARY};
+                    transform: scale(1.1);
+                }}
+                QToolButton:pressed{{
+                    transform: scale(0.9);
+                }}
+            """)
             btn.clicked.connect(lambda _=None, c=col: self._choose(c))
             layout.addWidget(btn, *pos)
 
@@ -371,7 +444,13 @@ class EditorWindow(QMainWindow):
         super().__init__()
         self.cfg = cfg
         self.setWindowTitle("SlipSnap — Редактор")
-        self.setMinimumSize(360, 240)
+
+        # Рассчитываем минимальные размеры для видимости всех иконок
+        # Левый тулбар: 7 кнопок по 52px + отступы = ~400px высота
+        # Верхний тулбар: ~8 кнопок + цвет + разделители = ~500px ширина
+        min_width = 580  # достаточно для всех верхних иконок
+        min_height = 480  # достаточно для всех левых иконок
+        self.setMinimumSize(min_width, min_height)
 
         # Инициализация компонентов
         self.canvas = Canvas(qimg)
@@ -392,15 +471,77 @@ class EditorWindow(QMainWindow):
         )
 
     def _setup_styles(self):
-        self.setStyleSheet("""
-            QMainWindow { background: #ffffff; }
-            QToolBar { background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #ffffff, stop:1 #f8f9fa);
-                       border: none; border-bottom: 1px solid #e9ecef; spacing: 8px; padding: 8px 12px; font-weight: 500; }
-            QToolButton { background: transparent; border: none; padding: 6px 8px; border-radius: 8px; }
-            QToolButton:hover { background: #eef4ff; }
-            QToolButton:checked { background: #0d6efd; color: white; border: 1px solid #0d47a1; }
-            QLabel { color: #6c757d; font-size: 12px; font-weight: 500; margin: 0 4px; }
-            QToolBar::separator { background: #e9ecef; width: 1px; margin: 4px 8px; }
+        self.setStyleSheet(f"""
+            QMainWindow {{
+                background: {ModernColors.SURFACE};
+                color: {ModernColors.TEXT_PRIMARY};
+            }}
+
+            QToolBar {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {ModernColors.SURFACE},
+                    stop:1 {ModernColors.SURFACE_VARIANT});
+                border: none;
+                border-bottom: 1px solid {ModernColors.BORDER};
+                spacing: 6px;
+                padding: 12px 16px;
+                font-weight: 500;
+                font-size: 13px;
+            }}
+
+            QToolButton {{
+                background: transparent;
+                border: none;
+                padding: 10px 14px;
+                border-radius: 10px;
+                font-weight: 500;
+                color: {ModernColors.TEXT_SECONDARY};
+                min-width: 32px;
+                min-height: 32px;
+                font-size: 16px;
+            }}
+
+            QToolButton:hover {{
+                background: {ModernColors.SURFACE_HOVER};
+                color: {ModernColors.TEXT_PRIMARY};
+                transform: translateY(-1px);
+            }}
+
+            QToolButton:pressed {{
+                background: {ModernColors.PRIMARY_LIGHT};
+                transform: translateY(0px);
+            }}
+
+            QToolButton:checked {{
+                background: {ModernColors.PRIMARY};
+                color: white;
+                border: 1px solid {ModernColors.PRIMARY_HOVER};
+            }}
+
+            QToolButton:checked:hover {{
+                background: {ModernColors.PRIMARY_HOVER};
+            }}
+
+            QLabel {{
+                color: {ModernColors.TEXT_MUTED};
+                font-size: 12px;
+                font-weight: 500;
+                margin: 0 6px;
+            }}
+
+            QToolBar::separator {{
+                background: {ModernColors.BORDER};
+                width: 1px;
+                margin: 6px 12px;
+            }}
+
+            QStatusBar {{
+                background: {ModernColors.SURFACE_VARIANT};
+                border-top: 1px solid {ModernColors.BORDER};
+                color: {ModernColors.TEXT_SECONDARY};
+                font-size: 12px;
+                padding: 6px 16px;
+            }}
         """)
 
     def _size_to_image(self, qimg: QImage):
@@ -418,8 +559,8 @@ class EditorWindow(QMainWindow):
         ag = screen.availableGeometry()
 
         # Целевые размеры: картинка 1:1 + панели + небольшой запас
-        target_w = qimg.width() + left_w + 24
-        target_h = qimg.height() + top_h + status_h + 24
+        target_w = qimg.width() + left_w + 32
+        target_h = qimg.height() + top_h + status_h + 32
         target_w = min(target_w, ag.width() - 40)
         target_h = min(target_h, ag.height() - 40)
 
@@ -435,55 +576,105 @@ class EditorWindow(QMainWindow):
         tools_tb.setFloatable(False)
         self.addToolBar(Qt.LeftToolBarArea, tools_tb)
 
-        # Иконки вектором (рисуем сами, чтобы не тащить ресурсы)
+        # Современные векторные иконки - увеличенные для верхнего тулбара
+        def make_icon_rect():
+            pm = QPixmap(40, 40);
+            pm.fill(Qt.transparent)
+            p = QPainter(pm);
+            p.setRenderHint(QPainter.Antialiasing)
+            p.setPen(QPen(QColor(ModernColors.TEXT_SECONDARY), 3))
+            p.drawRect(8, 8, 24, 24);
+            p.end();
+            return QIcon(pm)
+
         def make_icon_ellipse():
-            pm = QPixmap(28, 28); pm.fill(Qt.transparent)
-            p = QPainter(pm); p.setRenderHint(QPainter.Antialiasing); p.setPen(QColor(80,80,80))
-            p.drawEllipse(4, 4, 20, 20); p.end(); return QIcon(pm)
+            pm = QPixmap(40, 40);
+            pm.fill(Qt.transparent)
+            p = QPainter(pm);
+            p.setRenderHint(QPainter.Antialiasing)
+            p.setPen(QPen(QColor(ModernColors.TEXT_SECONDARY), 3))
+            p.drawEllipse(8, 8, 24, 24);
+            p.end();
+            return QIcon(pm)
 
         def make_icon_line():
-            pm = QPixmap(28, 28); pm.fill(Qt.transparent)
-            p = QPainter(pm); p.setRenderHint(QPainter.Antialiasing); p.setPen(QColor(80,80,80))
-            p.drawLine(6, 22, 22, 6); p.end(); return QIcon(pm)
+            pm = QPixmap(40, 40);
+            pm.fill(Qt.transparent)
+            p = QPainter(pm);
+            p.setRenderHint(QPainter.Antialiasing)
+            p.setPen(QPen(QColor(ModernColors.TEXT_SECONDARY), 3, Qt.SolidLine, Qt.RoundCap))
+            p.drawLine(10, 30, 30, 10);
+            p.end();
+            return QIcon(pm)
 
         def make_icon_arrow():
-            pm = QPixmap(28, 28); pm.fill(Qt.transparent)
-            p = QPainter(pm); p.setRenderHint(QPainter.Antialiasing); p.setPen(QColor(80,80,80))
-            p.drawLine(6, 22, 20, 8); p.drawLine(20, 8, 15, 11); p.drawLine(20, 8, 18, 14); p.end(); return QIcon(pm)
+            pm = QPixmap(40, 40);
+            pm.fill(Qt.transparent)
+            p = QPainter(pm);
+            p.setRenderHint(QPainter.Antialiasing)
+            p.setPen(QPen(QColor(ModernColors.TEXT_SECONDARY), 3, Qt.SolidLine, Qt.RoundCap))
+            p.drawLine(10, 30, 28, 12)
+            p.drawLine(28, 12, 23, 15);
+            p.drawLine(28, 12, 25, 17);
+            p.end();
+            return QIcon(pm)
 
         def make_icon_pencil():
-            pm = QPixmap(28, 28); pm.fill(Qt.transparent)
-            p = QPainter(pm); p.setRenderHint(QPainter.Antialiasing); p.setPen(QColor(80,80,80))
-            p.drawLine(6, 22, 22, 6); p.setPen(QColor(200,150,100)); p.drawEllipse(20, 4, 3, 3); p.end(); return QIcon(pm)
+            pm = QPixmap(40, 40);
+            pm.fill(Qt.transparent)
+            p = QPainter(pm);
+            p.setRenderHint(QPainter.Antialiasing)
+            p.setPen(QPen(QColor(ModernColors.TEXT_SECONDARY), 3))
+            p.drawLine(10, 30, 30, 10)
+            p.setPen(QPen(QColor(ModernColors.PRIMARY), 2.5))
+            p.drawEllipse(27, 7, 6, 6);
+            p.end();
+            return QIcon(pm)
 
         def make_icon_text():
-            pm = QPixmap(28, 28); pm.fill(Qt.transparent)
-            p = QPainter(pm); p.setRenderHint(QPainter.Antialiasing); p.setPen(QColor(80,80,80))
-            f = p.font(); f.setBold(True); f.setPointSize(18); p.setFont(f)
-            p.drawText(pm.rect(), Qt.AlignCenter, "T"); p.end(); return QIcon(pm)
+            pm = QPixmap(40, 40);
+            pm.fill(Qt.transparent)
+            p = QPainter(pm);
+            p.setRenderHint(QPainter.Antialiasing)
+            p.setPen(QPen(QColor(ModernColors.TEXT_SECONDARY), 2.5))
+            f = p.font();
+            f.setBold(True);
+            f.setPointSize(20);
+            p.setFont(f)
+            p.drawText(pm.rect(), Qt.AlignCenter, "T");
+            p.end();
+            return QIcon(pm)
 
         def make_icon_select():
-            pm = QPixmap(28, 28); pm.fill(Qt.transparent)
-            p = QPainter(pm); p.setRenderHint(QPainter.Antialiasing); p.setPen(QColor(80,80,80))
-            p.drawPolygon([QPointF(6,6), QPointF(6,22), QPointF(12,18), QPointF(18,22), QPointF(22,18), QPointF(14,12), QPointF(22,6)])
-            p.end(); return QIcon(pm)
+            pm = QPixmap(40, 40);
+            pm.fill(Qt.transparent)
+            p = QPainter(pm);
+            p.setRenderHint(QPainter.Antialiasing)
+            p.setPen(QPen(QColor(ModernColors.TEXT_SECONDARY), 2.5))
+            p.setBrush(QBrush(QColor(ModernColors.TEXT_SECONDARY)))
+            points = [QPointF(10, 10), QPointF(10, 30), QPointF(17, 25), QPointF(25, 30), QPointF(30, 25),
+                      QPointF(20, 17), QPointF(30, 10)]
+            p.drawPolygon(points);
+            p.end();
+            return QIcon(pm)
 
         self._tool_buttons = []
+
         def add_tool(tool, icon, tooltip):
             btn = QToolButton()
             btn.setIcon(icon)
-            btn.setIconSize(QSize(28, 28))
+            btn.setIconSize(QSize(40, 40))
             btn.setToolTip(tooltip)
             btn.setCheckable(True)
             btn.setAutoExclusive(True)
-            btn.setFixedSize(36, 36)
+            btn.setFixedSize(52, 52)
             btn.clicked.connect(lambda checked, t=tool: self.canvas.set_tool(t))
             tools_tb.addWidget(btn)
             self._tool_buttons.append(btn)
             return btn
 
         add_tool("select", make_icon_select(), "Выделение")
-        add_tool("rect", make_icon_ellipse(), "Прямоугольник")
+        add_tool("rect", make_icon_rect(), "Прямоугольник")
         add_tool("ellipse", make_icon_ellipse(), "Эллипс")
         add_tool("line", make_icon_line(), "Линия")
         add_tool("arrow", make_icon_arrow(), "Стрелка")
@@ -518,7 +709,7 @@ class EditorWindow(QMainWindow):
             toolbar.addWidget(btn)
             return a, btn
 
-        self.color_btn = ColorButton(QColor(255, 80, 80))
+        self.color_btn = ColorButton(QColor(ModernColors.PRIMARY))
         self.color_btn.setToolTip("Цвет")
         self.color_btn.clicked.connect(self.choose_color)
         tb.addWidget(self.color_btn)
@@ -526,12 +717,14 @@ class EditorWindow(QMainWindow):
         tb.addSeparator()
 
         # NEW: Live Text + копирование выделенного текста
-        self.act_live, _ = add_action(tb, "Live", self.toggle_live_text, sc="Ctrl+L", icon_text="🔎", show_text=False)
-        self.act_live_copy, _ = add_action(tb, "Текст", self.copy_live_text, sc="Ctrl+Shift+C", icon_text="📝", show_text=False)
+        self.act_live, _ = add_action(tb, "Live", self.toggle_live_text, sc="Ctrl+L", icon_text="🔍", show_text=False)
+        self.act_live_copy, _ = add_action(tb, "Текст", self.copy_live_text, sc="Ctrl+Shift+C", icon_text="📄",
+                                           show_text=False)
 
         # Остальные действия
         self.act_ocr, _ = add_action(tb, "OCR", self.ocr_current, sc="Ctrl+Alt+O", icon_text="📄", show_text=False)
-        self.act_new, _ = add_action(tb, "Новый снимок", self.add_screenshot, sc="Ctrl+N", icon_text="📸", show_text=False)
+        self.act_new, _ = add_action(tb, "Новый снимок", self.add_screenshot, sc="Ctrl+N", icon_text="📸",
+                                     show_text=False)
         self.act_collage, _ = add_action(tb, "Коллаж", self.open_collage, sc="Ctrl+K", icon_text="🧩", show_text=False)
         add_action(tb, "Копировать", self.copy_to_clipboard, sc="Ctrl+C", icon_text="📋", show_text=False)
         add_action(tb, "Сохранить", self.save_image, sc="Ctrl+S", icon_text="💾", show_text=False)
@@ -540,26 +733,43 @@ class EditorWindow(QMainWindow):
         if hasattr(self, 'act_collage'):
             self._update_collage_enabled()
 
-        # Стиль для тулбара инструментов
-        tools_tb.setStyleSheet("""
-            QToolBar {
-                background: #f9f9fb;
+        # Современный стиль для тулбара инструментов
+        tools_tb.setStyleSheet(f"""
+            QToolBar {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 {ModernColors.SURFACE},
+                    stop:1 {ModernColors.SURFACE_VARIANT});
                 border: none;
-                padding: 8px;
-            }
-            QToolButton {
+                border-right: 1px solid {ModernColors.BORDER};
+                padding: 16px 8px;
+                spacing: 4px;
+            }}
+            QToolButton {{
                 background: transparent;
                 border: none;
-                border-radius: 8px;
-                margin: 2px 0;
-            }
-            QToolButton:checked {
-                background: #e7f0fa;
-                border: 1px solid #1976d2;
-            }
-            QToolButton:hover {
-                background: #e7f0fa;
-            }
+                border-radius: 12px;
+                margin: 3px 0;
+                padding: 6px;
+            }}
+            QToolButton:checked {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {ModernColors.PRIMARY},
+                    stop:1 {ModernColors.PRIMARY_HOVER});
+                border: 1px solid {ModernColors.PRIMARY_HOVER};
+                box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
+            }}
+            QToolButton:hover {{
+                background: {ModernColors.SURFACE_HOVER};
+                transform: translateX(2px);
+            }}
+            QToolButton:checked:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {ModernColors.PRIMARY_HOVER},
+                    stop:1 {ModernColors.PRIMARY});
+            }}
+            QToolButton:pressed {{
+                transform: scale(0.95);
+            }}
         """)
 
     # ---- действия ----
@@ -601,9 +811,9 @@ class EditorWindow(QMainWindow):
     def toggle_live_text(self):
         ok = self.live_manager.toggle()
         if ok:
-            self.statusBar().showMessage("🔎 Live Text — включено. Выделяй мышью область и жми Ctrl+Shift+C", 3500)
+            self.statusBar().showMessage("🔍 Live Text — включено. Выдели мышью область и жми Ctrl+Shift+C", 3500)
         else:
-            self.statusBar().showMessage("🔎 Live Text — выключено", 2000)
+            self.statusBar().showMessage("🔍 Live Text — выключено", 2000)
 
     def copy_live_text(self):
         """Скопировать выделенный Live-текст. Если нет — OCR всей сцены."""
@@ -617,7 +827,8 @@ class EditorWindow(QMainWindow):
 
     def _update_collage_enabled(self):
         try:
-            has_history = any(HISTORY_DIR.glob("*.png")) or any(HISTORY_DIR.glob("*.jpg")) or any(HISTORY_DIR.glob("*.jpeg"))
+            has_history = any(HISTORY_DIR.glob("*.png")) or any(HISTORY_DIR.glob("*.jpg")) or any(
+                HISTORY_DIR.glob("*.jpeg"))
             if hasattr(self, "act_collage"):
                 self.act_collage.setEnabled(bool(has_history))
         except Exception:
@@ -646,7 +857,7 @@ class EditorWindow(QMainWindow):
         super().keyPressEvent(event)
 
     def add_screenshot(self):
-        """Новый скриншот через оверлеи"""
+        """Новый скриншот через оверлей"""
         try:
             from gui import OverlayManager
             self.setWindowState(self.windowState() | Qt.WindowMinimized)
