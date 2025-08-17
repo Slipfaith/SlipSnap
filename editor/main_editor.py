@@ -6,14 +6,41 @@ from PIL import Image, ImageQt, ImageFilter
 
 from PySide6.QtCore import Qt, QRectF, QPointF, QLineF, QTimer, QSize
 from PySide6.QtGui import (
-    QPainter, QPen, QColor, QImage, QKeySequence, QPixmap, QAction,
-    QCursor, QTextCursor, QTextCharFormat, QIcon, QBrush, QLinearGradient
+    QPainter,
+    QPen,
+    QColor,
+    QImage,
+    QKeySequence,
+    QPixmap,
+    QAction,
+    QCursor,
+    QTextCursor,
+    QTextCharFormat,
+    QIcon,
+    QBrush,
+    QLinearGradient,
+    QPainterPath,
 )
 from PySide6.QtWidgets import (
-    QMainWindow, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsItem,
-    QFileDialog, QMessageBox, QToolBar, QLabel, QWidget, QHBoxLayout,
-    QToolButton, QApplication, QGraphicsItemGroup, QGraphicsTextItem,
-    QDialog, QGridLayout
+    QMainWindow,
+    QGraphicsView,
+    QGraphicsScene,
+    QGraphicsPixmapItem,
+    QGraphicsItem,
+    QFileDialog,
+    QMessageBox,
+    QToolBar,
+    QLabel,
+    QWidget,
+    QHBoxLayout,
+    QToolButton,
+    QApplication,
+    QGraphicsItemGroup,
+    QGraphicsTextItem,
+    QDialog,
+    QGridLayout,
+    QGraphicsPathItem,
+    QInputDialog,
 )
 
 from logic import pil_to_qpixmap, qimage_to_pil, HISTORY_DIR, save_history
@@ -101,6 +128,8 @@ class Canvas(QGraphicsView):
         self._undo: List[QGraphicsItem] = []
         self._last_point: Optional[QPointF] = None
         self._text_manager: Optional[TextManager] = None
+        self._eraser_radius = 20
+        self._current_path_item: Optional[QGraphicsPathItem] = None
 
         # Курсоры
         self._create_custom_cursors()
@@ -243,6 +272,14 @@ class Canvas(QGraphicsView):
         super().wheelEvent(event)
 
     def mousePressEvent(self, event):
+        if event.button() == Qt.RightButton and self._tool == "erase":
+            size, ok = QInputDialog.getInt(
+                self, "Размер ластика", "Радиус:", self._eraser_radius, 1, 200, 1
+            )
+            if ok:
+                self._eraser_radius = size
+            event.accept()
+            return
         if event.button() == Qt.LeftButton and self._tool not in ("none", "select"):
             pos = self.mapToScene(event.position().toPoint())
             self._start = pos
@@ -255,7 +292,13 @@ class Canvas(QGraphicsView):
                 return
             elif self._tool == "free":
                 self._last_point = self._start
-                self._tmp = None
+                path = QPainterPath(self._start)
+                self._current_path_item = QGraphicsPathItem(path)
+                self._current_path_item.setPen(self._pen)
+                self._current_path_item.setFlag(QGraphicsItem.ItemIsSelectable, True)
+                self._current_path_item.setFlag(QGraphicsItem.ItemIsMovable, True)
+                self.scene.addItem(self._current_path_item)
+                self._undo.append(self._current_path_item)
             elif self._tool == "erase":
                 self._erase_at(pos)
             else:
@@ -268,11 +311,14 @@ class Canvas(QGraphicsView):
         if (event.buttons() & Qt.LeftButton) and self._tool not in ("none", "select"):
             pos = self.mapToScene(event.position().toPoint())
             if self._tool == "free":
-                if self._last_point is not None:
-                    line = self.scene.addLine(QLineF(self._last_point, pos), self._pen)
-                    line.setFlag(QGraphicsItem.ItemIsSelectable, True)
-                    line.setFlag(QGraphicsItem.ItemIsMovable, True)
-                    self._undo.append(line)
+                if self._last_point is not None and self._current_path_item is not None:
+                    path = self._current_path_item.path()
+                    mid = QPointF(
+                        (self._last_point.x() + pos.x()) / 2,
+                        (self._last_point.y() + pos.y()) / 2,
+                    )
+                    path.quadTo(self._last_point, mid)
+                    self._current_path_item.setPath(path)
                     self._last_point = pos
             elif self._tool == "erase":
                 self._erase_at(pos)
@@ -327,6 +373,11 @@ class Canvas(QGraphicsView):
                 self._last_point = None
                 event.accept()
                 return
+            if self._tool == "free":
+                self._current_path_item = None
+                self._last_point = None
+                event.accept()
+                return
             self._tmp = None
             self._last_point = None
             event.accept()
@@ -369,16 +420,46 @@ class Canvas(QGraphicsView):
         return group
 
     def _erase_at(self, pos: QPointF):
-        """Удалить верхний элемент сцены в точке pos, кроме базового изображения."""
-        for item in self.scene.items(pos):
+        """Стирает содержимое в окрестности точки, не удаляя весь элемент целиком."""
+        rad = self._eraser_radius
+        erase = QPainterPath()
+        erase.addEllipse(pos, rad, rad)
+        rect = QRectF(pos.x() - rad, pos.y() - rad, rad * 2, rad * 2)
+        for item in self.scene.items(rect):
             if item is self.pixmap_item:
                 continue
-            self.scene.removeItem(item)
-            try:
-                self._undo.remove(item)
-            except ValueError:
-                pass
-            break
+            if isinstance(item, QGraphicsPixmapItem):
+                pix = item.pixmap()
+                img = pix.toImage()
+                p = QPainter(img)
+                p.setRenderHint(QPainter.Antialiasing)
+                p.setCompositionMode(QPainter.CompositionMode_Clear)
+                local = item.mapFromScene(pos)
+                p.drawEllipse(local, rad, rad)
+                p.end()
+                item.setPixmap(QPixmap.fromImage(img))
+            else:
+                path = item.mapToScene(item.shape())
+                new_path = path.subtracted(erase)
+                if new_path.isEmpty():
+                    self.scene.removeItem(item)
+                    try:
+                        self._undo.remove(item)
+                    except ValueError:
+                        pass
+                else:
+                    new_item = QGraphicsPathItem(new_path)
+                    pen = item.pen() if hasattr(item, "pen") else self._pen
+                    new_item.setPen(pen)
+                    new_item.setFlag(QGraphicsItem.ItemIsMovable, True)
+                    new_item.setFlag(QGraphicsItem.ItemIsSelectable, True)
+                    self.scene.addItem(new_item)
+                    try:
+                        idx = self._undo.index(item)
+                        self._undo[idx] = new_item
+                    except ValueError:
+                        self._undo.append(new_item)
+                    self.scene.removeItem(item)
 
     def _create_blur_item(self, rect: QRectF):
         """Создать и добавить размытый фрагмент исходного изображения."""
@@ -630,7 +711,9 @@ class EditorWindow(QMainWindow):
         tools_tb.setOrientation(Qt.Vertical)
         tools_tb.setMovable(False)
         tools_tb.setFloatable(False)
+        tools_tb.setStyleSheet("QToolBar::extension{width:0px;height:0px;}")
         self.addToolBar(Qt.LeftToolBarArea, tools_tb)
+        self._tools_tb = tools_tb
 
         # Современные векторные иконки - увеличенные для верхнего тулбара
         def make_icon_rect():
@@ -752,7 +835,6 @@ class EditorWindow(QMainWindow):
             btn.setAutoExclusive(True)
             btn.setFixedSize(52, 52)
             btn.clicked.connect(lambda checked, t=tool: self.canvas.set_tool(t))
-            tools_tb.addWidget(btn)
             self._tool_buttons.append(btn)
             return btn
 
@@ -769,11 +851,23 @@ class EditorWindow(QMainWindow):
         self._tool_buttons[0].setChecked(True)
         self.canvas.set_tool("select")
 
+        self._scroll_up_btn = QToolButton()
+        self._scroll_up_btn.setArrowType(Qt.UpArrow)
+        self._scroll_up_btn.clicked.connect(lambda: self._scroll_tools(-1))
+        self._scroll_down_btn = QToolButton()
+        self._scroll_down_btn.setArrowType(Qt.DownArrow)
+        self._scroll_down_btn.clicked.connect(lambda: self._scroll_tools(1))
+        self._rebuild_tools_toolbar()
+
         # Верхняя панель действий
         tb = QToolBar("Actions")
         tb.setMovable(False)
         tb.setFloatable(False)
+        tb.setStyleSheet("QToolBar::extension{width:0px;height:0px;}")
         self.addToolBar(tb)
+        self._actions_tb = tb
+
+        self._action_buttons = []
 
         def add_action(toolbar, text, fn, checkable=False, sc=None, icon_text="", show_text=False):
             a = QAction(text, self)
@@ -791,15 +885,14 @@ class EditorWindow(QMainWindow):
                 btn.setText(icon_text)
                 btn.setToolTip(text)
             btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
-            toolbar.addWidget(btn)
+            self._action_buttons.append(btn)
             return a, btn
 
         self.color_btn = ColorButton(QColor(ModernColors.PRIMARY))
         self.color_btn.setToolTip("Цвет")
         self.color_btn.clicked.connect(self.choose_color)
-        tb.addWidget(self.color_btn)
-
-        tb.addSeparator()
+        self._action_buttons.append(self.color_btn)
+        self._action_buttons.append(None)  # separator
 
         # NEW: Live Text + копирование выделенного текста
         self.act_live, _ = add_action(tb, "Live", self.toggle_live_text, sc="Ctrl+L", icon_text="🔍", show_text=False)
@@ -817,6 +910,14 @@ class EditorWindow(QMainWindow):
 
         if hasattr(self, 'act_collage'):
             self._update_collage_enabled()
+
+        self._scroll_left_btn = QToolButton()
+        self._scroll_left_btn.setArrowType(Qt.LeftArrow)
+        self._scroll_left_btn.clicked.connect(lambda: self._scroll_actions(-1))
+        self._scroll_right_btn = QToolButton()
+        self._scroll_right_btn.setArrowType(Qt.RightArrow)
+        self._scroll_right_btn.clicked.connect(lambda: self._scroll_actions(1))
+        self._rebuild_actions_toolbar()
 
         # Современный стиль для тулбара инструментов
         tools_tb.setStyleSheet(f"""
@@ -856,6 +957,45 @@ class EditorWindow(QMainWindow):
                 transform: scale(0.95);
             }}
         """)
+
+    def _rebuild_tools_toolbar(self):
+        self._tools_tb.clear()
+        self._tools_tb.addWidget(self._scroll_up_btn)
+        for btn in self._tool_buttons:
+            self._tools_tb.addWidget(btn)
+        self._tools_tb.addWidget(self._scroll_down_btn)
+
+    def _scroll_tools(self, direction: int):
+        if not self._tool_buttons:
+            return
+        if direction > 0:
+            btn = self._tool_buttons.pop(0)
+            self._tool_buttons.append(btn)
+        else:
+            btn = self._tool_buttons.pop()
+            self._tool_buttons.insert(0, btn)
+        self._rebuild_tools_toolbar()
+
+    def _rebuild_actions_toolbar(self):
+        self._actions_tb.clear()
+        self._actions_tb.addWidget(self._scroll_left_btn)
+        for w in self._action_buttons:
+            if w is None:
+                self._actions_tb.addSeparator()
+            else:
+                self._actions_tb.addWidget(w)
+        self._actions_tb.addWidget(self._scroll_right_btn)
+
+    def _scroll_actions(self, direction: int):
+        if not self._action_buttons:
+            return
+        if direction > 0:
+            w = self._action_buttons.pop(0)
+            self._action_buttons.append(w)
+        else:
+            w = self._action_buttons.pop()
+            self._action_buttons.insert(0, w)
+        self._rebuild_actions_toolbar()
 
     # ---- действия ----
     def choose_color(self):
