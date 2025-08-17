@@ -2,9 +2,9 @@
 import math
 from typing import Optional, List
 from pathlib import Path
-from PIL import Image, ImageQt, ImageFilter
+from PIL import Image, ImageQt
 
-from PySide6.QtCore import Qt, QRectF, QPointF, QLineF, QTimer, QSize
+from PySide6.QtCore import Qt, QRectF, QPointF, QTimer, QSize
 from PySide6.QtGui import (
     QPainter, QPen, QColor, QImage, QKeySequence, QPixmap, QAction,
     QCursor, QTextCursor, QTextCharFormat, QIcon, QBrush, QLinearGradient
@@ -12,14 +12,20 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QMainWindow, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsItem,
     QFileDialog, QMessageBox, QToolBar, QLabel, QWidget, QHBoxLayout,
-    QToolButton, QApplication, QGraphicsItemGroup, QGraphicsTextItem,
+    QToolButton, QApplication, QGraphicsTextItem,
     QDialog, QGridLayout
 )
 
-from logic import pil_to_qpixmap, qimage_to_pil, HISTORY_DIR, save_history
+from logic import qimage_to_pil, HISTORY_DIR, save_history
 from editor.text_tools import TextManager, EditableTextItem
 from editor.ocr_tools import OCRManager
 from editor.live_ocr import LiveTextManager
+from editor.tools.selection_tool import SelectionTool
+from editor.tools.pencil_tool import PencilTool
+from editor.tools.shape_tools import RectangleTool, EllipseTool
+from editor.tools.blur_tool import BlurTool
+from editor.tools.eraser_tool import EraserTool
+from editor.tools.line_arrow_tool import LineTool, ArrowTool
 
 
 # =========================
@@ -93,14 +99,24 @@ class Canvas(QGraphicsView):
 
         # Инициализация инструментов
         self._tool = "select"
-        self._start = QPointF()
-        self._tmp: Optional[QGraphicsItem] = None
         self._pen = QPen(QColor(ModernColors.PRIMARY), 3)
         self._pen.setCapStyle(Qt.RoundCap)
         self._pen.setJoinStyle(Qt.RoundJoin)
         self._undo: List[QGraphicsItem] = []
-        self._last_point: Optional[QPointF] = None
         self._text_manager: Optional[TextManager] = None
+
+        # Tool handlers
+        self.tools = {
+            "select": SelectionTool(self),
+            "free": PencilTool(self),
+            "rect": RectangleTool(self),
+            "ellipse": EllipseTool(self),
+            "line": LineTool(self),
+            "arrow": ArrowTool(self),
+            "blur": BlurTool(self, ModernColors.PRIMARY),
+            "erase": EraserTool(self),
+        }
+        self.active_tool = self.tools["select"]
 
         # Курсоры
         self._create_custom_cursors()
@@ -181,6 +197,7 @@ class Canvas(QGraphicsView):
             self.viewport().setCursor(Qt.IBeamCursor)
         else:
             self.viewport().setCursor(Qt.ArrowCursor)
+        self.active_tool = self.tools.get(tool)
         self._apply_lock_state()
 
         # Авто-отключение Live Text при переходе к рисованию,
@@ -245,158 +262,37 @@ class Canvas(QGraphicsView):
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton and self._tool not in ("none", "select"):
             pos = self.mapToScene(event.position().toPoint())
-            self._start = pos
             if self._tool == "text":
                 if self._text_manager:
-                    item = self._text_manager.create_text_item(self._start)
+                    item = self._text_manager.create_text_item(pos)
                     if item:
                         self._undo.append(item)
                 event.accept()
                 return
-            elif self._tool == "free":
-                self._last_point = self._start
-                self._tmp = None
-            elif self._tool == "erase":
-                self._erase_at(pos)
-            else:
-                self._tmp = None
-            event.accept()
-            return
+            if self.active_tool:
+                self.active_tool.press(pos)
+                event.accept()
+                return
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
-        if (event.buttons() & Qt.LeftButton) and self._tool not in ("none", "select"):
+        if (event.buttons() & Qt.LeftButton) and self._tool not in ("none", "select", "text"):
             pos = self.mapToScene(event.position().toPoint())
-            if self._tool == "free":
-                if self._last_point is not None:
-                    line = self.scene.addLine(QLineF(self._last_point, pos), self._pen)
-                    line.setFlag(QGraphicsItem.ItemIsSelectable, True)
-                    line.setFlag(QGraphicsItem.ItemIsMovable, True)
-                    self._undo.append(line)
-                    self._last_point = pos
-            elif self._tool == "erase":
-                self._erase_at(pos)
-            elif self._tool == "blur":
-                if self._tmp is None:
-                    pen = QPen(Qt.DashLine)
-                    pen.setColor(QColor(ModernColors.PRIMARY))
-                    self._tmp = self.scene.addRect(QRectF(self._start, pos).normalized(), pen)
-                else:
-                    self._tmp.setRect(QRectF(self._start, pos).normalized())
-            elif self._tool != "text":
-                if self._tmp is None:
-                    if self._tool == "rect":
-                        self._tmp = self._create_rect_item(self._start, pos, self._pen)
-                    elif self._tool == "ellipse":
-                        self._tmp = self._create_ellipse_item(self._start, pos, self._pen)
-                    elif self._tool == "line":
-                        self._tmp = self.scene.addLine(QLineF(self._start, pos), self._pen)
-                        self._tmp.setFlag(QGraphicsItem.ItemIsMovable, True)
-                        self._tmp.setFlag(QGraphicsItem.ItemIsSelectable, True)
-                    elif self._tool == "arrow":
-                        self._tmp = self._create_arrow_group(self._start, pos, self._pen)
-                        self._tmp.setFlag(QGraphicsItem.ItemIsSelectable, True)
-                    if self._tmp:
-                        self._undo.append(self._tmp)
-                else:
-                    if self._tool in ("rect", "ellipse"):
-                        r = QRectF(self._start, pos).normalized()
-                        self._tmp.setRect(r)
-                    elif self._tool == "line":
-                        self._tmp.setLine(QLineF(self._start, pos))
-                    elif self._tool == "arrow":
-                        self.scene.removeItem(self._tmp)
-                        self._undo.pop()
-                        self._tmp = self._create_arrow_group(self._start, pos, self._pen)
-                        self._tmp.setFlag(QGraphicsItem.ItemIsSelectable, True)
-                        self._undo.append(self._tmp)
+            if self.active_tool:
+                self.active_tool.move(pos)
             event.accept()
             return
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
-        if event.button() == Qt.LeftButton and self._tool not in ("none", "select"):
-            if self._tool == "blur" and self._tmp is not None:
-                rect = self._tmp.rect()
-                self.scene.removeItem(self._tmp)
-                self._tmp = None
-                if rect.width() > 1 and rect.height() > 1:
-                    item = self._create_blur_item(rect)
-                    if item:
-                        self._undo.append(item)
-                self._last_point = None
-                event.accept()
-                return
-            self._tmp = None
-            self._last_point = None
+        if event.button() == Qt.LeftButton and self._tool not in ("none", "select", "text"):
+            pos = self.mapToScene(event.position().toPoint())
+            if self.active_tool:
+                self.active_tool.release(pos)
             event.accept()
             return
         super().mouseReleaseEvent(event)
 
-    # ---- примитивы ----
-    def _create_rect_item(self, start: QPointF, end: QPointF, pen: QPen):
-        item = self.scene.addRect(QRectF(start, end).normalized(), pen)
-        item.setFlag(QGraphicsItem.ItemIsSelectable, True)
-        item.setFlag(QGraphicsItem.ItemIsMovable, True)
-        return item
-
-    def _create_ellipse_item(self, start: QPointF, end: QPointF, pen: QPen):
-        item = self.scene.addEllipse(QRectF(start, end).normalized(), pen)
-        item.setFlag(QGraphicsItem.ItemIsSelectable, True)
-        item.setFlag(QGraphicsItem.ItemIsMovable, True)
-        return item
-
-    def _create_arrow_group(self, start: QPointF, end: QPointF, pen: QPen):
-        group = QGraphicsItemGroup()
-        line = self.scene.addLine(QLineF(start, end), pen)
-        group.addToGroup(line)
-
-        # Наконечник
-        v = end - start
-        length = (v.x() ** 2 + v.y() ** 2) ** 0.5
-        if length >= 1:
-            ux, uy = v.x() / length, v.y() / length
-            head = 12
-            left = QPointF(end.x() - ux * head - uy * head * 0.5, end.y() - uy * head + ux * head * 0.5)
-            right = QPointF(end.x() - ux * head + uy * head * 0.5, end.y() - uy * head - ux * head * 0.5)
-            left_line = self.scene.addLine(QLineF(end, left), pen)
-            right_line = self.scene.addLine(QLineF(end, right), pen)
-            group.addToGroup(left_line)
-            group.addToGroup(right_line)
-
-        group.setFlag(QGraphicsItem.ItemIsMovable, True)
-        self.scene.addItem(group)
-        return group
-
-    def _erase_at(self, pos: QPointF):
-        """Удалить верхний элемент сцены в точке pos, кроме базового изображения."""
-        for item in self.scene.items(pos):
-            if item is self.pixmap_item:
-                continue
-            self.scene.removeItem(item)
-            try:
-                self._undo.remove(item)
-            except ValueError:
-                pass
-            break
-
-    def _create_blur_item(self, rect: QRectF):
-        """Создать и добавить размытый фрагмент исходного изображения."""
-        r = rect.toRect()
-        if r.isNull():
-            return None
-        base = self.pixmap_item.pixmap().copy(r)
-        qimg = base.toImage()
-        pil_img = qimage_to_pil(qimg)
-        pil_blur = pil_img.filter(ImageFilter.GaussianBlur(12))
-        pix = pil_to_qpixmap(pil_blur)
-        item = QGraphicsPixmapItem(pix)
-        item.setPos(rect.left(), rect.top())
-        item.setZValue(1)
-        item.setFlag(QGraphicsItem.ItemIsSelectable, True)
-        item.setFlag(QGraphicsItem.ItemIsMovable, True)
-        self.scene.addItem(item)
-        return item
 
 
 # =========================
