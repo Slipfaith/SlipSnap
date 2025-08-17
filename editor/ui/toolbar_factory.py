@@ -255,28 +255,34 @@ def create_tools_toolbar(window, canvas):
 
     tool_buttons = []
 
-    def add_tool(tool, icon, tooltip):
+    def add_tool(tool, icon, tooltip, shortcut=None):
         btn = QToolButton()
         btn.setIcon(icon)
         btn.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
-        btn.setToolTip(tooltip)
+        btn.setToolTip(tooltip + (f" ({shortcut})" if shortcut else ""))
         btn.setCheckable(True)
         btn.setAutoExclusive(True)
         btn.setFixedSize(52, 52)
         btn.clicked.connect(lambda checked, t=tool: canvas.set_tool(t))
         tools_tb.addWidget(btn)
         tool_buttons.append(btn)
+        if shortcut:
+            act = QAction(window)
+            act.setShortcut(QKeySequence(shortcut))
+            act.setShortcutContext(Qt.WindowShortcut)
+            act.triggered.connect(btn.click)
+            window.addAction(act)
         return btn
 
-    add_tool("select", make_icon_select(), "Выделение")
-    add_tool("rect", make_icon_rect(), "Прямоугольник")
-    add_tool("ellipse", make_icon_ellipse(), "Эллипс")
-    add_tool("line", make_icon_line(), "Линия")
-    add_tool("arrow", make_icon_arrow(), "Стрелка")
+    add_tool("select", make_icon_select(), "Выделение", "V")
+    add_tool("rect", make_icon_rect(), "Прямоугольник", "R")
+    add_tool("ellipse", make_icon_ellipse(), "Эллипс", "O")
+    add_tool("line", make_icon_line(), "Линия", "L")
+    add_tool("arrow", make_icon_arrow(), "Стрелка", "A")
     add_tool("free", make_icon_pencil(), "Карандаш")
-    add_tool("blur", make_icon_blur(), "Блюр")
-    add_tool("erase", make_icon_eraser(), "Ластик")
-    add_tool("text", make_icon_text(), "Текст")
+    add_tool("blur", make_icon_blur(), "Блюр", "B")
+    add_tool("erase", make_icon_eraser(), "Ластик", "E")
+    add_tool("text", make_icon_text(), "Текст", "T")
 
     tool_buttons[0].setChecked(True)
     canvas.set_tool("select")
