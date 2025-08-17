@@ -33,10 +33,5 @@ class EditorLogic:
     def toggle_live_text(self):
         return self.live_manager.toggle()
 
-    def copy_live_text(self, parent):
-        if self.live_manager.active and self.live_manager.copy_selection_to_clipboard():
-            return True
-        return False
-
     def collage_available(self):
         return any(HISTORY_DIR.glob("*.png")) or any(HISTORY_DIR.glob("*.jpg")) or any(HISTORY_DIR.glob("*.jpeg"))
