@@ -2,6 +2,7 @@ from PySide6.QtCore import QPointF, QLineF
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsItemGroup
 
 from .base_tool import BaseTool
+from editor.undo_commands import AddCommand
 
 
 class LineTool(BaseTool):
@@ -21,7 +22,7 @@ class LineTool(BaseTool):
             self._tmp = self.canvas.scene.addLine(QLineF(self._start, pos), self.canvas._pen)
             self._tmp.setFlag(QGraphicsItem.ItemIsMovable, True)
             self._tmp.setFlag(QGraphicsItem.ItemIsSelectable, True)
-            self.canvas._undo.append(self._tmp)
+            self.canvas.undo_stack.push(AddCommand(self.canvas.scene, self._tmp))
         else:
             self._tmp.setLine(QLineF(self._start, pos))
 
@@ -45,16 +46,15 @@ class ArrowTool(BaseTool):
         if self._tmp is None:
             self._tmp = self._create_arrow_group(self._start, pos)
             self._tmp.setFlag(QGraphicsItem.ItemIsSelectable, True)
-            self.canvas._undo.append(self._tmp)
         else:
             self.canvas.scene.removeItem(self._tmp)
-            self.canvas._undo.pop()
             self._tmp = self._create_arrow_group(self._start, pos)
             self._tmp.setFlag(QGraphicsItem.ItemIsSelectable, True)
-            self.canvas._undo.append(self._tmp)
 
     def release(self, pos: QPointF):  # noqa: D401
-        self._tmp = None
+        if self._tmp is not None:
+            self.canvas.undo_stack.push(AddCommand(self.canvas.scene, self._tmp))
+            self._tmp = None
 
     def _create_arrow_group(self, start: QPointF, end: QPointF):
         group = QGraphicsItemGroup()
