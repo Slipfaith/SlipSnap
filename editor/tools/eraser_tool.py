@@ -1,25 +1,129 @@
-from PySide6.QtCore import QPointF
+from PySide6.QtCore import QPointF, Qt, QRectF
+from PySide6.QtGui import QPen, QBrush, QColor, QCursor, QPixmap, QPainter
+from PySide6.QtWidgets import QGraphicsEllipseItem
 
 from .base_tool import BaseTool
 from editor.undo_commands import RemoveCommand
 
 
 class EraserTool(BaseTool):
-    """Removes top items at the cursor position."""
+
+    def __init__(self, canvas):
+        super().__init__(canvas)
+        self.eraser_size = 20
+        self.min_size = 5
+        self.max_size = 100
+        self.size_step = 5
+        self._create_cursor()
 
     def press(self, pos: QPointF):
-        self._erase(pos)
+        self._erase_at_position(pos)
 
     def move(self, pos: QPointF):
-        self._erase(pos)
+        self._erase_at_position(pos)
 
-    def release(self, pos: QPointF):  # noqa: D401
+    def release(self, pos: QPointF):
         pass
 
-    def _erase(self, pos: QPointF):
-        for item in self.canvas.scene.items(pos):
+    def wheel_event(self, delta: int, pos: QPointF):
+        if delta > 0:
+            self._increase_size()
+        else:
+            self._decrease_size()
+
+    def key_press(self, key):
+        pass
+
+    def _create_cursor(self):
+        # Увеличиваем размер для эффекта размытия
+        cursor_size = max(32, self.eraser_size + 16)
+        pixmap = QPixmap(cursor_size, cursor_size)
+        pixmap.fill(Qt.GlobalColor.transparent)
+
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        center = cursor_size // 2
+        radius = self.eraser_size // 2
+
+        # Создаем эффект размытия с несколькими кругами разной прозрачности
+        blur_steps = 4
+        for i in range(blur_steps, 0, -1):
+            alpha = int(80 / i)  # Уменьшающаяся прозрачность
+            blur_radius = radius + (i * 2)  # Увеличивающийся радиус
+
+            # Красноватый цвет для ластика
+            color = QColor(255, 80, 80, alpha)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(color))
+
+            painter.drawEllipse(
+                center - blur_radius,
+                center - blur_radius,
+                blur_radius * 2,
+                blur_radius * 2
+            )
+
+        # Основной круг
+        main_color = QColor(255, 100, 100, 120)
+        painter.setBrush(QBrush(main_color))
+        painter.drawEllipse(center - radius, center - radius, radius * 2, radius * 2)
+
+        # Центральная точка для точности
+        painter.setPen(QPen(QColor(255, 50, 50, 180), 2))
+        painter.drawPoint(center, center)
+
+        painter.end()
+
+        self.cursor = QCursor(pixmap, center, center)
+
+        # Устанавливаем курсор сразу, если инструмент активен
+        if hasattr(self.canvas, '_tool') and self.canvas._tool == "erase":
+            self.canvas.viewport().setCursor(self.cursor)
+
+    def _erase_at_position(self, pos: QPointF):
+        erase_rect = QRectF(
+            pos.x() - self.eraser_size / 2,
+            pos.y() - self.eraser_size / 2,
+            self.eraser_size,
+            self.eraser_size
+        )
+
+        items_to_remove = []
+        for item in self.canvas.scene.items(erase_rect):
             if item is self.canvas.pixmap_item:
                 continue
+            if self._item_intersects_circle(item, pos, self.eraser_size / 2):
+                items_to_remove.append(item)
+
+        for item in items_to_remove:
             self.canvas.scene.removeItem(item)
             self.canvas.undo_stack.push(RemoveCommand(self.canvas.scene, item))
-            break
+
+    def _item_intersects_circle(self, item, center: QPointF, radius: float) -> bool:
+        item_rect = item.boundingRect()
+        item_center = item.mapToScene(item_rect.center())
+
+        distance = ((item_center.x() - center.x()) ** 2 +
+                    (item_center.y() - center.y()) ** 2) ** 0.5
+
+        item_radius = max(item_rect.width(), item_rect.height()) / 2
+
+        return distance <= radius + item_radius
+
+    def _increase_size(self):
+        if self.eraser_size < self.max_size:
+            self.eraser_size = min(self.max_size, self.eraser_size + self.size_step)
+            self._create_cursor()
+
+    def _decrease_size(self):
+        if self.eraser_size > self.min_size:
+            self.eraser_size = max(self.min_size, self.eraser_size - self.size_step)
+            self._create_cursor()
+
+    def get_size(self) -> int:
+        return self.eraser_size
+
+    def set_size(self, size: int):
+        self.eraser_size = max(self.min_size, min(self.max_size, size))
+        self._create_cursor()
