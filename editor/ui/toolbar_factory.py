@@ -279,7 +279,7 @@ def create_tools_toolbar(window, canvas):
     add_tool("ellipse", make_icon_ellipse(), "Эллипс", "O")
     add_tool("line", make_icon_line(), "Линия", "L")
     add_tool("arrow", make_icon_arrow(), "Стрелка", "A")
-    add_tool("free", make_icon_pencil(), "Карандаш")
+    add_tool("free", make_icon_pencil(), "Карандаш", "P")
     add_tool("blur", make_icon_blur(), "Блюр", "B")
     add_tool("erase", make_icon_eraser(), "Ластик", "E")
     add_tool("text", make_icon_text(), "Текст", "T")
@@ -316,7 +316,7 @@ def create_actions_toolbar(window, canvas):
             btn.setText(f"{icon_text} {text}" if icon_text and text else (text or icon_text))
         else:
             btn.setText(icon_text)
-            btn.setToolTip(text)
+        btn.setToolTip(text + (f" ({sc})" if sc else ""))
         btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
         tb.addWidget(btn)
         return a, btn
