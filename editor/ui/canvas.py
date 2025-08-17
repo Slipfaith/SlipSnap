@@ -23,6 +23,8 @@ from editor.tools.line_arrow_tool import LineTool, ArrowTool
 from editor.undo_commands import AddCommand, MoveCommand, ScaleCommand
 
 MARKER_ALPHA = 120
+PENCIL_WIDTH = 3
+MARKER_WIDTH = 15
 
 
 class Canvas(QGraphicsView):
@@ -65,7 +67,7 @@ class Canvas(QGraphicsView):
         self._tool = "select"
         self._pen_mode = "pencil"
         self._base_pen_color = QColor(ModernColors.PRIMARY)
-        self._pen = QPen(self._base_pen_color, 3)
+        self._pen = QPen(self._base_pen_color, PENCIL_WIDTH)
         self._pen.setCapStyle(Qt.RoundCap)
         self._pen.setJoinStyle(Qt.RoundJoin)
         self._apply_pen_mode()
@@ -159,8 +161,10 @@ class Canvas(QGraphicsView):
         color = QColor(self._base_pen_color)
         if self._pen_mode == "marker":
             color.setAlpha(MARKER_ALPHA)
+            self._pen.setWidth(MARKER_WIDTH)
         else:
             color.setAlpha(255)
+            self._pen.setWidth(PENCIL_WIDTH)
         self._pen.setColor(color)
 
     def export_image(self) -> QImage:
