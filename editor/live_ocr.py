@@ -6,9 +6,9 @@ from typing import List, Dict, Optional
 from dataclasses import dataclass
 
 from PySide6.QtCore import Qt, QRectF, QPointF, QObject, QEvent
-from PySide6.QtGui import QPen, QColor
+from PySide6.QtGui import QPen, QColor, QPainterPath
 from PySide6.QtWidgets import (
-    QGraphicsRectItem, QGraphicsItemGroup, QGraphicsItem, QGraphicsView
+    QGraphicsItemGroup, QGraphicsItem, QGraphicsView, QGraphicsPathItem
 )
 
 import pytesseract
@@ -29,9 +29,12 @@ class WordBox:
     word: int
 
 
-class _WordItem(QGraphicsRectItem):
+class _WordItem(QGraphicsPathItem):
     def __init__(self, box: WordBox):
-        super().__init__(QRectF(box.left, box.top, box.width, box.height))
+        rect = QRectF(box.left, box.top, box.width, box.height)
+        path = QPainterPath()
+        path.addRoundedRect(rect, 4, 4)
+        super().__init__(path)
         self.box = box
         self.setPen(QPen(QColor(255, 200, 0, 220), 1))
         self.setBrush(QColor(255, 230, 120, 50))
@@ -141,10 +144,14 @@ class _ViewportFilter(QObject):
         if scene is None:
             return
         if self.rubber is None:
-            self.rubber = scene.addRect(QRectF(), QPen(QColor(70, 130, 240), 2))
+            path = QPainterPath()
+            path.addRoundedRect(QRectF(), 8, 8)
+            self.rubber = scene.addPath(path, QPen(QColor(70, 130, 240), 2))
             self.rubber.setZValue(1000)
         rect = QRectF(self.start_scene, self.end_scene).normalized()
-        self.rubber.setRect(rect)
+        path = QPainterPath()
+        path.addRoundedRect(rect, 8, 8)
+        self.rubber.setPath(path)
 
         layer = self.manager.layer
         if not layer:
