@@ -8,9 +8,9 @@ from typing import Tuple, Optional
 import mss
 from PIL import Image, ImageQt
 
-APP_NAME = "Screenshot"
-CONFIG_PATH = Path.home() / ".screenshot_config.json"
-HISTORY_DIR = Path(tempfile.gettempdir()) / "screenshot_history"
+APP_NAME = "SlipSnap"
+CONFIG_PATH = Path.home() / ".slipsnap_config.json"
+HISTORY_DIR = Path(tempfile.gettempdir()) / "slipsnap_history"
 HISTORY_DIR.mkdir(parents=True, exist_ok=True)
 
 DEFAULT_CONFIG = {
