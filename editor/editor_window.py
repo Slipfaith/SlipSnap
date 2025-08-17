@@ -9,7 +9,6 @@ from PySide6.QtWidgets import (
 
 from logic import qimage_to_pil, save_history
 from editor.text_tools import TextManager
-from editor.ocr_tools import OCRManager
 from editor.live_ocr import LiveTextManager
 from editor.editor_logic import EditorLogic
 
@@ -35,9 +34,8 @@ class EditorWindow(QMainWindow):
         self.canvas = Canvas(qimg)
         self.text_manager = TextManager(self.canvas)
         self.canvas.set_text_manager(self.text_manager)
-        self.ocr_manager = OCRManager(cfg)
-        self.live_manager = LiveTextManager(self.canvas, self.ocr_manager)
-        self.logic = EditorLogic(self.canvas, self.ocr_manager, self.live_manager)
+        self.live_manager = LiveTextManager(self.canvas)
+        self.logic = EditorLogic(self.canvas, self.live_manager)
 
         self.setCentralWidget(self.canvas)
         self.setStyleSheet(main_window_style())
@@ -46,7 +44,6 @@ class EditorWindow(QMainWindow):
         self.color_btn, actions = create_actions_toolbar(self, self.canvas)
         self.act_live = actions['live']
         self.act_live_copy = actions['live_copy']
-        self.act_ocr = actions['ocr']
         self.act_new = actions['new']
         self.act_collage = actions['collage']
         if hasattr(self, 'act_collage'):
@@ -54,7 +51,7 @@ class EditorWindow(QMainWindow):
 
         QTimer.singleShot(0, lambda q=qimg: size_to_image(self, q))
 
-        self.statusBar().showMessage("Готово | Ctrl+N: новый скриншот | Ctrl+K: коллаж | Ctrl+Alt+O: OCR | Ctrl+L: Live | Del: удалить | Ctrl +/-: масштаб", 5000)
+        self.statusBar().showMessage("Готово | Ctrl+N: новый скриншот | Ctrl+K: коллаж | Ctrl+L: Live | Ctrl+Shift+C: текст | Del: удалить | Ctrl +/-: масштаб", 5000)
 
     # ---- actions ----
     def choose_color(self):
@@ -78,10 +75,6 @@ class EditorWindow(QMainWindow):
         if name:
             self.statusBar().showMessage(f"✅ Сохранено: {name}", 3000)
 
-    def ocr_current(self):
-        if self.logic.ocr_current(self):
-            self.statusBar().showMessage("🔍 Текст распознан и скопирован", 3000)
-
     def toggle_live_text(self):
         ok = self.logic.toggle_live_text()
         if ok:
@@ -90,11 +83,8 @@ class EditorWindow(QMainWindow):
             self.statusBar().showMessage("🔍 Live Text — выключено", 2000)
 
     def copy_live_text(self):
-        res = self.logic.copy_live_text(self)
-        if res == "live":
+        if self.logic.copy_live_text(self):
             self.statusBar().showMessage("📋 Текст скопирован (Live)", 2500)
-        elif res == "ocr":
-            self.statusBar().showMessage("📋 Текст распознан и скопирован", 2500)
 
     def _update_collage_enabled(self):
         try:
