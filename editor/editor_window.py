@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
-from PIL import ImageQt
-
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
-    QMainWindow, QMessageBox, QApplication, QGraphicsItem, QGraphicsPixmapItem
+    QMainWindow,
+    QMessageBox,
+    QApplication,
+    QGraphicsItem,
+    QGraphicsPixmapItem,
 )
 
 from logic import qimage_to_pil, save_history
@@ -51,7 +53,7 @@ class EditorWindow(QMainWindow):
 
         QTimer.singleShot(0, lambda q=qimg: size_to_image(self, q))
 
-        self.statusBar().showMessage("Готово | Ctrl+N: новый скриншот | Ctrl+K: коллаж | Ctrl+L: Live | Ctrl+Shift+C: текст | Del: удалить | Ctrl +/-: масштаб", 5000)
+        self.statusBar().showMessage("Готово | Ctrl+N: новый скриншот | Ctrl+K: история | Ctrl+L: Live | Ctrl+Shift+C: текст | Del: удалить | Ctrl +/-: масштаб", 5000)
 
     # ---- actions ----
     def choose_color(self):
@@ -129,6 +131,23 @@ class EditorWindow(QMainWindow):
             self.show()
             QMessageBox.critical(self, "Ошибка", f"Не удалось захватить скриншот: {e}")
 
+    def _insert_screenshot_item(self, qimg: QImage):
+        pixmap = QPixmap.fromImage(qimg)
+        screenshot_item = QGraphicsPixmapItem(pixmap)
+        screenshot_item.setFlag(QGraphicsItem.ItemIsMovable, True)
+        screenshot_item.setFlag(QGraphicsItem.ItemIsSelectable, True)
+        screenshot_item.setFlag(QGraphicsItem.ItemIsFocusable, True)
+        screenshot_item.setZValue(10)
+        self.canvas.scene.addItem(screenshot_item)
+
+        view_center = self.canvas.mapToScene(self.canvas.viewport().rect().center())
+        r = screenshot_item.boundingRect()
+        screenshot_item.setPos(view_center.x() - r.width() / 2, view_center.y() - r.height() / 2)
+        screenshot_item.setSelected(True)
+        self.canvas.setFocus(Qt.OtherFocusReason)
+        self._update_collage_enabled()
+        self.canvas._apply_lock_state()
+
     def _on_new_screenshot(self, qimg: QImage):
         try:
             self.overlay_manager.close_all()
@@ -145,30 +164,27 @@ class EditorWindow(QMainWindow):
         except Exception:
             pass
 
-        pixmap = QPixmap.fromImage(qimg)
-        screenshot_item = QGraphicsPixmapItem(pixmap)
-        screenshot_item.setFlag(QGraphicsItem.ItemIsMovable, True)
-        screenshot_item.setFlag(QGraphicsItem.ItemIsSelectable, True)
-        screenshot_item.setFlag(QGraphicsItem.ItemIsFocusable, True)
-        screenshot_item.setZValue(10)
-        self.canvas.scene.addItem(screenshot_item)
-
-        view_center = self.canvas.mapToScene(self.canvas.viewport().rect().center())
-        r = screenshot_item.boundingRect()
-        screenshot_item.setPos(view_center.x() - r.width() / 2, view_center.y() - r.height() / 2)
-        screenshot_item.setSelected(True)
-        self.canvas.setFocus(Qt.OtherFocusReason)
-        self._update_collage_enabled()
-        self.canvas._apply_lock_state()
-        self.statusBar().showMessage("📸 Новый скриншот добавлен (можно двигать и масштабировать)", 2500)
+        self._insert_screenshot_item(qimg)
+        self.statusBar().showMessage(
+            "📸 Новый скриншот добавлен (можно двигать и масштабировать)", 2500
+        )
 
     # ---- collage ----
     def open_collage(self):
-        from collage import CollageDialog, compose_collage
+        from collage import CollageDialog
+
         dlg = CollageDialog(self)
         if dlg.exec():
             paths = dlg.selected_images()
             if not paths:
                 return
-            img = compose_collage(paths, dlg.target_width)
-            EditorWindow(ImageQt.ImageQt(img), self.cfg).show()
+            added = 0
+            for p in paths:
+                qimg = QImage(str(p))
+                if not qimg.isNull():
+                    self._insert_screenshot_item(qimg)
+                    added += 1
+            if added:
+                self.statusBar().showMessage(
+                    f"🖼 Добавлено из истории: {added}", 2500
+                )
