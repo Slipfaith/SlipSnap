@@ -45,7 +45,6 @@ class EditorWindow(QMainWindow):
         self._tool_buttons = create_tools_toolbar(self, self.canvas)
         self.color_btn, actions = create_actions_toolbar(self, self.canvas)
         self.act_live = actions['live']
-        self.act_live_copy = actions['live_copy']
         self.act_new = actions['new']
         self.act_collage = actions['collage']
         if hasattr(self, 'act_collage'):
@@ -53,7 +52,7 @@ class EditorWindow(QMainWindow):
 
         QTimer.singleShot(0, lambda q=qimg: size_to_image(self, q))
 
-        self.statusBar().showMessage("Готово | Ctrl+N: новый скриншот | Ctrl+K: история | Ctrl+L: Live | Ctrl+Shift+C: текст | Del: удалить | Ctrl +/-: масштаб", 5000)
+        self.statusBar().showMessage("Готово | Ctrl+N: новый скриншот | Ctrl+K: история | Ctrl+L: Live | Del: удалить | Ctrl +/-: масштаб", 5000)
 
     # ---- actions ----
     def choose_color(self):
@@ -80,13 +79,9 @@ class EditorWindow(QMainWindow):
     def toggle_live_text(self):
         ok = self.logic.toggle_live_text()
         if ok:
-            self.statusBar().showMessage("🔍 Live Text — включено. Выдели мышью область и жми Ctrl+Shift+C", 3500)
+            self.statusBar().showMessage("🔍 Live Text — включено", 3500)
         else:
             self.statusBar().showMessage("🔍 Live Text — выключено", 2000)
-
-    def copy_live_text(self):
-        if self.logic.copy_live_text(self):
-            self.statusBar().showMessage("📋 Текст скопирован (Live)", 2500)
 
     def _update_collage_enabled(self):
         try:
