@@ -5,6 +5,7 @@ from PIL import ImageFilter
 
 from logic import pil_to_qpixmap, qimage_to_pil
 from .base_tool import BaseTool
+from editor.undo_commands import AddCommand
 
 
 class BlurTool(BaseTool):
@@ -36,7 +37,7 @@ class BlurTool(BaseTool):
             if rect.width() > 1 and rect.height() > 1:
                 item = self._create_blur_item(rect)
                 if item:
-                    self.canvas._undo.append(item)
+                    self.canvas.undo_stack.push(AddCommand(self.canvas.scene, item))
 
     def _create_blur_item(self, rect: QRectF):
         r = rect.toRect()
