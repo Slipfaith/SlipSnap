@@ -93,12 +93,26 @@ class EraserTool(BaseTool):
         for item in self.canvas.scene.items(erase_rect):
             if item is self.canvas.pixmap_item:
                 continue
+            if item.data(0) == "blur":
+                self._erase_blur_item(item, pos)
+                continue
             if self._item_intersects_circle(item, pos, self.eraser_size / 2):
                 items_to_remove.append(item)
 
         for item in items_to_remove:
             self.canvas.scene.removeItem(item)
             self.canvas.undo_stack.push(RemoveCommand(self.canvas.scene, item))
+
+    def _erase_blur_item(self, item, pos: QPointF):
+        pix = item.pixmap()
+        painter = QPainter(pix)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setCompositionMode(QPainter.CompositionMode_Clear)
+        local = item.mapFromScene(pos)
+        r = self.eraser_size / 2
+        painter.drawEllipse(local, r, r)
+        painter.end()
+        item.setPixmap(pix)
 
     def _item_intersects_circle(self, item, center: QPointF, radius: float) -> bool:
         item_rect = item.boundingRect()
