@@ -125,14 +125,22 @@ class SelectionOverlayBase(QWidget):
             loc = QRect(gr.x() - self.geometry().x(), gr.y() - self.geometry().y(), gr.width(), gr.height())
 
             if self.shape == "rect":
+                path = QPainterPath()
+                path.addRoundedRect(QRectF(loc), 12, 12)
+                p.save()
+                p.setClipPath(path)
                 p.drawPixmap(loc, self._bg_original_scaled, loc)
+                p.restore()
+                p.setBrush(Qt.NoBrush)
                 # Более стильная рамка
                 p.setPen(QPen(QColor(70, 130, 240), 3, Qt.SolidLine))
-                p.drawRect(loc)
+                p.drawPath(path)
                 # Внутренняя светлая рамка
                 p.setPen(QPen(QColor(255, 255, 255, 180), 1, Qt.SolidLine))
-                inner_rect = QRect(loc.x() + 1, loc.y() + 1, loc.width() - 2, loc.height() - 2)
-                p.drawRect(inner_rect)
+                inner_rect = QRectF(loc.x() + 1, loc.y() + 1, loc.width() - 2, loc.height() - 2)
+                inner_path = QPainterPath()
+                inner_path.addRoundedRect(inner_rect, 11, 11)
+                p.drawPath(inner_path)
             else:
                 path = QPainterPath()
                 path.addEllipse(QRectF(loc))

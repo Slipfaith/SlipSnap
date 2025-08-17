@@ -1,4 +1,5 @@
 from PySide6.QtCore import QPointF, QRectF
+from PySide6.QtGui import QPainterPath
 from PySide6.QtWidgets import QGraphicsItem
 
 from .base_tool import BaseTool
@@ -22,13 +23,16 @@ class RectangleTool(_BaseShapeTool):
     """Draws rectangles."""
 
     def move(self, pos: QPointF):
+        rect = QRectF(self._start, pos).normalized()
+        path = QPainterPath()
+        path.addRoundedRect(rect, 12, 12)
         if self._tmp is None:
-            self._tmp = self.canvas.scene.addRect(QRectF(self._start, pos).normalized(), self.canvas._pen)
+            self._tmp = self.canvas.scene.addPath(path, self.canvas._pen)
             self._tmp.setFlag(QGraphicsItem.ItemIsSelectable, True)
             self._tmp.setFlag(QGraphicsItem.ItemIsMovable, True)
             self.canvas._undo.append(self._tmp)
         else:
-            self._tmp.setRect(QRectF(self._start, pos).normalized())
+            self._tmp.setPath(path)
 
 
 class EllipseTool(_BaseShapeTool):
