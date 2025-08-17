@@ -1,5 +1,6 @@
-from PySide6.QtCore import QPointF, QLineF
-from PySide6.QtWidgets import QGraphicsItem
+from PySide6.QtCore import QPointF
+from PySide6.QtGui import QPainterPath
+from PySide6.QtWidgets import QGraphicsItem, QGraphicsPathItem
 
 from .base_tool import BaseTool
 from editor.undo_commands import AddCommand
@@ -10,28 +11,28 @@ class PencilTool(BaseTool):
 
     def __init__(self, canvas):
         super().__init__(canvas)
-        self._last_point = None
-        self._drawing = False
+        self._path = None
+        self._path_item = None
 
     def press(self, pos: QPointF):
-        self._last_point = pos
-        self._drawing = False
+        self._path = QPainterPath(pos)
+        self._path_item = QGraphicsPathItem(self._path)
+        self._path_item.setPen(self.canvas._pen)
+        self._path_item.setFlag(QGraphicsItem.ItemIsSelectable, True)
+        self._path_item.setFlag(QGraphicsItem.ItemIsMovable, True)
+        self.canvas.scene.addItem(self._path_item)
 
     def move(self, pos: QPointF):
-        if self._last_point is not None:
-            if not self._drawing:
-                # Start a macro so the whole stroke becomes a single undo step
-                self.canvas.undo_stack.beginMacro("Карандаш")
-                self._drawing = True
-            line = self.canvas.scene.addLine(QLineF(self._last_point, pos), self.canvas._pen)
-            line.setFlag(QGraphicsItem.ItemIsSelectable, True)
-            line.setFlag(QGraphicsItem.ItemIsMovable, True)
-            self.canvas.undo_stack.push(AddCommand(self.canvas.scene, line))
-            self._last_point = pos
+        if self._path is not None and self._path_item is not None:
+            self._path.lineTo(pos)
+            self._path_item.setPath(self._path)
 
     def release(self, pos: QPointF):  # noqa: D401 - docs inherited
-        self._last_point = None
-        if self._drawing:
-            # Finish the macro when the stroke ends
-            self.canvas.undo_stack.endMacro()
-            self._drawing = False
+        if self._path_item is not None:
+            # If the user just clicked without moving, create a dot
+            if self._path.elementCount() == 1:
+                self._path.lineTo(pos)
+                self._path_item.setPath(self._path)
+            self.canvas.undo_stack.push(AddCommand(self.canvas.scene, self._path_item))
+            self._path = None
+            self._path_item = None
