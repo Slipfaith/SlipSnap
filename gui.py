@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
 )
 
 from logic import load_config, save_config, ScreenGrabber, qimage_to_pil, save_history
-from editor.main_editor import EditorWindow
+from editor.editor_window import EditorWindow
 from icons import make_icon_capture, make_icon_shape, make_icon_close
 
 
