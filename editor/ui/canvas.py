@@ -22,6 +22,8 @@ from editor.tools.eraser_tool import EraserTool
 from editor.tools.line_arrow_tool import LineTool, ArrowTool
 from editor.undo_commands import AddCommand, MoveCommand, ScaleCommand
 
+MARKER_ALPHA = 120
+
 
 class Canvas(QGraphicsView):
     """Drawing canvas holding the image and drawn items."""
@@ -61,9 +63,12 @@ class Canvas(QGraphicsView):
         """)
 
         self._tool = "select"
-        self._pen = QPen(QColor(ModernColors.PRIMARY), 3)
+        self._pen_mode = "pencil"
+        self._base_pen_color = QColor(ModernColors.PRIMARY)
+        self._pen = QPen(self._base_pen_color, 3)
         self._pen.setCapStyle(Qt.RoundCap)
         self._pen.setJoinStyle(Qt.RoundJoin)
+        self._apply_pen_mode()
         self.undo_stack = QUndoStack(self)
         self._move_snapshot: Dict[QGraphicsItem, QPointF] = {}
         self._text_manager: Optional[TextManager] = None
@@ -139,6 +144,23 @@ class Canvas(QGraphicsView):
         self._pen.setWidth(w)
 
     def set_pen_color(self, color: QColor):
+        self._base_pen_color = QColor(color)
+        self._apply_pen_mode()
+
+    def set_pen_mode(self, mode: str):
+        self._pen_mode = mode
+        self._apply_pen_mode()
+
+    @property
+    def pen_mode(self) -> str:
+        return self._pen_mode
+
+    def _apply_pen_mode(self):
+        color = QColor(self._base_pen_color)
+        if self._pen_mode == "marker":
+            color.setAlpha(MARKER_ALPHA)
+        else:
+            color.setAlpha(255)
         self._pen.setColor(color)
 
     def export_image(self) -> QImage:

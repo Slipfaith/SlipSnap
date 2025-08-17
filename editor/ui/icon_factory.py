@@ -66,6 +66,19 @@ def make_icon_pencil() -> QIcon:
     return QIcon(pm)
 
 
+def make_icon_marker() -> QIcon:
+    pm = _base_pixmap()
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+    # draw a thicker translucent stroke to represent a marker
+    color = QColor(ModernColors.PRIMARY)
+    color.setAlpha(150)
+    p.setPen(QPen(color, 7, Qt.SolidLine, Qt.RoundCap))
+    p.drawLine(10, 30, 30, 10)
+    p.end()
+    return QIcon(pm)
+
+
 def make_icon_text() -> QIcon:
     pm = _base_pixmap()
     p = QPainter(pm)

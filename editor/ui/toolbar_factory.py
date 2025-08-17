@@ -1,8 +1,8 @@
 from typing import Dict
 
 from PySide6.QtCore import Qt, QSize
-from PySide6.QtGui import QAction, QKeySequence, QColor
-from PySide6.QtWidgets import QToolBar, QToolButton
+from PySide6.QtGui import QAction, QKeySequence, QColor, QActionGroup
+from PySide6.QtWidgets import QToolBar, QToolButton, QMenu
 
 from .styles import ModernColors, tools_toolbar_style
 from .color_widgets import ColorButton
@@ -13,6 +13,7 @@ from .icon_factory import (
     make_icon_line,
     make_icon_arrow,
     make_icon_pencil,
+    make_icon_marker,
     make_icon_text,
     make_icon_blur,
     make_icon_eraser,
@@ -279,7 +280,31 @@ def create_tools_toolbar(window, canvas):
     add_tool("ellipse", make_icon_ellipse(), "Эллипс", "O")
     add_tool("line", make_icon_line(), "Линия", "L")
     add_tool("arrow", make_icon_arrow(), "Стрелка", "A")
-    add_tool("free", make_icon_pencil(), "Карандаш", "P")
+    free_btn = add_tool("free", make_icon_pencil(), "Карандаш", "P")
+
+    menu = QMenu(free_btn)
+    grp = QActionGroup(menu)
+    act_pencil = menu.addAction("Карандаш")
+    act_marker = menu.addAction("Маркер")
+    for act in (act_pencil, act_marker):
+        act.setCheckable(True)
+        grp.addAction(act)
+
+    def _set_mode(mode: str):
+        canvas.set_pen_mode(mode)
+        free_btn.setIcon(make_icon_marker() if mode == "marker" else make_icon_pencil())
+        act_pencil.setChecked(mode == "pencil")
+        act_marker.setChecked(mode == "marker")
+
+    act_pencil.triggered.connect(lambda: _set_mode("pencil"))
+    act_marker.triggered.connect(lambda: _set_mode("marker"))
+
+    act_pencil.setChecked(canvas.pen_mode == "pencil")
+    act_marker.setChecked(canvas.pen_mode == "marker")
+    free_btn.setMenu(menu)
+    free_btn.setPopupMode(QToolButton.MenuButtonPopup)
+    free_btn.setIcon(make_icon_marker() if canvas.pen_mode == "marker" else make_icon_pencil())
+
     add_tool("blur", make_icon_blur(), "Блюр", "B")
     add_tool("erase", make_icon_eraser(), "Ластик", "E")
     add_tool("text", make_icon_text(), "Текст", "T")
