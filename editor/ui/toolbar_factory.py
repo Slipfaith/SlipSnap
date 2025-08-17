@@ -327,7 +327,7 @@ def create_actions_toolbar(window, canvas):
     actions['live_copy'], _ = add_action("Текст", window.copy_live_text, sc="Ctrl+Shift+C", icon_text="📄",
                                          show_text=False)
     actions['new'], _ = add_action("Новый снимок", window.add_screenshot, sc="Ctrl+N", icon_text="📸", show_text=False)
-    actions['collage'], _ = add_action("Коллаж", window.open_collage, sc="Ctrl+K", icon_text="🧩", show_text=False)
+    actions['collage'], _ = add_action("История", window.open_collage, sc="Ctrl+K", icon_text="🖼", show_text=False)
     add_action("Копировать", window.copy_to_clipboard, sc="Ctrl+C", icon_text="📋", show_text=False)
     add_action("Сохранить", window.save_image, sc="Ctrl+S", icon_text="💾", show_text=False)
     add_action("Отмена", lambda: canvas.undo(), sc="Ctrl+Z", icon_text="↶", show_text=False)
