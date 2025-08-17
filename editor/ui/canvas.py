@@ -1,9 +1,14 @@
-from typing import Optional, List
+from typing import Optional, Dict
 import math
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QPainter, QPen, QColor, QImage, QPixmap
-from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsItem
+from PySide6.QtCore import Qt, QPointF
+from PySide6.QtGui import QPainter, QPen, QColor, QImage, QPixmap, QUndoStack
+from PySide6.QtWidgets import (
+    QGraphicsView,
+    QGraphicsScene,
+    QGraphicsPixmapItem,
+    QGraphicsItem,
+)
 
 from .styles import ModernColors
 from .icon_factory import create_pencil_cursor, create_select_cursor
@@ -15,6 +20,7 @@ from editor.tools.shape_tools import RectangleTool, EllipseTool
 from editor.tools.blur_tool import BlurTool
 from editor.tools.eraser_tool import EraserTool
 from editor.tools.line_arrow_tool import LineTool, ArrowTool
+from editor.undo_commands import AddCommand, MoveCommand, ScaleCommand
 
 
 class Canvas(QGraphicsView):
@@ -57,7 +63,8 @@ class Canvas(QGraphicsView):
         self._pen = QPen(QColor(ModernColors.PRIMARY), 3)
         self._pen.setCapStyle(Qt.RoundCap)
         self._pen.setJoinStyle(Qt.RoundJoin)
-        self._undo: List[QGraphicsItem] = []
+        self.undo_stack = QUndoStack(self)
+        self._move_snapshot: Dict[QGraphicsItem, QPointF] = {}
         self._text_manager: Optional[TextManager] = None
 
         self.tools = {
@@ -150,35 +157,47 @@ class Canvas(QGraphicsView):
         return qimage_to_pil(img)
 
     def undo(self):
-        if self._undo:
-            item = self._undo.pop()
-            self.scene.removeItem(item)
+        self.undo_stack.undo()
+
+    def redo(self):
+        self.undo_stack.redo()
 
     def wheelEvent(self, event):
         if event.modifiers() & Qt.ControlModifier:
             selected = self.scene.selectedItems()
             if selected:
                 factor = 1.1 if event.angleDelta().y() > 0 else 1 / 1.1
+                before = {it: it.scale() for it in selected}
                 for it in selected:
                     it.setScale(it.scale() * factor)
+                after = {it: it.scale() for it in selected}
+                if any(before[it] != after[it] for it in selected):
+                    self.undo_stack.push(
+                        ScaleCommand({it: (before[it], after[it]) for it in selected})
+                    )
                 event.accept()
                 return
         super().wheelEvent(event)
 
     def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton and self._tool not in ("none", "select"):
-            pos = self.mapToScene(event.position().toPoint())
-            if self._tool == "text":
-                if self._text_manager:
-                    item = self._text_manager.create_text_item(pos)
-                    if item:
-                        self._undo.append(item)
-                event.accept()
-                return
-            if self.active_tool:
-                self.active_tool.press(pos)
-                event.accept()
-                return
+        if event.button() == Qt.LeftButton:
+            if self._tool == "select":
+                items = self.scene.selectedItems()
+                if items:
+                    self._move_snapshot = {it: it.pos() for it in items}
+            elif self._tool not in ("none", "select"):
+                pos = self.mapToScene(event.position().toPoint())
+                if self._tool == "text":
+                    if self._text_manager:
+                        item = self._text_manager.create_text_item(pos)
+                        if item:
+                            self.undo_stack.push(AddCommand(self.scene, item))
+                    event.accept()
+                    return
+                if self.active_tool:
+                    self.active_tool.press(pos)
+                    event.accept()
+                    return
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
@@ -191,10 +210,19 @@ class Canvas(QGraphicsView):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
-        if event.button() == Qt.LeftButton and self._tool not in ("none", "select", "text"):
-            pos = self.mapToScene(event.position().toPoint())
-            if self.active_tool:
-                self.active_tool.release(pos)
-            event.accept()
-            return
+        if event.button() == Qt.LeftButton:
+            if self._tool == "select" and self._move_snapshot:
+                moved = {}
+                for it, old in self._move_snapshot.items():
+                    if it.pos() != old:
+                        moved[it] = (old, it.pos())
+                if moved:
+                    self.undo_stack.push(MoveCommand(moved))
+                self._move_snapshot = {}
+            elif self._tool not in ("none", "select", "text"):
+                pos = self.mapToScene(event.position().toPoint())
+                if self.active_tool:
+                    self.active_tool.release(pos)
+                event.accept()
+                return
         super().mouseReleaseEvent(event)

@@ -328,7 +328,19 @@ def create_actions_toolbar(window, canvas):
     actions['collage'], _ = add_action("История", window.open_collage, sc="Ctrl+K", icon_text="🖼", show_text=False)
     add_action("Копировать", window.copy_to_clipboard, sc="Ctrl+C", icon_text="📋", show_text=False)
     add_action("Сохранить", window.save_image, sc="Ctrl+S", icon_text="💾", show_text=False)
-    add_action("Отмена", lambda: canvas.undo(), sc="Ctrl+Z", icon_text="↶", show_text=False)
+
+    undo_act = canvas.undo_stack.createUndoAction(window, "Отмена")
+    undo_act.setShortcut(QKeySequence("Ctrl+Z"))
+    redo_act = canvas.undo_stack.createRedoAction(window, "Повтор")
+    redo_act.setShortcut(QKeySequence("Ctrl+Y"))
+    window.addAction(undo_act)
+    window.addAction(redo_act)
+    for act, text in ((undo_act, "↶"), (redo_act, "↷")):
+        btn = QToolButton()
+        btn.setDefaultAction(act)
+        btn.setText(text)
+        btn.setToolButtonStyle(QToolButton.TextOnly)
+        tb.addWidget(btn)
 
     # Применяем улучшенные стили
     tb.setStyleSheet(enhanced_actions_toolbar_style())

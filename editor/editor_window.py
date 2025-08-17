@@ -14,6 +14,8 @@ from editor.text_tools import TextManager
 from editor.live_ocr import LiveTextManager
 from editor.editor_logic import EditorLogic
 
+from editor.undo_commands import AddCommand, RemoveCommand, ScaleCommand
+
 from .ui.canvas import Canvas
 from .ui.styles import main_window_style
 from .ui.color_widgets import HexColorDialog
@@ -97,19 +99,24 @@ class EditorWindow(QMainWindow):
             for item in selected_items:
                 if item != self.canvas.pixmap_item:
                     self.canvas.scene.removeItem(item)
-                    if item in self.canvas._undo:
-                        self.canvas._undo.remove(item)
+                    self.canvas.undo_stack.push(RemoveCommand(self.canvas.scene, item))
             if selected_items:
                 self.statusBar().showMessage("🗑️ Удалены выбранные элементы", 2000)
         elif event.modifiers() & Qt.ControlModifier:
             selected_items = [it for it in self.canvas.scene.selectedItems()]
             if selected_items:
+                before = {it: it.scale() for it in selected_items}
                 if event.key() in (Qt.Key_Plus, Qt.Key_Equal):
                     for it in selected_items:
                         it.setScale(it.scale() * 1.1)
                 elif event.key() == Qt.Key_Minus:
                     for it in selected_items:
                         it.setScale(it.scale() * 0.9)
+                after = {it: it.scale() for it in selected_items}
+                if any(before[it] != after[it] for it in selected_items):
+                    self.canvas.undo_stack.push(
+                        ScaleCommand({it: (before[it], after[it]) for it in selected_items})
+                    )
         super().keyPressEvent(event)
 
     # ---- screenshots ----
@@ -146,6 +153,7 @@ class EditorWindow(QMainWindow):
         screenshot_item.setFlag(QGraphicsItem.ItemIsFocusable, True)
         screenshot_item.setZValue(10)
         self.canvas.scene.addItem(screenshot_item)
+        self.canvas.undo_stack.push(AddCommand(self.canvas.scene, screenshot_item))
 
         view_center = self.canvas.mapToScene(self.canvas.viewport().rect().center())
         r = screenshot_item.boundingRect()
@@ -195,3 +203,15 @@ class EditorWindow(QMainWindow):
                 self.statusBar().showMessage(
                     f"🖼 Добавлено из истории: {added}", 2500
                 )
+
+    def closeEvent(self, event):
+        try:
+            if getattr(self, "live_manager", None):
+                self.live_manager.disable()
+                try:
+                    self.canvas.viewport().removeEventFilter(self.live_manager._filter)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        super().closeEvent(event)
