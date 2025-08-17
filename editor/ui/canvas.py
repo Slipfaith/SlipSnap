@@ -127,7 +127,7 @@ class Canvas(QGraphicsView):
     def set_pen_color(self, color: QColor):
         self._pen.setColor(color)
 
-    def export_image(self) -> Image.Image:
+    def export_image(self) -> QImage:
         rect = self.scene.itemsBoundingRect()
         dpr = getattr(self.window().windowHandle(), "devicePixelRatio", lambda: 1.0)()
         try:
