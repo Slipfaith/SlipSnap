@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtCore import Qt, QTimer, QRectF
+from PySide6.QtGui import QImage, QPixmap, QPainter, QPainterPath
 from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
@@ -126,8 +126,20 @@ class EditorWindow(QMainWindow):
             self.show()
             QMessageBox.critical(self, "Ошибка", f"Не удалось захватить скриншот: {e}")
 
+    def _rounded_pixmap(self, qimg: QImage, radius: int = 12) -> QPixmap:
+        pixmap = QPixmap(qimg.size())
+        pixmap.fill(Qt.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(0, 0, qimg.width(), qimg.height()), radius, radius)
+        painter.setClipPath(path)
+        painter.drawPixmap(0, 0, QPixmap.fromImage(qimg))
+        painter.end()
+        return pixmap
+
     def _insert_screenshot_item(self, qimg: QImage):
-        pixmap = QPixmap.fromImage(qimg)
+        pixmap = self._rounded_pixmap(qimg)
         screenshot_item = QGraphicsPixmapItem(pixmap)
         screenshot_item.setFlag(QGraphicsItem.ItemIsMovable, True)
         screenshot_item.setFlag(QGraphicsItem.ItemIsSelectable, True)
