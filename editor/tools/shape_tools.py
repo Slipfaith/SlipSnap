@@ -3,6 +3,7 @@ from PySide6.QtGui import QPainterPath
 from PySide6.QtWidgets import QGraphicsItem
 
 from .base_tool import BaseTool
+from editor.undo_commands import AddCommand
 
 
 class _BaseShapeTool(BaseTool):
@@ -30,7 +31,7 @@ class RectangleTool(_BaseShapeTool):
             self._tmp = self.canvas.scene.addPath(path, self.canvas._pen)
             self._tmp.setFlag(QGraphicsItem.ItemIsSelectable, True)
             self._tmp.setFlag(QGraphicsItem.ItemIsMovable, True)
-            self.canvas._undo.append(self._tmp)
+            self.canvas.undo_stack.push(AddCommand(self.canvas.scene, self._tmp))
         else:
             self._tmp.setPath(path)
 
@@ -43,6 +44,6 @@ class EllipseTool(_BaseShapeTool):
             self._tmp = self.canvas.scene.addEllipse(QRectF(self._start, pos).normalized(), self.canvas._pen)
             self._tmp.setFlag(QGraphicsItem.ItemIsSelectable, True)
             self._tmp.setFlag(QGraphicsItem.ItemIsMovable, True)
-            self.canvas._undo.append(self._tmp)
+            self.canvas.undo_stack.push(AddCommand(self.canvas.scene, self._tmp))
         else:
             self._tmp.setRect(QRectF(self._start, pos).normalized())

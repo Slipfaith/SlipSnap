@@ -1,6 +1,7 @@
 from PySide6.QtCore import QPointF
 
 from .base_tool import BaseTool
+from editor.undo_commands import RemoveCommand
 
 
 class EraserTool(BaseTool):
@@ -20,8 +21,5 @@ class EraserTool(BaseTool):
             if item is self.canvas.pixmap_item:
                 continue
             self.canvas.scene.removeItem(item)
-            try:
-                self.canvas._undo.remove(item)
-            except ValueError:
-                pass
+            self.canvas.undo_stack.push(RemoveCommand(self.canvas.scene, item))
             break
