@@ -33,6 +33,7 @@ class Canvas(QGraphicsView):
         self.setScene(self.scene)
 
         self.pixmap_item = QGraphicsPixmapItem(QPixmap.fromImage(image))
+        self.pil_image = qimage_to_pil(image)  # store original PIL image
         self.pixmap_item.setFlag(QGraphicsItem.ItemIsMovable, True)
         self.pixmap_item.setFlag(QGraphicsItem.ItemIsSelectable, True)
         self.pixmap_item.setFlag(QGraphicsItem.ItemIsFocusable, True)
