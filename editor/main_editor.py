@@ -1,23 +1,21 @@
 # -*- coding: utf-8 -*-
 import math
 from typing import Optional, List
-from pathlib import Path
 from PIL import Image, ImageQt
 
-from PySide6.QtCore import Qt, QRectF, QPointF, QTimer, QSize
+from PySide6.QtCore import Qt, QPointF, QTimer, QSize
 from PySide6.QtGui import (
     QPainter, QPen, QColor, QImage, QKeySequence, QPixmap, QAction,
     QCursor, QTextCursor, QTextCharFormat, QIcon, QBrush, QLinearGradient
 )
 from PySide6.QtWidgets import (
     QMainWindow, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsItem,
-    QFileDialog, QMessageBox, QToolBar, QLabel, QWidget, QHBoxLayout,
+    QMessageBox, QToolBar, QLabel, QWidget, QHBoxLayout,
     QToolButton, QApplication, QGraphicsTextItem,
     QDialog, QGridLayout
 )
-
-from logic import qimage_to_pil, HISTORY_DIR, save_history
-from editor.text_tools import TextManager, EditableTextItem
+from logic import qimage_to_pil, save_history
+from editor.text_tools import TextManager
 from editor.ocr_tools import OCRManager
 from editor.live_ocr import LiveTextManager
 from editor.tools.selection_tool import SelectionTool
@@ -26,6 +24,7 @@ from editor.tools.shape_tools import RectangleTool, EllipseTool
 from editor.tools.blur_tool import BlurTool
 from editor.tools.eraser_tool import EraserTool
 from editor.tools.line_arrow_tool import LineTool, ArrowTool
+from editor.editor_logic import EditorLogic
 
 
 # =========================
@@ -410,6 +409,7 @@ class EditorWindow(QMainWindow):
         self.canvas.set_text_manager(self.text_manager)
         self.ocr_manager = OCRManager(cfg)
         self.live_manager = LiveTextManager(self.canvas, self.ocr_manager)
+        self.logic = EditorLogic(self.canvas, self.ocr_manager, self.live_manager)
 
         self.setCentralWidget(self.canvas)
         self._setup_styles()
@@ -768,50 +768,37 @@ class EditorWindow(QMainWindow):
                 self.text_manager.apply_color_to_selected(selected_items, focus_item)
 
     def copy_to_clipboard(self):
-        img = self.canvas.export_image()
-        qim = ImageQt.ImageQt(img)
-        QApplication.clipboard().setImage(qim)
+        self.logic.copy_to_clipboard()
         self.statusBar().showMessage("✅ Скопировано в буфер обмена", 2000)
 
     def save_image(self):
-        img = self.canvas.export_image()
-        path, _ = QFileDialog.getSaveFileName(self, "Сохранить изображение", "",
-                                              "PNG (*.png);;JPEG (*.jpg);;Все файлы (*.*)")
-        if path:
-            if path.lower().endswith((".jpg", ".jpeg")):
-                img = img.convert("RGB")
-            img.save(path)
-            self.statusBar().showMessage(f"✅ Сохранено: {Path(path).name}", 3000)
+        name = self.logic.save_image(self)
+        if name:
+            self.statusBar().showMessage(f"✅ Сохранено: {name}", 3000)
 
     def ocr_current(self):
-        img = self.canvas.export_image()
-        if self.ocr_manager.ocr_to_clipboard(img, self):
+        if self.logic.ocr_current(self):
             self.statusBar().showMessage("🔍 Текст распознан и скопирован", 3000)
 
     # NEW: Live Text
     def toggle_live_text(self):
-        ok = self.live_manager.toggle()
+        ok = self.logic.toggle_live_text()
         if ok:
             self.statusBar().showMessage("🔍 Live Text — включено. Выдели мышью область и жми Ctrl+Shift+C", 3500)
         else:
             self.statusBar().showMessage("🔍 Live Text — выключено", 2000)
 
     def copy_live_text(self):
-        """Скопировать выделенный Live-текст. Если нет — OCR всей сцены."""
-        if self.live_manager.active and self.live_manager.copy_selection_to_clipboard():
+        res = self.logic.copy_live_text(self)
+        if res == "live":
             self.statusBar().showMessage("📋 Текст скопирован (Live)", 2500)
-            return
-        # Фоллбек: обычный OCR
-        img = self.canvas.export_image()
-        if self.ocr_manager.ocr_to_clipboard(img, self):
+        elif res == "ocr":
             self.statusBar().showMessage("📋 Текст распознан и скопирован", 2500)
 
     def _update_collage_enabled(self):
         try:
-            has_history = any(HISTORY_DIR.glob("*.png")) or any(HISTORY_DIR.glob("*.jpg")) or any(
-                HISTORY_DIR.glob("*.jpeg"))
             if hasattr(self, "act_collage"):
-                self.act_collage.setEnabled(bool(has_history))
+                self.act_collage.setEnabled(self.logic.collage_available())
         except Exception:
             pass
 
