@@ -292,6 +292,11 @@ def create_tools_toolbar(window, canvas):
         grp.addAction(act)
 
     def _set_mode(mode: str):
+        # Choosing a drawing mode from the context menu should also
+        # activate the freehand tool so the user can start drawing
+        # immediately with the selected instrument.
+        canvas.set_tool("free")
+        free_btn.setChecked(True)
         canvas.set_pen_mode(mode)
         free_btn.setIcon(make_icon_marker() if mode == "marker" else make_icon_pencil())
         act_pencil.setChecked(mode == "pencil")
