@@ -17,7 +17,7 @@ class BlurTool(BaseTool):
         self._rect_item = None  # preview rectangle
         self._preview_item = None  # live blur preview
         self.preview_color = preview_color
-        self.blur_radius = 25  # default blur strength increased
+        self.blur_radius = 5  # default blur strength increased
         self.edge_width = 2  # minimal softness of edges
 
     def press(self, pos: QPointF):
