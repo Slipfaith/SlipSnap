@@ -18,7 +18,7 @@ class BlurTool(BaseTool):
         self._preview_item = None  # live blur preview
         self.preview_color = preview_color
         self.blur_radius = 25  # default blur strength increased
-        self.edge_width = 12  # softness of edges
+        self.edge_width = 2  # minimal softness of edges
 
     def press(self, pos: QPointF):
         self._start = pos
@@ -72,7 +72,7 @@ class BlurTool(BaseTool):
         if edge > 0:
             mask = Image.new("L", (w, h), 0)
             draw = ImageDraw.Draw(mask)
-            draw.rounded_rectangle((edge, edge, w - edge, h - edge), radius=8, fill=255)
+            draw.rounded_rectangle((edge, edge, w - edge, h - edge), radius=edge, fill=255)
             mask = mask.filter(ImageFilter.GaussianBlur(edge))
             pil_blur.putalpha(mask)
 

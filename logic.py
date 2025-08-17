@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Tuple, Optional
 
 import mss
-from PIL import Image, ImageQt
+from PIL import Image
 
 APP_NAME = "SlipSnap"
 CONFIG_PATH = Path.home() / ".slipsnap_config.json"
@@ -37,10 +37,14 @@ def save_config(cfg: dict) -> None:
     CONFIG_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 def pil_to_qpixmap(img: Image.Image):
-    from PySide6.QtGui import QPixmap
+    """Convert PIL image to QPixmap with RGBA support."""
+    from PySide6.QtGui import QImage, QPixmap
+
     if img.mode != "RGBA":
         img = img.convert("RGBA")
-    qimg = ImageQt.ImageQt(img)
+    w, h = img.size
+    data = img.tobytes("raw", "RGBA")
+    qimg = QImage(data, w, h, QImage.Format_RGBA8888)
     return QPixmap.fromImage(qimg)
 
 def qimage_to_pil(qimg) -> Image.Image:
