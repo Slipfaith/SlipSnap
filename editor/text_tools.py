@@ -3,7 +3,7 @@ from typing import Optional
 from PySide6.QtCore import QPointF, Qt, QRectF
 from PySide6.QtGui import QFont, QColor, QTextCursor, QTextCharFormat, QPen, QPainter
 from PySide6.QtWidgets import (QGraphicsItem, QGraphicsTextItem,
-                               QGraphicsRectItem, QGraphicsItemGroup)
+                               QGraphicsItemGroup)
 
 
 class EditableTextItem(QGraphicsTextItem):
@@ -155,7 +155,7 @@ class EditableTextItem(QGraphicsTextItem):
             pen = QPen(QColor(70, 130, 240), 1, Qt.DashLine)
             painter.setPen(pen)
             painter.setBrush(Qt.NoBrush)
-            painter.drawRect(rect)
+            painter.drawRoundedRect(rect, 8, 8)
 
             # Рисуем маленькие квадратики по углам для изменения размера
             handle_size = 6
@@ -176,7 +176,7 @@ class EditableTextItem(QGraphicsTextItem):
                     handle_size,
                     handle_size
                 )
-                painter.drawRect(handle_rect)
+                painter.drawRoundedRect(handle_rect, 2, 2)
 
             painter.restore()
 
