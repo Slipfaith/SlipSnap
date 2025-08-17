@@ -22,7 +22,7 @@ from editor.tools.eraser_tool import EraserTool
 from editor.tools.line_arrow_tool import LineTool, ArrowTool
 from editor.undo_commands import AddCommand, MoveCommand, ScaleCommand
 
-MARKER_ALPHA = 120
+MARKER_ALPHA = 80
 PENCIL_WIDTH = 3
 MARKER_WIDTH = 15
 
