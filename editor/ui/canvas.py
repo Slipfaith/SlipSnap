@@ -39,7 +39,6 @@ class Canvas(QGraphicsView):
         self.setTransformationAnchor(QGraphicsView.AnchorViewCenter)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
-        self.setAutoScroll(False)
 
         self.setStyleSheet(f"""
             QGraphicsView {{
