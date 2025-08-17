@@ -14,16 +14,21 @@ class EraserTool(BaseTool):
         self.min_size = 5
         self.max_size = 100
         self.size_step = 5
+        self._last_pos = None
+        self._last_item = None
         self._create_cursor()
 
     def press(self, pos: QPointF):
+        self._last_pos = pos
+        self._last_item = None
         self._erase_at_position(pos)
 
     def move(self, pos: QPointF):
         self._erase_at_position(pos)
 
     def release(self, pos: QPointF):
-        pass
+        self._last_pos = None
+        self._last_item = None
 
     def wheel_event(self, delta: int, pos: QPointF):
         if delta > 0:
@@ -90,11 +95,13 @@ class EraserTool(BaseTool):
         )
 
         items_to_remove = []
+        blur_found = False
         for item in self.canvas.scene.items(erase_rect):
             if item is self.canvas.pixmap_item:
                 continue
             if item.data(0) == "blur":
                 self._erase_blur_item(item, pos)
+                blur_found = True
                 continue
             if self._item_intersects_circle(item, pos, self.eraser_size / 2):
                 items_to_remove.append(item)
@@ -103,16 +110,31 @@ class EraserTool(BaseTool):
             self.canvas.scene.removeItem(item)
             self.canvas.undo_stack.push(RemoveCommand(self.canvas.scene, item))
 
+        if not blur_found:
+            self._last_item = None
+            self._last_pos = pos
+
     def _erase_blur_item(self, item, pos: QPointF):
         pix = item.pixmap()
         painter = QPainter(pix)
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setCompositionMode(QPainter.CompositionMode_Clear)
         local = item.mapFromScene(pos)
-        r = self.eraser_size / 2
-        painter.drawEllipse(local, r, r)
+        if self._last_pos is not None and self._last_item is item:
+            prev_local = item.mapFromScene(self._last_pos)
+            pen = QPen(Qt.GlobalColor.transparent, self.eraser_size,
+                       Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+            painter.setPen(pen)
+            painter.drawLine(prev_local, local)
+        else:
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(Qt.GlobalColor.transparent)
+            r = self.eraser_size / 2
+            painter.drawEllipse(local, r, r)
         painter.end()
         item.setPixmap(pix)
+        self._last_pos = pos
+        self._last_item = item
 
     def _item_intersects_circle(self, item, center: QPointF, radius: float) -> bool:
         item_rect = item.boundingRect()
