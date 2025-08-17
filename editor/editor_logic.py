@@ -6,9 +6,8 @@ from logic import HISTORY_DIR
 
 
 class EditorLogic:
-    def __init__(self, canvas, ocr_manager, live_manager):
+    def __init__(self, canvas, live_manager):
         self.canvas = canvas
-        self.ocr_manager = ocr_manager
         self.live_manager = live_manager
 
     def export_image(self) -> Image.Image:
@@ -31,20 +30,13 @@ class EditorLogic:
         img.save(path)
         return Path(path).name
 
-    def ocr_current(self, parent):
-        img = self.export_image()
-        return self.ocr_manager.ocr_to_clipboard(img, parent)
-
     def toggle_live_text(self):
         return self.live_manager.toggle()
 
     def copy_live_text(self, parent):
         if self.live_manager.active and self.live_manager.copy_selection_to_clipboard():
-            return "live"
-        img = self.export_image()
-        if self.ocr_manager.ocr_to_clipboard(img, parent):
-            return "ocr"
-        return None
+            return True
+        return False
 
     def collage_available(self):
         return any(HISTORY_DIR.glob("*.png")) or any(HISTORY_DIR.glob("*.jpg")) or any(HISTORY_DIR.glob("*.jpeg"))

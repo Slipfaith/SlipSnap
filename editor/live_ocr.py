@@ -11,9 +11,9 @@ from PySide6.QtWidgets import (
     QGraphicsRectItem, QGraphicsItemGroup, QGraphicsItem, QGraphicsView
 )
 
+import pytesseract
 from PIL import Image
 from logic import qimage_to_pil
-from .ocr_tools import OCRManager, OCRError
 
 
 @dataclass
@@ -162,9 +162,9 @@ class _ViewportFilter(QObject):
 class LiveTextManager:
     """Создаёт/удаляет LiveTextLayer для заданного Canvas."""
 
-    def __init__(self, canvas: QGraphicsView, ocr: OCRManager):
+    def __init__(self, canvas: QGraphicsView, lang: str = "eng+rus"):
         self.canvas = canvas
-        self.ocr = ocr
+        self.lang = lang
         self.layer: Optional[LiveTextLayer] = None
         self.pixmap_item: Optional[QGraphicsItem] = None
         self._filter = _ViewportFilter(canvas, self)
@@ -190,7 +190,9 @@ class LiveTextManager:
         pil_img: Image.Image = qimage_to_pil(qimg)
 
         # OCR → боксы слов
-        data = self.ocr.image_to_data(pil_img)
+        data = pytesseract.image_to_data(
+            pil_img, lang=self.lang, output_type=pytesseract.Output.DICT
+        )
         boxes = self._collect_boxes(data)
 
         # Слой поверх картинки
