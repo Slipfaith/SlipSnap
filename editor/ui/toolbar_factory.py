@@ -339,7 +339,7 @@ def create_actions_toolbar(window, canvas):
         btn = QToolButton()
         btn.setDefaultAction(act)
         btn.setText(text)
-        btn.setToolButtonStyle(QToolButton.TextOnly)
+        btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
         tb.addWidget(btn)
 
     # Применяем улучшенные стили
