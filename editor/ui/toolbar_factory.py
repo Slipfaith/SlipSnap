@@ -247,6 +247,7 @@ def create_tools_toolbar(window, canvas):
     tools_tb.setOrientation(Qt.Vertical)
     tools_tb.setMovable(False)
     tools_tb.setFloatable(False)
+    tools_tb.setContextMenuPolicy(Qt.PreventContextMenu)
 
     # Улучшенные настройки для отображения стрелок
     tools_tb.setToolButtonStyle(Qt.ToolButtonIconOnly)
@@ -301,8 +302,8 @@ def create_tools_toolbar(window, canvas):
 
     act_pencil.setChecked(canvas.pen_mode == "pencil")
     act_marker.setChecked(canvas.pen_mode == "marker")
-    free_btn.setMenu(menu)
-    free_btn.setPopupMode(QToolButton.MenuButtonPopup)
+    free_btn.setContextMenuPolicy(Qt.CustomContextMenu)
+    free_btn.customContextMenuRequested.connect(lambda pos: menu.exec(free_btn.mapToGlobal(pos)))
     free_btn.setIcon(make_icon_marker() if canvas.pen_mode == "marker" else make_icon_pencil())
 
     add_tool("blur", make_icon_blur(), "Блюр", "B")
@@ -321,6 +322,7 @@ def create_actions_toolbar(window, canvas):
     tb = QToolBar("Actions")
     tb.setMovable(False)
     tb.setFloatable(False)
+    tb.setContextMenuPolicy(Qt.PreventContextMenu)
 
     # Улучшенные настройки для отображения стрелок
     tb.setToolButtonStyle(Qt.ToolButtonTextOnly)
