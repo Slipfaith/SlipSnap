@@ -44,8 +44,8 @@ def enhanced_tools_toolbar_style() -> str:
 
     QToolBar QToolButton:checked {{
         background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-            stop:0 {ModernColors.PRIMARY},
-            stop:1 {ModernColors.PRIMARY_HOVER});
+            stop:0 {ModernColors.PRIMARY_LIGHT},
+            stop:1 {ModernColors.PRIMARY_LIGHT});
         border: 1px solid {ModernColors.PRIMARY_HOVER};
         box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
     }}
@@ -57,8 +57,8 @@ def enhanced_tools_toolbar_style() -> str:
 
     QToolBar QToolButton:checked:hover {{
         background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-            stop:0 {ModernColors.PRIMARY_HOVER},
-            stop:1 {ModernColors.PRIMARY});
+            stop:0 {ModernColors.PRIMARY_LIGHT},
+            stop:1 {ModernColors.PRIMARY_LIGHT});
     }}
 
     QToolBar QToolButton:pressed {{
@@ -162,13 +162,13 @@ def enhanced_actions_toolbar_style() -> str:
     }}
 
     QToolBar QToolButton:checked {{
-        background: {ModernColors.PRIMARY};
-        color: white;
+        background: {ModernColors.PRIMARY_LIGHT};
+        color: {ModernColors.TEXT_PRIMARY};
         border: 1px solid {ModernColors.PRIMARY_HOVER};
     }}
 
     QToolBar QToolButton:checked:hover {{
-        background: {ModernColors.PRIMARY_HOVER};
+        background: {ModernColors.PRIMARY_LIGHT};
     }}
 
     QLabel {{
@@ -256,6 +256,7 @@ def create_tools_toolbar(window, canvas):
     window.addToolBar(Qt.LeftToolBarArea, tools_tb)
 
     tool_buttons = []
+    current_shape = "rect"
 
     def add_tool(tool, icon, tooltip, shortcut=None):
         btn = QToolButton()
@@ -277,8 +278,53 @@ def create_tools_toolbar(window, canvas):
         return btn
 
     add_tool("select", make_icon_select(), "Выделение", "V")
-    add_tool("rect", make_icon_rect(), "Прямоугольник", "R")
-    add_tool("ellipse", make_icon_ellipse(), "Эллипс", "O")
+    shape_btn = QToolButton()
+    shape_btn.setIcon(make_icon_rect())
+    shape_btn.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
+    shape_btn.setToolTip("Фигуры (R/O)")
+    shape_btn.setCheckable(True)
+    shape_btn.setAutoExclusive(True)
+    shape_btn.setFixedSize(52, 52)
+    shape_btn.clicked.connect(lambda checked: canvas.set_tool(current_shape))
+    tools_tb.addWidget(shape_btn)
+    tool_buttons.append(shape_btn)
+
+    shape_menu = QMenu(shape_btn)
+    shape_grp = QActionGroup(shape_menu)
+    act_rect = shape_menu.addAction("Прямоугольник")
+    act_ellipse = shape_menu.addAction("Эллипс")
+    for act in (act_rect, act_ellipse):
+        act.setCheckable(True)
+        shape_grp.addAction(act)
+    act_rect.setChecked(True)
+
+    def _set_shape(shape: str):
+        nonlocal current_shape
+        current_shape = shape
+        canvas.set_tool(shape)
+        shape_btn.setChecked(True)
+        shape_btn.setIcon(make_icon_rect() if shape == "rect" else make_icon_ellipse())
+        act_rect.setChecked(shape == "rect")
+        act_ellipse.setChecked(shape == "ellipse")
+
+    act_rect.triggered.connect(lambda: _set_shape("rect"))
+    act_ellipse.triggered.connect(lambda: _set_shape("ellipse"))
+
+    shape_btn.setContextMenuPolicy(Qt.CustomContextMenu)
+    shape_btn.customContextMenuRequested.connect(lambda pos: shape_menu.exec(shape_btn.mapToGlobal(pos)))
+
+    act_r = QAction(window)
+    act_r.setShortcut(QKeySequence("R"))
+    act_r.setShortcutContext(Qt.WindowShortcut)
+    act_r.triggered.connect(lambda: _set_shape("rect"))
+    window.addAction(act_r)
+
+    act_o = QAction(window)
+    act_o.setShortcut(QKeySequence("O"))
+    act_o.setShortcutContext(Qt.WindowShortcut)
+    act_o.triggered.connect(lambda: _set_shape("ellipse"))
+    window.addAction(act_o)
+
     add_tool("line", make_icon_line(), "Линия", "L")
     add_tool("arrow", make_icon_arrow(), "Стрелка", "A")
     free_btn = add_tool("free", make_icon_pencil(), "Карандаш", "P")
