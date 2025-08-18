@@ -69,13 +69,13 @@ def main_window_style() -> str:
     }}
 
     QToolButton:checked {{
-        background: rgba(37, 99, 235, 0.2);
-        color: white;
-        border: 1px solid rgba(29, 78, 216, 0.4);
+        background: {ModernColors.PRIMARY_LIGHT};
+        color: {ModernColors.TEXT_PRIMARY};
+        border: 1px solid {ModernColors.PRIMARY_HOVER};
     }}
 
     QToolButton:checked:hover {{
-        background: rgba(29, 78, 216, 0.3);
+        background: {ModernColors.PRIMARY_LIGHT};
     }}
 
     QLabel {{
@@ -122,9 +122,9 @@ def tools_toolbar_style() -> str:
     }}
     QToolButton:checked {{
         background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-            stop:0 rgba(37, 99, 235, 0.2),
-            stop:1 rgba(29, 78, 216, 0.3));
-        border: 1px solid rgba(29, 78, 216, 0.4);
+            stop:0 {ModernColors.PRIMARY_LIGHT},
+            stop:1 {ModernColors.PRIMARY_LIGHT});
+        border: 1px solid {ModernColors.PRIMARY_HOVER};
         box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
     }}
     QToolButton:hover {{
@@ -133,8 +133,8 @@ def tools_toolbar_style() -> str:
     }}
     QToolButton:checked:hover {{
         background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-            stop:0 rgba(29, 78, 216, 0.3),
-            stop:1 rgba(37, 99, 235, 0.2));
+            stop:0 {ModernColors.PRIMARY_LIGHT},
+            stop:1 {ModernColors.PRIMARY_LIGHT});
     }}
     QToolButton:pressed {{
         transform: scale(0.95);
