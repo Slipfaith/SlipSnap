@@ -38,13 +38,19 @@ class BlurTool(BaseTool):
         else:
             self._rect_item.setRect(rect)
 
-        pix = self._generate_blur_pixmap(rect)
-        if self._preview_item is None:
-            self._preview_item = self.canvas.scene.addPixmap(pix)
-            self._preview_item.setZValue(1)
+        result = self._generate_blur_pixmap(rect)
+        if result is None:
+            if self._preview_item is not None:
+                self.canvas.scene.removeItem(self._preview_item)
+                self._preview_item = None
         else:
-            self._preview_item.setPixmap(pix)
-        self._preview_item.setPos(rect.left(), rect.top())
+            pix, pos = result
+            if self._preview_item is None:
+                self._preview_item = self.canvas.scene.addPixmap(pix)
+                self._preview_item.setZValue(1)
+            else:
+                self._preview_item.setPixmap(pix)
+            self._preview_item.setPos(pos)
 
     def release(self, pos: QPointF):
         if self._rect_item is not None:
@@ -60,10 +66,13 @@ class BlurTool(BaseTool):
                     self.canvas.undo_stack.push(AddCommand(self.canvas.scene, item))
 
     def _generate_blur_pixmap(self, rect: QRectF):
+        img_rect = self.canvas.pixmap_item.boundingRect()
+        img_rect = self.canvas.pixmap_item.mapRectToScene(img_rect)
+        rect = rect.intersected(img_rect)
+        if rect.isNull() or rect.isEmpty():
+            return None
+
         r = rect.toRect()
-        if r.isNull():
-            from PySide6.QtGui import QPixmap
-            return QPixmap()
         left, top, w, h = r.x(), r.y(), r.width(), r.height()
         img = QImage(w, h, QImage.Format_RGBA8888)
         img.fill(Qt.transparent)
@@ -86,15 +95,15 @@ class BlurTool(BaseTool):
             mask = mask.filter(ImageFilter.GaussianBlur(edge))
             pil_blur.putalpha(mask)
 
-        return pil_to_qpixmap(pil_blur)
+        return pil_to_qpixmap(pil_blur), rect.topLeft()
 
     def _create_blur_item(self, rect: QRectF):
-        r = rect.toRect()
-        if r.isNull():
+        result = self._generate_blur_pixmap(rect)
+        if result is None:
             return None
-        pix = self._generate_blur_pixmap(rect)
+        pix, pos = result
         item = QGraphicsPixmapItem(pix)
-        item.setPos(rect.left(), rect.top())
+        item.setPos(pos)
         item.setZValue(1)
         item.setFlag(QGraphicsItem.ItemIsSelectable, True)
         item.setFlag(QGraphicsItem.ItemIsMovable, True)
