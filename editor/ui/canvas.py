@@ -224,6 +224,12 @@ class Canvas(QGraphicsView):
         super().keyPressEvent(event)
 
     def mousePressEvent(self, event):
+        if event.button() == Qt.RightButton and self._tool == "erase":
+            if self.active_tool and hasattr(self.active_tool, "show_size_popup"):
+                global_pos = self.viewport().mapToGlobal(event.position().toPoint())
+                self.active_tool.show_size_popup(global_pos)
+            event.accept()
+            return
         if event.button() == Qt.LeftButton:
             if self._tool == "select":
                 items = self.scene.selectedItems()
