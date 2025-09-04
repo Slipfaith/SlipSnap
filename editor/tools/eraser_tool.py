@@ -1,9 +1,16 @@
-from PySide6.QtCore import QPointF, Qt, QRectF
+from PySide6.QtCore import QPointF, Qt, QRectF, QLineF
 from PySide6.QtGui import QPen, QBrush, QColor, QCursor, QPixmap, QPainter
-from PySide6.QtWidgets import QGraphicsEllipseItem
+from PySide6.QtWidgets import (
+    QGraphicsEllipseItem,
+    QWidget,
+    QSlider,
+    QVBoxLayout,
+    QLabel,
+)
 
 from .base_tool import BaseTool
 from editor.undo_commands import RemoveCommand
+from editor.ui.styles import ModernColors
 
 
 class EraserTool(BaseTool):
@@ -24,7 +31,12 @@ class EraserTool(BaseTool):
         self._erase_at_position(pos)
 
     def move(self, pos: QPointF):
-        self._erase_at_position(pos)
+        if self._last_pos is None:
+            self._erase_at_position(pos)
+            self._last_pos = pos
+        else:
+            self._erase_line(self._last_pos, pos)
+            self._last_pos = pos
 
     def release(self, pos: QPointF):
         self._last_pos = None
@@ -112,7 +124,19 @@ class EraserTool(BaseTool):
 
         if not blur_found:
             self._last_item = None
-            self._last_pos = pos
+
+    def _erase_line(self, start: QPointF, end: QPointF):
+        line = QLineF(start, end)
+        length = line.length()
+        if length == 0:
+            self._erase_at_position(end)
+            return
+        step = max(1.0, self.eraser_size / 2)
+        steps = max(1, int(length / step))
+        for i in range(1, steps + 1):
+            point = line.pointAt(i / steps)
+            self._erase_at_position(point)
+            self._last_pos = point
 
     def _erase_blur_item(self, item, pos: QPointF):
         pix = item.pixmap()
@@ -163,3 +187,53 @@ class EraserTool(BaseTool):
     def set_size(self, size: int):
         self.eraser_size = max(self.min_size, min(self.max_size, size))
         self._create_cursor()
+
+    def show_size_popup(self, global_pos):
+        if not hasattr(self, "_popup") or self._popup is None:
+            self._popup = _EraserSizePopup(self)
+        self._popup.slider.setValue(self.get_size())
+        self._popup.move(global_pos)
+        self._popup.show()
+
+
+class _EraserSizePopup(QWidget):
+    def __init__(self, tool: EraserTool):
+        super().__init__(flags=Qt.Popup)
+        self.tool = tool
+        self.slider = QSlider(Qt.Horizontal)
+        self.slider.setRange(tool.min_size, tool.max_size)
+        self.slider.setValue(tool.get_size())
+        self.label = QLabel(f"{tool.get_size()} px")
+        self.label.setAlignment(Qt.AlignCenter)
+        self.slider.valueChanged.connect(self._on_value_changed)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.addWidget(self.label)
+        layout.addWidget(self.slider)
+        self.setStyleSheet(
+            f"""
+            QWidget {{
+                background: {ModernColors.SURFACE};
+                border: 1px solid {ModernColors.BORDER};
+                border-radius: 8px;
+            }}
+            QSlider::groove:horizontal {{
+                height: 4px;
+                background: {ModernColors.BORDER};
+                border-radius: 2px;
+            }}
+            QSlider::handle:horizontal {{
+                width: 12px;
+                height: 12px;
+                background: {ModernColors.PRIMARY};
+                border-radius: 6px;
+            }}
+            QLabel {{
+                color: {ModernColors.TEXT_PRIMARY};
+            }}
+            """
+        )
+
+    def _on_value_changed(self, value: int):
+        self.label.setText(f"{value} px")
+        self.tool.set_size(value)
