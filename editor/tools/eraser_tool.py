@@ -198,7 +198,8 @@ class EraserTool(BaseTool):
 
 class _EraserSizePopup(QWidget):
     def __init__(self, tool: EraserTool):
-        super().__init__(flags=Qt.Popup)
+        super().__init__()
+        self.setWindowFlags(Qt.Popup)
         self.tool = tool
         self.slider = QSlider(Qt.Horizontal)
         self.slider.setRange(tool.min_size, tool.max_size)
