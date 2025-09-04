@@ -1,9 +1,9 @@
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QPen, QColor
+from PySide6.QtGui import QPen, QColor, QImage, QPainter
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsPixmapItem
 from PIL import ImageFilter, ImageDraw, Image
 
-from logic import pil_to_qpixmap
+from logic import pil_to_qpixmap, qimage_to_pil
 from .base_tool import BaseTool
 from editor.undo_commands import AddCommand
 
@@ -65,7 +65,17 @@ class BlurTool(BaseTool):
             from PySide6.QtGui import QPixmap
             return QPixmap()
         left, top, w, h = r.x(), r.y(), r.width(), r.height()
-        pil_img = self.canvas.pil_image.crop((left, top, left + w, top + h))
+        img = QImage(w, h, QImage.Format_RGBA8888)
+        img.fill(Qt.transparent)
+        p = QPainter(img)
+        if self._preview_item is not None:
+            self._preview_item.hide()
+        source_rect = QRectF(left, top, w, h)
+        self.canvas.scene.render(p, QRectF(0, 0, w, h), source_rect)
+        p.end()
+        if self._preview_item is not None:
+            self._preview_item.show()
+        pil_img = qimage_to_pil(img)
         pil_blur = pil_img.filter(ImageFilter.GaussianBlur(self.blur_radius))
 
         edge = min(self.edge_width, w // 2, h // 2)
