@@ -72,26 +72,62 @@ class BlurTool(BaseTool):
         if rect.isNull() or rect.isEmpty():
             return None
 
-        r = rect.toRect()
-        left, top, w, h = r.x(), r.y(), r.width(), r.height()
-        img = QImage(w, h, QImage.Format_RGBA8888)
+        radius = self.blur_radius
+
+        # expand source rect so blur has neighboring pixels to sample from
+        expanded = rect.adjusted(-radius, -radius, radius, radius)
+        expanded = expanded.intersected(img_rect)
+        er = expanded.toRect()
+        ex, ey, ew, eh = er.x(), er.y(), er.width(), er.height()
+
+        img = QImage(ew, eh, QImage.Format_RGBA8888)
         img.fill(Qt.transparent)
         p = QPainter(img)
         if self._preview_item is not None:
             self._preview_item.hide()
-        source_rect = QRectF(left, top, w, h)
-        self.canvas.scene.render(p, QRectF(0, 0, w, h), source_rect)
+        self.canvas.scene.render(p, QRectF(0, 0, ew, eh), expanded)
         p.end()
         if self._preview_item is not None:
             self._preview_item.show()
         pil_img = qimage_to_pil(img)
-        pil_blur = pil_img.filter(ImageFilter.GaussianBlur(self.blur_radius))
 
-        edge = min(self.edge_width, w // 2, h // 2)
+        def _pad_with_edge(image: Image.Image, pad: int) -> Image.Image:
+            if pad <= 0:
+                return image
+            w, h = image.size
+            padded = Image.new(image.mode, (w + pad * 2, h + pad * 2))
+            padded.paste(image, (pad, pad))
+            # edges
+            padded.paste(image.crop((0, 0, w, 1)).resize((w, pad)), (pad, 0))
+            padded.paste(image.crop((0, h - 1, w, h)).resize((w, pad)), (pad, h + pad))
+            padded.paste(image.crop((0, 0, 1, h)).resize((pad, h)), (0, pad))
+            padded.paste(image.crop((w - 1, 0, w, h)).resize((pad, h)), (w + pad, pad))
+            # corners
+            tl = Image.new(image.mode, (pad, pad), image.getpixel((0, 0)))
+            tr = Image.new(image.mode, (pad, pad), image.getpixel((w - 1, 0)))
+            bl = Image.new(image.mode, (pad, pad), image.getpixel((0, h - 1)))
+            br = Image.new(image.mode, (pad, pad), image.getpixel((w - 1, h - 1)))
+            padded.paste(tl, (0, 0))
+            padded.paste(tr, (w + pad, 0))
+            padded.paste(bl, (0, h + pad))
+            padded.paste(br, (w + pad, h + pad))
+            return padded
+
+        pil_img = _pad_with_edge(pil_img, radius)
+        pil_blur = pil_img.filter(ImageFilter.GaussianBlur(radius))
+
+        # crop to original rect inside the padded/expanded image
+        crop_x = radius + int(rect.left() - expanded.left())
+        crop_y = radius + int(rect.top() - expanded.top())
+        crop_w = int(rect.width())
+        crop_h = int(rect.height())
+        pil_blur = pil_blur.crop((crop_x, crop_y, crop_x + crop_w, crop_y + crop_h))
+
+        edge = min(self.edge_width, crop_w // 2, crop_h // 2)
         if edge > 0:
-            mask = Image.new("L", (w, h), 0)
+            mask = Image.new("L", (crop_w, crop_h), 0)
             draw = ImageDraw.Draw(mask)
-            draw.rounded_rectangle((edge, edge, w - edge, h - edge), radius=edge, fill=255)
+            draw.rounded_rectangle((edge, edge, crop_w - edge, crop_h - edge), radius=edge, fill=255)
             mask = mask.filter(ImageFilter.GaussianBlur(edge))
             pil_blur.putalpha(mask)
 
