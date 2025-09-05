@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QGraphicsScene,
     QGraphicsPixmapItem,
     QGraphicsItem,
+    QMenu,
 )
 
 from .styles import ModernColors
@@ -20,7 +21,7 @@ from editor.tools.shape_tools import RectangleTool, EllipseTool
 from editor.tools.blur_tool import BlurTool
 from editor.tools.eraser_tool import EraserTool
 from editor.tools.line_arrow_tool import LineTool, ArrowTool
-from editor.undo_commands import AddCommand, MoveCommand, ScaleCommand
+from editor.undo_commands import AddCommand, MoveCommand, ScaleCommand, ZValueCommand
 
 MARKER_ALPHA = 80
 PENCIL_WIDTH = 3
@@ -296,3 +297,36 @@ class Canvas(QGraphicsView):
                 event.accept()
                 return
         super().mouseReleaseEvent(event)
+
+    def bring_to_front(self, item: QGraphicsItem):
+        items = self.scene.items()
+        max_z = max((it.zValue() for it in items), default=0)
+        old = item.zValue()
+        new = max_z + 1
+        item.setZValue(new)
+        self.undo_stack.push(ZValueCommand({item: (old, new)}))
+
+    def send_to_back(self, item: QGraphicsItem):
+        items = self.scene.items()
+        min_z = min((it.zValue() for it in items), default=0)
+        old = item.zValue()
+        new = min_z - 1
+        item.setZValue(new)
+        self.undo_stack.push(ZValueCommand({item: (old, new)}))
+
+    def contextMenuEvent(self, event):
+        scene_pos = self.mapToScene(event.pos())
+        items = self.scene.items(scene_pos)
+        if items:
+            item = items[0]
+            menu = QMenu(self)
+            act_front = menu.addAction("На передний план")
+            act_back = menu.addAction("На задний план")
+            chosen = menu.exec(event.globalPos())
+            if chosen == act_front:
+                self.bring_to_front(item)
+            elif chosen == act_back:
+                self.send_to_back(item)
+            event.accept()
+            return
+        super().contextMenuEvent(event)

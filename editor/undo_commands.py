@@ -66,3 +66,20 @@ class ScaleCommand(QUndoCommand):
     def redo(self):
         for item, (old, new) in self.items_scale.items():
             item.setScale(new)
+
+
+class ZValueCommand(QUndoCommand):
+    """Command to change Z-order of items."""
+
+    def __init__(self, items_z):
+        # items_z: Dict[QGraphicsItem, Tuple[float, float]]
+        super().__init__("Порядок")
+        self.items_z = items_z
+
+    def undo(self):
+        for item, (old, new) in self.items_z.items():
+            item.setZValue(old)
+
+    def redo(self):
+        for item, (old, new) in self.items_z.items():
+            item.setZValue(new)
