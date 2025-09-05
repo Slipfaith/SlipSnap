@@ -60,24 +60,6 @@ def make_icon_add(size: int = 28) -> QIcon:
     p.end()
     return QIcon(pm)
 
-def make_icon_ocr(size: int = 28) -> QIcon:
-    """Иконка OCR: рамка + стилизованная буква 'T'"""
-    pm = _pm(size)
-    p = QPainter(pm)
-    p.setRenderHint(QPainter.Antialiasing)
-    # Рамка
-    p.setPen(QPen(QColor(180, 180, 180), 2))
-    m = 5
-    p.drawRect(m, m, size - 2 * m, size - 2 * m)
-    # 'T'
-    p.setPen(QPen(QColor(70, 70, 70), 2.5))
-    cx = size // 2
-    top = m + 4
-    p.drawLine(m + 6, top, size - m - 6, top)      # верхняя перекладина
-    p.drawLine(cx, top, cx, size - m - 6)          # ножка
-    p.end()
-    return QIcon(pm)
-
 def make_icon_collage(size: int = 28) -> QIcon:
     """Сетка 2×2 — «Коллаж»"""
     pm = _pm(size)
