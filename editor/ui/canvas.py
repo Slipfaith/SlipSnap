@@ -307,19 +307,40 @@ class Canvas(QGraphicsView):
 
     def bring_to_front(self, item: QGraphicsItem):
         items = self.scene.items()
-        max_z = max((it.zValue() for it in items), default=0)
-        old = item.zValue()
-        new = max_z + 1
-        item.setZValue(new)
-        self.undo_stack.push(ZValueCommand({item: (old, new)}))
+        changes = {}
+        if item.data(0) != "blur":
+            non_blur_items = [it for it in items if it.data(0) != "blur"]
+            max_z = max((it.zValue() for it in non_blur_items), default=0)
+            old = item.zValue()
+            new = max_z + 1
+            item.setZValue(new)
+            changes[item] = (old, new)
+        self._ensure_blur_top(items, changes)
+        if changes:
+            self.undo_stack.push(ZValueCommand(changes))
 
     def send_to_back(self, item: QGraphicsItem):
         items = self.scene.items()
-        min_z = min((it.zValue() for it in items), default=0)
-        old = item.zValue()
-        new = min_z - 1
-        item.setZValue(new)
-        self.undo_stack.push(ZValueCommand({item: (old, new)}))
+        changes = {}
+        if item.data(0) != "blur":
+            non_blur_items = [it for it in items if it.data(0) != "blur"]
+            min_z = min((it.zValue() for it in non_blur_items), default=0)
+            old = item.zValue()
+            new = min_z - 1
+            item.setZValue(new)
+            changes[item] = (old, new)
+        self._ensure_blur_top(items, changes)
+        if changes:
+            self.undo_stack.push(ZValueCommand(changes))
+
+    def _ensure_blur_top(self, items, changes):
+        non_blur_z = [it.zValue() for it in items if it.data(0) != "blur"]
+        max_z = max(non_blur_z, default=0)
+        blur_z = max_z + 1
+        for it in items:
+            if it.data(0) == "blur" and it.zValue() != blur_z:
+                changes[it] = (it.zValue(), blur_z)
+                it.setZValue(blur_z)
 
     def contextMenuEvent(self, event):
         scene_pos = self.mapToScene(event.pos())
