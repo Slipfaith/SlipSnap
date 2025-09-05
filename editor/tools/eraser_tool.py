@@ -1,15 +1,18 @@
 from PySide6.QtCore import QPointF, Qt, QRectF, QLineF
-from PySide6.QtGui import QPen, QBrush, QColor, QCursor, QPixmap, QPainter
+from PySide6.QtGui import QPen, QBrush, QColor, QCursor, QPixmap, QPainter, QImage
 from PySide6.QtWidgets import (
     QGraphicsEllipseItem,
     QWidget,
     QSlider,
     QVBoxLayout,
     QLabel,
+    QGraphicsPixmapItem,
+    QGraphicsItem,
+    QStyleOptionGraphicsItem,
 )
 
 from .base_tool import BaseTool
-from editor.undo_commands import RemoveCommand
+from editor.undo_commands import AddCommand, RemoveCommand
 from editor.ui.styles import ModernColors
 
 
@@ -106,23 +109,19 @@ class EraserTool(BaseTool):
             self.eraser_size
         )
 
-        items_to_remove = []
-        blur_found = False
+        handled = False
         for item in self.canvas.scene.items(erase_rect):
             if item is self.canvas.pixmap_item:
                 continue
-            if item.data(0) == "blur":
-                self._erase_blur_item(item, pos)
-                blur_found = True
+            if isinstance(item, QGraphicsPixmapItem):
+                self._erase_pixmap_item(item, pos)
+                handled = True
                 continue
             if self._item_intersects_circle(item, pos, self.eraser_size / 2):
-                items_to_remove.append(item)
-
-        for item in items_to_remove:
-            self.canvas.scene.removeItem(item)
-            self.canvas.undo_stack.push(RemoveCommand(self.canvas.scene, item))
-
-        if not blur_found:
+                pix_item = self._vector_item_to_pixmap(item)
+                self._erase_pixmap_item(pix_item, pos)
+                handled = True
+        if not handled:
             self._last_item = None
 
     def _erase_line(self, start: QPointF, end: QPointF):
@@ -138,7 +137,31 @@ class EraserTool(BaseTool):
             self._erase_at_position(point)
             self._last_pos = point
 
-    def _erase_blur_item(self, item, pos: QPointF):
+    def _vector_item_to_pixmap(self, item):
+        rect = item.boundingRect()
+        w = max(1, int(rect.width()))
+        h = max(1, int(rect.height()))
+        image = QImage(w, h, QImage.Format_ARGB32_Premultiplied)
+        image.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(image)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.translate(-rect.topLeft())
+        option = QStyleOptionGraphicsItem()
+        item.paint(painter, option, None)
+        painter.end()
+        pixmap = QPixmap.fromImage(image)
+        pix_item = QGraphicsPixmapItem(pixmap)
+        pix_item.setPos(item.mapToScene(rect.topLeft()))
+        pix_item.setZValue(item.zValue())
+        pix_item.setFlag(QGraphicsItem.ItemIsSelectable, True)
+        pix_item.setFlag(QGraphicsItem.ItemIsMovable, True)
+        self.canvas.scene.addItem(pix_item)
+        self.canvas.scene.removeItem(item)
+        self.canvas.undo_stack.push(RemoveCommand(self.canvas.scene, item))
+        self.canvas.undo_stack.push(AddCommand(self.canvas.scene, pix_item))
+        return pix_item
+
+    def _erase_pixmap_item(self, item, pos: QPointF):
         pix = item.pixmap()
         painter = QPainter(pix)
         painter.setRenderHint(QPainter.Antialiasing)
