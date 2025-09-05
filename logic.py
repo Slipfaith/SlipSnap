@@ -4,83 +4,139 @@ import uuid
 import tempfile
 from pathlib import Path
 from typing import Tuple, Optional
-import mss
-from PIL import Image, ImageQt
 
-APP_NAME = "Screenshot"
-CONFIG_PATH = Path.home() / ".screenshot_config.json"
-HISTORY_DIR = Path(tempfile.gettempdir()) / "screenshot_history"
+import mss
+from PIL import Image
+
+APP_NAME = "SlipSnap"
+CONFIG_PATH = Path.home() / ".slipsnap_config.json"
+HISTORY_DIR = Path(tempfile.gettempdir()) / "slipsnap_history"
 HISTORY_DIR.mkdir(parents=True, exist_ok=True)
 
 DEFAULT_CONFIG = {
     "shape": "rect",
-    "blur_radius": 6,
-    "tesseract_path": ""
+    "tesseract_path": "",
+    "pen_width": 3,
+    "font_px": 18,
 }
 
 def load_config() -> dict:
+    cfg = DEFAULT_CONFIG.copy()
     if CONFIG_PATH.exists():
         try:
-            cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-            base = DEFAULT_CONFIG.copy()
-            base.update(cfg)
-            return base
+            data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                cfg.update({k: v for k, v in data.items() if k in DEFAULT_CONFIG})
         except Exception:
             pass
-    CONFIG_PATH.write_text(json.dumps(DEFAULT_CONFIG, ensure_ascii=False, indent=2), encoding="utf-8")
-    return DEFAULT_CONFIG.copy()
+    return cfg
 
 def save_config(cfg: dict) -> None:
-    CONFIG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    data = DEFAULT_CONFIG.copy()
+    data.update({k: v for k, v in cfg.items() if k in DEFAULT_CONFIG})
+    CONFIG_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 def pil_to_qpixmap(img: Image.Image):
-    from PySide6.QtGui import QPixmap
-    return QPixmap.fromImage(ImageQt.ImageQt(img.convert("RGBA")))
+    """Convert PIL image to QPixmap with RGBA support."""
+    from PySide6.QtGui import QImage, QPixmap
+
+    if img.mode != "RGBA":
+        img = img.convert("RGBA")
+    w, h = img.size
+    data = img.tobytes("raw", "RGBA")
+    qimg = QImage(data, w, h, QImage.Format_RGBA8888)
+    return QPixmap.fromImage(qimg)
 
 def qimage_to_pil(qimg) -> Image.Image:
     from PySide6.QtGui import QImage
-    buf = qimg.bits().tobytes()
-    return Image.frombuffer("RGBA", (qimg.width(), qimg.height()), buf, "raw", "BGRA", 0, 1)
+    if qimg.isNull():
+        raise ValueError("QImage is null")
+    if qimg.format() != QImage.Format_RGBA8888:
+        qimg = qimg.convertToFormat(QImage.Format_RGBA8888)
+    w, h = qimg.width(), qimg.height()
+    bpl = qimg.bytesPerLine()
+    try:
+        size = qimg.sizeInBytes()
+    except AttributeError:
+        size = bpl * h
+    ptr = qimg.constBits()
+    buf = bytes(ptr[:size])
+    img = Image.frombuffer("RGBA", (w, h), buf, "raw", "RGBA", bpl, 1)
+    return img.copy()
 
 def save_history(img: Image.Image) -> Path:
     p = HISTORY_DIR / f"shot_{uuid.uuid4().hex}.png"
-    img.save(p)
+    if img.mode != "RGBA":
+        img = img.convert("RGBA")
+    img.save(p, format="PNG")
+    _prune_history(keep=10)
     return p
 
+def _prune_history(keep: int = 10) -> None:
+    files = sorted(
+        [*HISTORY_DIR.glob("*.png"), *HISTORY_DIR.glob("*.jpg"), *HISTORY_DIR.glob("*.jpeg")],
+        key=lambda x: x.stat().st_mtime,
+        reverse=True,
+    )
+    for f in files[keep:]:
+        try:
+            f.unlink(missing_ok=True)
+        except Exception:
+            pass
+
 def smart_grid(n: int) -> Tuple[int, int]:
-    if n <= 2:
-        return (n, 1)
-    if n == 3:
-        return (3, 1)
-    if n == 4:
-        return (2, 2)
-    if n in (5, 6):
-        return (3, 2)
-    c = math.ceil(math.sqrt(n))
-    r = math.ceil(n / c)
-    return c, r
+    if n <= 0:
+        return (0, 0)
+    cols = int(math.ceil(math.sqrt(n)))
+    rows = int(math.ceil(n / cols))
+    return rows, cols
 
 class ScreenGrabber:
     def __init__(self):
         self._sct = mss.mss()
-        self._monitors = self._sct.monitors[1:]
+        self._monitors = [m for m in self._sct.monitors[1:]]
+
+    def _qt_rect_phys(self, qs) -> "QRect":
+        from PySide6.QtCore import QRect
+        g = qs.geometry()
+        dpr = getattr(qs, "devicePixelRatio", lambda: 1.0)()
+        if hasattr(qs, "devicePixelRatio"):
+            try:
+                dpr = float(qs.devicePixelRatio())
+            except Exception:
+                dpr = 1.0
+        left = int(round(g.x() * dpr))
+        top = int(round(g.y() * dpr))
+        width = int(round(g.width() * dpr))
+        height = int(round(g.height() * dpr))
+        return QRect(left, top, width, height)
 
     def _match_monitor(self, qs) -> Optional[dict]:
         from PySide6.QtCore import QRect
-        g = qs.geometry()
+        target = self._qt_rect_phys(qs)
         for mon in self._monitors:
-            if (mon["left"] == g.x() and mon["top"] == g.y() and
-                mon["width"] == g.width() and mon["height"] == g.height()):
+            if (mon["left"] == target.x() and mon["top"] == target.y()
+                and mon["width"] == target.width() and mon["height"] == target.height()):
                 return mon
+        best = None
+        best_area = -1
         for mon in self._monitors:
-            r1 = QRect(mon["left"], mon["top"], mon["width"], mon["height"])
-            if r1.intersects(g):
-                return mon
-        return None
+            mr = QRect(mon["left"], mon["top"], mon["width"], mon["height"])
+            inter = mr.intersected(target)
+            area = inter.width() * inter.height()
+            if area > best_area:
+                best_area = area
+                best = mon
+        return best
 
     def grab(self, qs) -> Image.Image:
         mon = self._match_monitor(qs)
         if not mon:
             raise RuntimeError("Не удалось сопоставить монитор MSS с QScreen")
+        shot = self._sct.grab(mon)
+        return Image.frombytes("RGB", (shot.width, shot.height), shot.rgb)
+
+    def grab_virtual(self) -> Image.Image:
+        mon = self._sct.monitors[0]
         shot = self._sct.grab(mon)
         return Image.frombytes("RGB", (shot.width, shot.height), shot.rgb)
