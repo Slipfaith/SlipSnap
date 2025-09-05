@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
 from .styles import ModernColors
 from .icon_factory import create_pencil_cursor, create_select_cursor
 from logic import qimage_to_pil
-from editor.text_tools import TextManager
+from editor.text_tools import TextManager, EditableTextItem
 from editor.tools.selection_tool import SelectionTool
 from editor.tools.pencil_tool import PencilTool
 from editor.tools.shape_tools import RectangleTool, EllipseTool
@@ -237,13 +237,24 @@ class Canvas(QGraphicsView):
                     self._move_snapshot = {it: it.pos() for it in items}
             elif self._tool not in ("none", "select"):
                 pos = self.mapToScene(event.position().toPoint())
-                if self._tool == "text":
-                    if self._text_manager:
+                if self._tool == "text" and self._text_manager:
+                    current = getattr(self._text_manager, "_current_text_item", None)
+                    if current:
+                        # If click inside current text item, allow editing; otherwise finish editing
+                        if current.contains(current.mapFromScene(pos)):
+                            super().mousePressEvent(event)
+                        else:
+                            self._text_manager.finish_current_editing()
+                            self.set_tool("select")
+                            event.accept()
+                        return
+                    else:
+                        # Create new text item
                         item = self._text_manager.create_text_item(pos)
                         if item:
                             self.undo_stack.push(AddCommand(self.scene, item))
-                    event.accept()
-                    return
+                        event.accept()
+                        return
                 if self.active_tool:
                     self.active_tool.press(pos)
                     event.accept()
