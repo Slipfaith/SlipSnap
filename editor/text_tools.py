@@ -330,13 +330,20 @@ class EditableTextItem(QGraphicsTextItem):
 
     def contextMenuEvent(self, event):
         menu = QMenu()
+        act_front = menu.addAction("На передний план")
+        act_back = menu.addAction("На задний план")
+        menu.addSeparator()
         act_delete = menu.addAction("Удалить")
         chosen = menu.exec(event.screenPos())
         event.accept()
-        if chosen == act_delete:
-            scene = self.scene()
+        scene = self.scene()
+        view = scene.views()[0] if scene and scene.views() else None
+        if chosen == act_front and view:
+            view.bring_to_front(self)
+        elif chosen == act_back and view:
+            view.send_to_back(self)
+        elif chosen == act_delete:
             if scene:
-                view = scene.views()[0] if scene.views() else None
                 undo_stack = getattr(view, "undo_stack", None)
                 if undo_stack:
                     undo_stack.push(RemoveCommand(scene, self))
