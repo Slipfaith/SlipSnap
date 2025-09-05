@@ -75,6 +75,7 @@ class Canvas(QGraphicsView):
         self.undo_stack = QUndoStack(self)
         self._move_snapshot: Dict[QGraphicsItem, QPointF] = {}
         self._text_manager: Optional[TextManager] = None
+        self._zoom = 1.0
 
         self.tools = {
             "select": SelectionTool(self),
@@ -167,6 +168,12 @@ class Canvas(QGraphicsView):
             color.setAlpha(255)
             self._pen.setWidth(PENCIL_WIDTH)
         self._pen.setColor(color)
+
+    def set_zoom(self, factor: float):
+        """Set the zoom level of the canvas."""
+        self._zoom = factor
+        self.resetTransform()
+        self.scale(factor, factor)
 
     def export_image(self) -> QImage:
         selected = [it for it in self.scene.selectedItems()]
