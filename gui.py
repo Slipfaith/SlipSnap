@@ -107,7 +107,9 @@ class SelectionOverlayBase(QWidget):
                 out = Image.new("RGBA", (w, h), (0, 0, 0, 0))
                 out.paste(crop, (0, 0), mask)
                 crop = out
-                self.captured.emit(ImageQt.ImageQt(crop))
+                qimg = ImageQt.ImageQt(crop).convertToFormat(QImage.Format_ARGB32)
+                QGuiApplication.clipboard().setImage(qimg)
+                self.captured.emit(qimg)
         self.releaseKeyboard()
         self.cancel_all.emit()
 
