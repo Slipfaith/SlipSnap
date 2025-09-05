@@ -28,7 +28,7 @@ class SelectionOverlayBase(QWidget):
         self.shape = cfg.get("shape", "rect")
 
         self.base_img = base_img.convert("RGBA")
-        blur_r = cfg.get("blur_radius", 8)
+        blur_r = cfg.get("blur_radius", 2)
         self.blurred = self.base_img.filter(ImageFilter.GaussianBlur(radius=blur_r))
         self._bg_blurred = QPixmap.fromImage(ImageQt.ImageQt(self.blurred))
         self._bg_original = QPixmap.fromImage(ImageQt.ImageQt(self.base_img))
