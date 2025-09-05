@@ -137,7 +137,11 @@ class EditorWindow(QMainWindow):
         pixmap = QPixmap(qimg.size())
         pixmap.fill(Qt.transparent)
         painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHints(
+            QPainter.Antialiasing
+            | QPainter.HighQualityAntialiasing
+            | QPainter.SmoothPixmapTransform
+        )
         path = QPainterPath()
         path.addRoundedRect(QRectF(0, 0, qimg.width(), qimg.height()), radius, radius)
         painter.setClipPath(path)
@@ -148,6 +152,7 @@ class EditorWindow(QMainWindow):
     def _insert_screenshot_item(self, qimg: QImage):
         pixmap = self._rounded_pixmap(qimg)
         screenshot_item = QGraphicsPixmapItem(pixmap)
+        screenshot_item.setTransformationMode(Qt.SmoothTransformation)
         screenshot_item.setFlag(QGraphicsItem.ItemIsMovable, True)
         screenshot_item.setFlag(QGraphicsItem.ItemIsSelectable, True)
         screenshot_item.setFlag(QGraphicsItem.ItemIsFocusable, True)
