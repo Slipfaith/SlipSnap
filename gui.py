@@ -29,7 +29,14 @@ class SelectionOverlayBase(QWidget):
 
         self.base_img = base_img.convert("RGBA")
         blur_r = cfg.get("blur_radius", 8)
-        self.blurred = self.base_img.filter(ImageFilter.GaussianBlur(radius=blur_r))
+        # Downscale before blurring to speed up heavy operations on large screens
+        w, h = self.base_img.size
+        scale = 0.25  # work on a 1/4 sized image for faster Gaussian blur
+        small = self.base_img.resize(
+            (max(1, int(w * scale)), max(1, int(h * scale))), Image.BILINEAR
+        )
+        small = small.filter(ImageFilter.GaussianBlur(radius=blur_r * scale))
+        self.blurred = small.resize(self.base_img.size, Image.LANCZOS)
         self._bg_blurred = QPixmap.fromImage(ImageQt.ImageQt(self.blurred))
         self._bg_original = QPixmap.fromImage(ImageQt.ImageQt(self.base_img))
         self._bg_blurred_scaled = self._bg_blurred.scaled(self.size(), Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
