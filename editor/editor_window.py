@@ -54,7 +54,29 @@ class EditorWindow(QMainWindow):
 
         QTimer.singleShot(0, lambda q=qimg: size_to_image(self, q))
 
-        self.statusBar().showMessage("Готово | Ctrl+N: новый скриншот | Ctrl+K: история | Ctrl+L: Live | Del: удалить | Ctrl +/-: масштаб", 5000)
+        self.statusBar().showMessage(
+            "Готово | Ctrl+N: новый скриншот | Ctrl+K: история | Ctrl+L: Live | Del: удалить | Ctrl +/-: масштаб",
+            5000,
+        )
+
+        # Меню справки с горячими клавишами
+        help_menu = self.menuBar().addMenu("Справка")
+        act_shortcuts = help_menu.addAction("Горячие клавиши")
+        act_shortcuts.triggered.connect(self.show_shortcuts)
+
+    def show_shortcuts(self):
+        text = (
+            "Ctrl+N — новый снимок\n"
+            "Ctrl+K — история\n"
+            "Ctrl+L — Live Text\n"
+            "Ctrl+C — копировать\n"
+            "Ctrl+S — сохранить\n"
+            "Ctrl+Z — отмена\n"
+            "Ctrl+Y — повтор\n"
+            "Delete — удалить\n"
+            "Ctrl+Plus/Minus — масштаб"
+        )
+        QMessageBox.information(self, "Горячие клавиши", text)
 
     # ---- actions ----
     def choose_color(self):
@@ -137,11 +159,10 @@ class EditorWindow(QMainWindow):
         pixmap = QPixmap(qimg.size())
         pixmap.fill(Qt.transparent)
         painter = QPainter(pixmap)
-        painter.setRenderHints(
-            QPainter.Antialiasing
-            | QPainter.HighQualityAntialiasing
-            | QPainter.SmoothPixmapTransform
-        )
+        hints = QPainter.Antialiasing | QPainter.SmoothPixmapTransform
+        if hasattr(QPainter, "HighQualityAntialiasing"):
+            hints |= QPainter.HighQualityAntialiasing
+        painter.setRenderHints(hints)
         path = QPainterPath()
         path.addRoundedRect(QRectF(0, 0, qimg.width(), qimg.height()), radius, radius)
         painter.setClipPath(path)
