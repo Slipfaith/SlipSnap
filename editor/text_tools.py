@@ -1,7 +1,5 @@
 # -*- coding: utf-8 -*-
-from typing import Optional
-import math
-from PySide6.QtCore import QPointF, Qt, QRectF
+from PySide6.QtCore import QPointF, Qt, QRectF, QSizeF
 from PySide6.QtGui import (
     QFont,
     QColor,
@@ -13,7 +11,6 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QGraphicsItem,
     QGraphicsTextItem,
-    QGraphicsItemGroup,
     QMenu,
 )
 from .undo_commands import RemoveCommand
@@ -30,11 +27,11 @@ class EditableTextItem(QGraphicsTextItem):
         self._placeholder_text = "Введите текст..."
         self._ignore_content_changes = False  # Флаг для предотвращения рекурсии
 
-        # Параметры для изменения масштаба
+        # Параметры для изменения размера текстового блока
         self._resizing = False
         self._resize_start_pos = QPointF()
-        self._resize_start_scale = 1.0
-        self._resize_origin = QPointF()
+        self._resize_start_rect = QRectF()
+        self._resize_handle = None
 
         # Настройка элемента
         self.setFlag(QGraphicsItem.ItemIsMovable, True)
@@ -221,26 +218,20 @@ class EditableTextItem(QGraphicsTextItem):
             painter.setBrush(Qt.NoBrush)
             painter.drawRoundedRect(rect, 8, 8)
 
-            # Рисуем маленькие квадратики по углам для изменения размера
+            # Рисуем квадрат для изменения размера в правом нижнем углу
             handle_size = 6
-            handles = [
-                rect.topLeft(),
-                rect.topRight(),
-                rect.bottomLeft(),
-                rect.bottomRight()
-            ]
+            handle_pos = rect.bottomRight()
 
             painter.setBrush(QColor(70, 130, 240))
             painter.setPen(QPen(QColor(255, 255, 255), 1))
 
-            for handle_pos in handles:
-                handle_rect = QRectF(
-                    handle_pos.x() - handle_size / 2,
-                    handle_pos.y() - handle_size / 2,
-                    handle_size,
-                    handle_size
-                )
-                painter.drawRoundedRect(handle_rect, 2, 2)
+            handle_rect = QRectF(
+                handle_pos.x() - handle_size / 2,
+                handle_pos.y() - handle_size / 2,
+                handle_size,
+                handle_size,
+            )
+            painter.drawRoundedRect(handle_rect, 2, 2)
 
             painter.restore()
 
@@ -250,13 +241,10 @@ class EditableTextItem(QGraphicsTextItem):
         if event.button() == Qt.LeftButton:
             rect = self.boundingRect()
             handle_size = 6
-            handles = [
-                rect.topLeft(),
-                rect.topRight(),
-                rect.bottomLeft(),
-                rect.bottomRight(),
-            ]
-            for handle in handles:
+            handles = {
+                "bottom-right": rect.bottomRight(),
+            }
+            for name, handle in handles.items():
                 handle_rect = QRectF(
                     handle.x() - handle_size / 2,
                     handle.y() - handle_size / 2,
@@ -265,23 +253,22 @@ class EditableTextItem(QGraphicsTextItem):
                 )
                 if handle_rect.contains(event.pos()):
                     self._resizing = True
+                    self._resize_handle = name
                     self._resize_start_pos = event.pos()
-                    self._resize_start_scale = self.scale()
-                    self._resize_origin = rect.center()
-                    self.setTransformOriginPoint(rect.center())
+                    self._resize_start_rect = rect
                     event.accept()
                     return
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
-        if self._resizing:
-            start_vec = self._resize_start_pos - self._resize_origin
-            current_vec = event.pos() - self._resize_origin
-            start_len = math.hypot(start_vec.x(), start_vec.y())
-            current_len = math.hypot(current_vec.x(), current_vec.y())
-            if start_len > 0:
-                new_scale = self._resize_start_scale * (current_len / start_len)
-                self.setScale(max(0.1, new_scale))
+        if self._resizing and self._resize_handle == "bottom-right":
+            delta = event.pos() - self._resize_start_pos
+            new_width = max(20, self._resize_start_rect.width() + delta.x())
+            new_height = max(20, self._resize_start_rect.height() + delta.y())
+            self.prepareGeometryChange()
+            self.setTextWidth(new_width)
+            self.document().setPageSize(QSizeF(new_width, new_height))
+            self.update()
             event.accept()
             return
         super().mouseMoveEvent(event)
@@ -289,6 +276,7 @@ class EditableTextItem(QGraphicsTextItem):
     def mouseReleaseEvent(self, event):
         if self._resizing and event.button() == Qt.LeftButton:
             self._resizing = False
+            self._resize_handle = None
             event.accept()
             return
         super().mouseReleaseEvent(event)
