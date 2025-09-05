@@ -32,6 +32,7 @@ class EditableTextItem(QGraphicsTextItem):
         self._resize_start_pos = QPointF()
         self._resize_start_rect = QRectF()
         self._resize_handle = None
+        self._resize_start_font_size = self._font.pointSizeF()
 
         # Настройка элемента
         self.setFlag(QGraphicsItem.ItemIsMovable, True)
@@ -266,6 +267,7 @@ class EditableTextItem(QGraphicsTextItem):
                     self._resize_handle = name
                     self._resize_start_pos = event.pos()
                     self._resize_start_rect = rect
+                    self._resize_start_font_size = self._font.pointSizeF()
                     event.accept()
                     return
         super().mousePressEvent(event)
@@ -305,33 +307,42 @@ class EditableTextItem(QGraphicsTextItem):
             h0 = self._resize_start_rect.height()
 
             if self._resize_handle == "bottom-right":
-                new_w = w0 + delta.x()
-                new_h = h0 + delta.y()
+                scale_w = (w0 + delta.x()) / w0
+                scale_h = (h0 + delta.y()) / h0
+                scale = max(scale_w, scale_h, 20 / w0, 20 / h0)
                 new_x = self.x()
                 new_y = self.y()
             elif self._resize_handle == "bottom-left":
-                new_w = w0 - delta.x()
-                new_h = h0 + delta.y()
-                new_x = self.x() + (w0 - max(20, new_w))
+                scale_w = (w0 - delta.x()) / w0
+                scale_h = (h0 + delta.y()) / h0
+                scale = max(scale_w, scale_h, 20 / w0, 20 / h0)
+                new_x = self.x() + (w0 - w0 * scale)
                 new_y = self.y()
             elif self._resize_handle == "top-right":
-                new_w = w0 + delta.x()
-                new_h = h0 - delta.y()
+                scale_w = (w0 + delta.x()) / w0
+                scale_h = (h0 - delta.y()) / h0
+                scale = max(scale_w, scale_h, 20 / w0, 20 / h0)
                 new_x = self.x()
-                new_y = self.y() + (h0 - max(20, new_h))
+                new_y = self.y() + (h0 - h0 * scale)
             else:  # top-left
-                new_w = w0 - delta.x()
-                new_h = h0 - delta.y()
-                new_x = self.x() + (w0 - max(20, new_w))
-                new_y = self.y() + (h0 - max(20, new_h))
+                scale_w = (w0 - delta.x()) / w0
+                scale_h = (h0 - delta.y()) / h0
+                scale = max(scale_w, scale_h, 20 / w0, 20 / h0)
+                new_x = self.x() + (w0 - w0 * scale)
+                new_y = self.y() + (h0 - h0 * scale)
 
-            new_width = max(20, new_w)
-            new_height = max(20, new_h)
+            new_width = w0 * scale
+            new_height = h0 * scale
 
             self.prepareGeometryChange()
             self.setPos(new_x, new_y)
             self.setTextWidth(new_width)
             self.document().setPageSize(QSizeF(new_width, new_height))
+
+            new_font = QFont(self._font)
+            new_font.setPointSizeF(max(1.0, self._resize_start_font_size * scale))
+            self.set_font(new_font)
+
             self.update()
             event.accept()
             return

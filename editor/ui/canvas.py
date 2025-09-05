@@ -1,7 +1,7 @@
 from typing import Optional, Dict
 import math
 
-from PySide6.QtCore import Qt, QPointF
+from PySide6.QtCore import Qt, QPointF, QRectF
 from PySide6.QtGui import QPainter, QPen, QColor, QImage, QPixmap, QUndoStack
 from PySide6.QtWidgets import (
     QGraphicsView,
@@ -182,8 +182,7 @@ class Canvas(QGraphicsView):
         p = QPainter(img)
         p.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
         p.scale(dpr, dpr)
-        p.translate(-rect.left(), -rect.top())
-        self.scene.render(p)
+        self.scene.render(p, QRectF(0, 0, rect.width(), rect.height()), rect)
         p.end()
         return qimage_to_pil(img)
 
