@@ -53,9 +53,13 @@ class BlurTool(BaseTool):
             pix, pos = result
             if self._preview_item is None:
                 self._preview_item = self.canvas.scene.addPixmap(pix)
-                self._preview_item.setZValue(1)
             else:
                 self._preview_item.setPixmap(pix)
+            max_z = max(
+                (it.zValue() for it in self.canvas.scene.items() if it is not self._preview_item),
+                default=0,
+            )
+            self._preview_item.setZValue(max_z + 1)
             self._preview_item.setPos(pos)
 
     def release(self, pos: QPointF):
