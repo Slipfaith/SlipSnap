@@ -111,7 +111,7 @@ class EraserTool(BaseTool):
 
         handled = False
         for item in self.canvas.scene.items(erase_rect):
-            if item is self.canvas.pixmap_item:
+            if isinstance(item, QGraphicsPixmapItem) and item.data(0) == "screenshot":
                 continue
             if isinstance(item, QGraphicsPixmapItem):
                 self._erase_pixmap_item(item, pos)

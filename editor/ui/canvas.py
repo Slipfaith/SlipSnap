@@ -43,6 +43,7 @@ class Canvas(QGraphicsView):
         self.pixmap_item.setFlag(QGraphicsItem.ItemIsSelectable, True)
         self.pixmap_item.setFlag(QGraphicsItem.ItemIsFocusable, True)
         self.pixmap_item.setZValue(0)
+        self.pixmap_item.setData(0, "screenshot")
         self.scene.addItem(self.pixmap_item)
 
         self.setDragMode(QGraphicsView.NoDrag)
