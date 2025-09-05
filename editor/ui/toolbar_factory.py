@@ -2,7 +2,7 @@ from typing import Dict
 
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QAction, QKeySequence, QColor, QActionGroup
-from PySide6.QtWidgets import QToolBar, QToolButton, QMenu
+from PySide6.QtWidgets import QToolBar, QToolButton, QMenu, QSlider, QLabel
 
 from logic import save_config
 
@@ -406,6 +406,18 @@ def create_actions_toolbar(window, canvas):
     color_btn.clicked.connect(window.choose_color)
     tb.addWidget(color_btn)
 
+    tb.addSeparator()
+
+    # Zoom slider for canvas scaling
+    zoom_slider = QSlider(Qt.Horizontal)
+    zoom_slider.setRange(10, 400)
+    zoom_slider.setValue(100)
+    zoom_slider.setFixedWidth(120)
+    zoom_slider.setToolTip("Масштаб")
+    zoom_label = QLabel("100%")
+    zoom_slider.valueChanged.connect(lambda v: (canvas.set_zoom(v / 100), zoom_label.setText(f"{v}%")))
+    tb.addWidget(zoom_slider)
+    tb.addWidget(zoom_label)
     tb.addSeparator()
 
     actions: Dict[str, QAction] = {}
