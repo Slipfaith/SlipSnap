@@ -79,7 +79,7 @@ class BlurTool(BaseTool):
 
         # expand source rect so blur has neighboring pixels to sample from
         expanded = rect.adjusted(-radius, -radius, radius, radius)
-        expanded = expanded.intersected(img_rect).toAlignedRect()
+        expanded = expanded.intersected(img_rect)
         ex, ey, ew, eh = expanded.x(), expanded.y(), expanded.width(), expanded.height()
 
         img = QImage(ew, eh, QImage.Format_RGBA8888)
