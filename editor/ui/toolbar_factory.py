@@ -4,6 +4,8 @@ from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QAction, QKeySequence, QColor, QActionGroup
 from PySide6.QtWidgets import QToolBar, QToolButton, QMenu
 
+from logic import save_config
+
 from .styles import ModernColors, tools_toolbar_style
 from .color_widgets import ColorButton
 from .icon_factory import (
@@ -408,7 +410,7 @@ def create_actions_toolbar(window, canvas):
 
     actions: Dict[str, QAction] = {}
     actions['live'], _ = add_action("Live", window.toggle_live_text, sc="Ctrl+L", icon_text="🔍", show_text=False)
-    actions['new'], _ = add_action("Новый снимок", window.add_screenshot, sc="Ctrl+N", icon_text="📸", show_text=False)
+    actions['new'], new_btn = add_action("Новый снимок", window.add_screenshot, sc="Ctrl+N", icon_text="📸", show_text=False)
     actions['collage'], _ = add_action("История", window.open_collage, sc="Ctrl+K", icon_text="🖼", show_text=False)
     add_action("Копировать", window.copy_to_clipboard, sc="Ctrl+C", icon_text="📋", show_text=False)
     add_action("Сохранить", window.save_image, sc="Ctrl+S", icon_text="💾", show_text=False)
@@ -425,6 +427,21 @@ def create_actions_toolbar(window, canvas):
         btn.setText(text)
         btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
         tb.addWidget(btn)
+
+    # Контекстное меню для выбора формы скриншота
+    def show_shape_menu(pos):
+        menu = QMenu(new_btn)
+        rect_act = menu.addAction("Прямоугольник")
+        circle_act = menu.addAction("Круг")
+        chosen = menu.exec(new_btn.mapToGlobal(pos))
+        if chosen == rect_act:
+            window.cfg["shape"] = "rect"
+        elif chosen == circle_act:
+            window.cfg["shape"] = "ellipse"
+        save_config(window.cfg)
+
+    new_btn.setContextMenuPolicy(Qt.CustomContextMenu)
+    new_btn.customContextMenuRequested.connect(show_shape_menu)
 
     # Применяем улучшенные стили
     tb.setStyleSheet(enhanced_actions_toolbar_style())
