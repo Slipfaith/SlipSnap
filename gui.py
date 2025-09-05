@@ -456,6 +456,7 @@ class App(QObject):
         self.launcher.start_capture.connect(self.capture)
         self.launcher.toggle_shape.connect(self._toggle_shape)
         self.launcher.show()
+        self._captured_once = False
 
     def _toggle_shape(self):
         if hasattr(self, "ovm"):
@@ -466,22 +467,23 @@ class App(QObject):
         try:
             self.ovm = OverlayManager(self.cfg)
             self.ovm.captured.connect(self._on_captured)
-            self.ovm.finished.connect(self.launcher.show)
+            self.ovm.finished.connect(self._on_finished)
             self.ovm.start()
         except Exception as e:
             self.launcher.show()
             QMessageBox.critical(None, "SlipSnap", f"Ошибка съёмки: {e}")
 
+    def _on_finished(self):
+        if not self._captured_once:
+            self.launcher.show()
+
     def _on_captured(self, qimg: QImage):
-        try:
-            self.ovm.close_all()
-        except Exception:
-            pass
         try:
             img = qimage_to_pil(qimg)
             save_history(img)
             EditorWindow(qimg, self.cfg).show()
+            self._captured_once = True
+            self.launcher.close()
         except Exception as e:
             QMessageBox.critical(None, "SlipSnap", f"Ошибка обработки: {e}")
-        finally:
             self.launcher.show()
