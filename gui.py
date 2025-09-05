@@ -240,6 +240,7 @@ class VirtualOverlay(SelectionOverlayBase):
 
 class OverlayManager(QObject):
     captured = Signal(QImage)
+    finished = Signal()
 
     def __init__(self, cfg: dict):
         super().__init__()
@@ -326,6 +327,7 @@ class OverlayManager(QObject):
         for ov in self._overlays:
             ov.close()
         self._overlays.clear()
+        self.finished.emit()
 
     def _on_captured(self, qimg: QImage):
         self.captured.emit(qimg)
@@ -460,11 +462,14 @@ class App(QObject):
             self.ovm.set_shape(self.cfg.get("shape", "rect"))
 
     def capture(self):
+        self.launcher.hide()
         try:
             self.ovm = OverlayManager(self.cfg)
             self.ovm.captured.connect(self._on_captured)
+            self.ovm.finished.connect(self.launcher.show)
             self.ovm.start()
         except Exception as e:
+            self.launcher.show()
             QMessageBox.critical(None, "SlipSnap", f"Ошибка съёмки: {e}")
 
     def _on_captured(self, qimg: QImage):
@@ -478,3 +483,5 @@ class App(QObject):
             EditorWindow(qimg, self.cfg).show()
         except Exception as e:
             QMessageBox.critical(None, "SlipSnap", f"Ошибка обработки: {e}")
+        finally:
+            self.launcher.show()
