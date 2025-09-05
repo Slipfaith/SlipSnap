@@ -178,6 +178,7 @@ class EditorWindow(QMainWindow):
         screenshot_item.setFlag(QGraphicsItem.ItemIsSelectable, True)
         screenshot_item.setFlag(QGraphicsItem.ItemIsFocusable, True)
         screenshot_item.setZValue(10)
+        screenshot_item.setData(0, "screenshot")
         self.canvas.scene.addItem(screenshot_item)
         self.canvas.undo_stack.push(AddCommand(self.canvas.scene, screenshot_item))
 
