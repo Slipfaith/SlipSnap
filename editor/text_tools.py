@@ -1,7 +1,15 @@
 # -*- coding: utf-8 -*-
 from typing import Optional
+import math
 from PySide6.QtCore import QPointF, Qt, QRectF
-from PySide6.QtGui import QFont, QColor, QTextCursor, QTextCharFormat, QPen, QPainter
+from PySide6.QtGui import (
+    QFont,
+    QColor,
+    QTextCursor,
+    QTextCharFormat,
+    QPen,
+    QPainter,
+)
 from PySide6.QtWidgets import (QGraphicsItem, QGraphicsTextItem,
                                QGraphicsItemGroup)
 
@@ -16,6 +24,12 @@ class EditableTextItem(QGraphicsTextItem):
         self._is_editing = False
         self._placeholder_text = "Введите текст..."
         self._ignore_content_changes = False  # Флаг для предотвращения рекурсии
+
+        # Параметры для изменения масштаба
+        self._resizing = False
+        self._resize_start_pos = QPointF()
+        self._resize_start_scale = 1.0
+        self._resize_origin = QPointF()
 
         # Настройка элемента
         self.setFlag(QGraphicsItem.ItemIsMovable, True)
@@ -108,6 +122,25 @@ class EditableTextItem(QGraphicsTextItem):
         except Exception as e:
             print(f"Ошибка при применении шрифта: {e}")
 
+    def _toggle_format(self, mode: str):
+        """Переключить форматирование текста"""
+        cursor = self.textCursor()
+        fmt = QTextCharFormat()
+        current = cursor.charFormat()
+
+        if mode == "bold":
+            weight = QFont.Bold if current.fontWeight() <= QFont.Normal else QFont.Normal
+            fmt.setFontWeight(weight)
+        elif mode == "italic":
+            fmt.setFontItalic(not current.fontItalic())
+        elif mode == "underline":
+            fmt.setFontUnderline(not current.fontUnderline())
+
+        if cursor.hasSelection():
+            cursor.mergeCharFormat(fmt)
+        else:
+            self.mergeCurrentCharFormat(fmt)
+
     def focusInEvent(self, event):
         """Обработчик получения фокуса"""
         super().focusInEvent(event)
@@ -132,6 +165,17 @@ class EditableTextItem(QGraphicsTextItem):
 
     def keyPressEvent(self, event):
         """Обработчик нажатий клавиш"""
+        if event.modifiers() & Qt.ControlModifier:
+            if event.key() == Qt.Key_B:
+                self._toggle_format("bold")
+                return
+            if event.key() == Qt.Key_I:
+                self._toggle_format("italic")
+                return
+            if event.key() == Qt.Key_U:
+                self._toggle_format("underline")
+                return
+
         # Если нажат Escape, убираем фокус
         if event.key() == Qt.Key_Escape:
             self.clearFocus()
@@ -181,6 +225,53 @@ class EditableTextItem(QGraphicsTextItem):
             painter.restore()
 
         super().paint(painter, option, widget)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and not self._is_editing:
+            rect = self.boundingRect()
+            handle_size = 6
+            handles = [
+                rect.topLeft(),
+                rect.topRight(),
+                rect.bottomLeft(),
+                rect.bottomRight(),
+            ]
+            for handle in handles:
+                handle_rect = QRectF(
+                    handle.x() - handle_size / 2,
+                    handle.y() - handle_size / 2,
+                    handle_size,
+                    handle_size,
+                )
+                if handle_rect.contains(event.pos()):
+                    self._resizing = True
+                    self._resize_start_pos = event.pos()
+                    self._resize_start_scale = self.scale()
+                    self._resize_origin = rect.center()
+                    self.setTransformOriginPoint(rect.center())
+                    event.accept()
+                    return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._resizing:
+            start_vec = self._resize_start_pos - self._resize_origin
+            current_vec = event.pos() - self._resize_origin
+            start_len = math.hypot(start_vec.x(), start_vec.y())
+            current_len = math.hypot(current_vec.x(), current_vec.y())
+            if start_len > 0:
+                new_scale = self._resize_start_scale * (current_len / start_len)
+                self.setScale(max(0.1, new_scale))
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if self._resizing and event.button() == Qt.LeftButton:
+            self._resizing = False
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
 
 class TextManager:
