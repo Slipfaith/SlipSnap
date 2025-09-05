@@ -32,7 +32,7 @@ class EditableTextItem(QGraphicsTextItem):
 
         # Параметры для изменения размера текстового блока
         self._resizing = False
-        self._resize_start_pos = QPointF()
+        self._resize_start_scene_pos = QPointF()
         self._resize_start_rect = QRectF()
         self._resize_handle = None
         self._resize_start_font_size = self._font.pointSizeF()
@@ -273,7 +273,7 @@ class EditableTextItem(QGraphicsTextItem):
                 if handle_rect.contains(event.pos()):
                     self._resizing = True
                     self._resize_handle = name
-                    self._resize_start_pos = event.pos()
+                    self._resize_start_scene_pos = event.scenePos()
                     self._resize_start_rect = rect
                     self._resize_start_font_size = self._font.pointSizeF()
                     event.accept()
@@ -310,7 +310,7 @@ class EditableTextItem(QGraphicsTextItem):
 
     def mouseMoveEvent(self, event):
         if self._resizing and self._resize_handle:
-            delta = event.pos() - self._resize_start_pos
+            delta = event.scenePos() - self._resize_start_scene_pos
             w0 = self._resize_start_rect.width()
             h0 = self._resize_start_rect.height()
 
