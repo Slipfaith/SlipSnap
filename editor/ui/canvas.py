@@ -168,6 +168,11 @@ class Canvas(QGraphicsView):
         self._pen.setColor(color)
 
     def export_image(self) -> QImage:
+        selected = [it for it in self.scene.selectedItems()]
+        focus_item = self.scene.focusItem()
+        for it in selected:
+            it.setSelected(False)
+
         rect = self.scene.itemsBoundingRect()
         dpr = getattr(self.window().windowHandle(), "devicePixelRatio", lambda: 1.0)()
         try:
@@ -184,6 +189,11 @@ class Canvas(QGraphicsView):
         p.scale(dpr, dpr)
         self.scene.render(p, QRectF(0, 0, rect.width(), rect.height()), rect)
         p.end()
+
+        for it in selected:
+            it.setSelected(True)
+        if focus_item:
+            focus_item.setFocus()
         return qimage_to_pil(img)
 
     def undo(self):

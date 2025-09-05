@@ -16,6 +16,9 @@ from PySide6.QtWidgets import (
 from .undo_commands import RemoveCommand
 
 
+RESIZE_HANDLE_SIZE = 6
+
+
 class EditableTextItem(QGraphicsTextItem):
     """Улучшенный текстовый элемент с лучшим управлением цветом и редактированием"""
 
@@ -207,6 +210,11 @@ class EditableTextItem(QGraphicsTextItem):
 
         super().keyPressEvent(event)
 
+    def boundingRect(self):
+        rect = super().boundingRect()
+        margin = RESIZE_HANDLE_SIZE / 2
+        return rect.adjusted(-margin, -margin, margin, margin)
+
     def paint(self, painter, option, widget=None):
         """Переопределяем отрисовку для лучшего отображения"""
         # Если элемент выделен, рисуем рамку
@@ -214,14 +222,14 @@ class EditableTextItem(QGraphicsTextItem):
             painter.save()
 
             # Рисуем рамку выделения
-            rect = self.boundingRect()
+            rect = super().boundingRect()
             pen = QPen(QColor(70, 130, 240), 1, Qt.DashLine)
             painter.setPen(pen)
             painter.setBrush(Qt.NoBrush)
             painter.drawRoundedRect(rect, 8, 8)
 
             # Рисуем квадраты для изменения размера в углах
-            handle_size = 6
+            handle_size = RESIZE_HANDLE_SIZE
             handle_positions = [
                 rect.topLeft(),
                 rect.topRight(),
@@ -247,8 +255,8 @@ class EditableTextItem(QGraphicsTextItem):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
-            rect = self.boundingRect()
-            handle_size = 6
+            rect = super().boundingRect()
+            handle_size = RESIZE_HANDLE_SIZE
             handles = {
                 "top-left": rect.topLeft(),
                 "top-right": rect.topRight(),
@@ -273,8 +281,8 @@ class EditableTextItem(QGraphicsTextItem):
         super().mousePressEvent(event)
 
     def hoverMoveEvent(self, event):
-        rect = self.boundingRect()
-        handle_size = 6
+        rect = super().boundingRect()
+        handle_size = RESIZE_HANDLE_SIZE
         handles = {
             "top-left": rect.topLeft(),
             "top-right": rect.topRight(),
