@@ -10,8 +10,13 @@ from PySide6.QtGui import (
     QPen,
     QPainter,
 )
-from PySide6.QtWidgets import (QGraphicsItem, QGraphicsTextItem,
-                               QGraphicsItemGroup)
+from PySide6.QtWidgets import (
+    QGraphicsItem,
+    QGraphicsTextItem,
+    QGraphicsItemGroup,
+    QMenu,
+)
+from .undo_commands import RemoveCommand
 
 
 class EditableTextItem(QGraphicsTextItem):
@@ -144,10 +149,10 @@ class EditableTextItem(QGraphicsTextItem):
     def focusInEvent(self, event):
         """Обработчик получения фокуса"""
         super().focusInEvent(event)
-        self._is_editing = True
+        self._is_editing = self.textInteractionFlags() != Qt.NoTextInteraction
 
-        # Если текст это placeholder, очищаем и выделяем
-        if self.toPlainText() == self._placeholder_text:
+        # Если текст это placeholder, очищаем при начале редактирования
+        if self._is_editing and self.toPlainText() == self._placeholder_text:
             self.setPlainText("")
 
     def focusOutEvent(self, event):
@@ -163,8 +168,23 @@ class EditableTextItem(QGraphicsTextItem):
             self._ignore_content_changes = False
             self._select_all_text()
 
+        # После завершения редактирования возвращаем обычный режим
+        self.setTextInteractionFlags(Qt.NoTextInteraction)
+
     def keyPressEvent(self, event):
         """Обработчик нажатий клавиш"""
+        if not self._is_editing and event.key() == Qt.Key_Delete:
+            scene = self.scene()
+            if scene:
+                view = scene.views()[0] if scene.views() else None
+                undo_stack = getattr(view, "undo_stack", None)
+                if undo_stack:
+                    undo_stack.push(RemoveCommand(scene, self))
+                else:
+                    scene.removeItem(self)
+            event.accept()
+            return
+
         if event.modifiers() & Qt.ControlModifier:
             if event.key() == Qt.Key_B:
                 self._toggle_format("bold")
@@ -190,8 +210,8 @@ class EditableTextItem(QGraphicsTextItem):
 
     def paint(self, painter, option, widget=None):
         """Переопределяем отрисовку для лучшего отображения"""
-        # Если элемент выделен и не редактируется, рисуем рамку
-        if self.isSelected() and not self._is_editing:
+        # Если элемент выделен, рисуем рамку
+        if self.isSelected():
             painter.save()
 
             # Рисуем рамку выделения
@@ -227,7 +247,7 @@ class EditableTextItem(QGraphicsTextItem):
         super().paint(painter, option, widget)
 
     def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton and not self._is_editing:
+        if event.button() == Qt.LeftButton:
             rect = self.boundingRect()
             handle_size = 6
             handles = [
@@ -272,6 +292,27 @@ class EditableTextItem(QGraphicsTextItem):
             event.accept()
             return
         super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.setTextInteractionFlags(Qt.TextEditorInteraction)
+            self._is_editing = True
+        super().mouseDoubleClickEvent(event)
+
+    def contextMenuEvent(self, event):
+        menu = QMenu()
+        act_delete = menu.addAction("Удалить")
+        chosen = menu.exec(event.screenPos())
+        event.accept()
+        if chosen == act_delete:
+            scene = self.scene()
+            if scene:
+                view = scene.views()[0] if scene.views() else None
+                undo_stack = getattr(view, "undo_stack", None)
+                if undo_stack:
+                    undo_stack.push(RemoveCommand(scene, self))
+                else:
+                    scene.removeItem(self)
 
 
 class TextManager:
