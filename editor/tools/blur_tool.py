@@ -20,6 +20,20 @@ class BlurTool(BaseTool):
         self.blur_radius = 5
         self.edge_width = 2
 
+    def _image_rect(self) -> QRectF:
+        """Combined bounding rect of all screenshot items."""
+        items = [
+            it
+            for it in self.canvas.scene.items()
+            if isinstance(it, QGraphicsPixmapItem) and it.data(0) != "blur"
+        ]
+        if not items:
+            return QRectF()
+        rect = items[0].sceneBoundingRect()
+        for it in items[1:]:
+            rect = rect.united(it.sceneBoundingRect())
+        return rect
+
     def press(self, pos: QPointF):
         self._start = pos
         if self._rect_item is not None:
@@ -32,8 +46,7 @@ class BlurTool(BaseTool):
     def move(self, pos: QPointF):
         user_rect = QRectF(self._start, pos).normalized()
 
-        img_rect = self.canvas.pixmap_item.pixmap().rect()
-        img_rect = self.canvas.pixmap_item.mapRectToScene(img_rect)
+        img_rect = self._image_rect()
 
         clipped_rect = user_rect.intersected(img_rect)
 
@@ -77,8 +90,7 @@ class BlurTool(BaseTool):
                     self.canvas.bring_to_front(item)
 
     def _generate_blur_pixmap(self, rect: QRectF):
-        img_rect = self.canvas.pixmap_item.pixmap().rect()
-        img_rect = self.canvas.pixmap_item.mapRectToScene(img_rect).toAlignedRect()
+        img_rect = self._image_rect().toAlignedRect()
 
         rect = rect.intersected(img_rect).toAlignedRect()
         if rect.isNull() or rect.isEmpty():
