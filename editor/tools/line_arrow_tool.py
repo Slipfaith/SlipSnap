@@ -23,6 +23,7 @@ class LineTool(BaseTool):
             self._tmp.setFlag(QGraphicsItem.ItemIsMovable, True)
             self._tmp.setFlag(QGraphicsItem.ItemIsSelectable, True)
             self.canvas.undo_stack.push(AddCommand(self.canvas.scene, self._tmp))
+            self.canvas.bring_to_front(self._tmp)
         else:
             self._tmp.setLine(QLineF(self._start, pos))
 
@@ -46,6 +47,7 @@ class ArrowTool(BaseTool):
         if self._tmp is None:
             self._tmp = self._create_arrow_group(self._start, pos)
             self._tmp.setFlag(QGraphicsItem.ItemIsSelectable, True)
+            self.canvas.bring_to_front(self._tmp)
         else:
             self.canvas.scene.removeItem(self._tmp)
             self._tmp = self._create_arrow_group(self._start, pos)
@@ -54,6 +56,7 @@ class ArrowTool(BaseTool):
     def release(self, pos: QPointF):  # noqa: D401
         if self._tmp is not None:
             self.canvas.undo_stack.push(AddCommand(self.canvas.scene, self._tmp))
+            self.canvas.bring_to_front(self._tmp)
             self._tmp = None
 
     def _create_arrow_group(self, start: QPointF, end: QPointF):

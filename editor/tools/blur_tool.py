@@ -64,6 +64,8 @@ class BlurTool(BaseTool):
                 item = self._create_blur_item(rect)
                 if item:
                     self.canvas.undo_stack.push(AddCommand(self.canvas.scene, item))
+                    # Ensure new blur items appear above existing elements
+                    self.canvas.bring_to_front(item)
 
     def _generate_blur_pixmap(self, rect: QRectF):
         img_rect = self.canvas.pixmap_item.boundingRect()

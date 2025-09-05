@@ -34,5 +34,7 @@ class PencilTool(BaseTool):
                 self._path.lineTo(pos)
                 self._path_item.setPath(self._path)
             self.canvas.undo_stack.push(AddCommand(self.canvas.scene, self._path_item))
+            # Bring the new drawing to the front automatically
+            self.canvas.bring_to_front(self._path_item)
             self._path = None
             self._path_item = None
