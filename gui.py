@@ -98,12 +98,16 @@ class SelectionOverlayBase(QWidget):
             if gr.width() > 5 and gr.height() > 5:
                 left, top, w, h = self._map_rect_to_image_coords(gr)
                 crop = self.base_img.crop((left, top, left + w, top + h))
-                mask = Image.new("L", (w, h), 0)
+                # Используем увеличенную маску и последующее уменьшение,
+                # чтобы получить сглаженные края выделения
+                scale = 4
+                mask = Image.new("L", (w * scale, h * scale), 0)
                 draw = ImageDraw.Draw(mask)
                 if self.shape == "ellipse":
-                    draw.ellipse((0, 0, w, h), fill=255)
+                    draw.ellipse((0, 0, w * scale, h * scale), fill=255)
                 else:
-                    draw.rounded_rectangle((0, 0, w, h), radius=12, fill=255)
+                    draw.rounded_rectangle((0, 0, w * scale, h * scale), radius=12 * scale, fill=255)
+                mask = mask.resize((w, h), Image.LANCZOS)
                 crop.putalpha(mask)
                 qimg = ImageQt.ImageQt(crop).convertToFormat(QImage.Format_ARGB32)
                 QGuiApplication.clipboard().setImage(qimg)
