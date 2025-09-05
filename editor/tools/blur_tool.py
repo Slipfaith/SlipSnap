@@ -69,18 +69,18 @@ class BlurTool(BaseTool):
 
     def _generate_blur_pixmap(self, rect: QRectF):
         img_rect = self.canvas.pixmap_item.boundingRect()
-        img_rect = self.canvas.pixmap_item.mapRectToScene(img_rect)
-        rect = rect.intersected(img_rect)
+        img_rect = self.canvas.pixmap_item.mapRectToScene(img_rect).toAlignedRect()
+
+        rect = rect.intersected(img_rect).toAlignedRect()
         if rect.isNull() or rect.isEmpty():
             return None
 
-        radius = self.blur_radius
+        radius = int(self.blur_radius)
 
         # expand source rect so blur has neighboring pixels to sample from
         expanded = rect.adjusted(-radius, -radius, radius, radius)
-        expanded = expanded.intersected(img_rect)
-        er = expanded.toRect()
-        ex, ey, ew, eh = er.x(), er.y(), er.width(), er.height()
+        expanded = expanded.intersected(img_rect).toAlignedRect()
+        ex, ey, ew, eh = expanded.x(), expanded.y(), expanded.width(), expanded.height()
 
         img = QImage(ew, eh, QImage.Format_RGBA8888)
         img.fill(Qt.transparent)
@@ -119,10 +119,10 @@ class BlurTool(BaseTool):
         pil_blur = pil_img.filter(ImageFilter.GaussianBlur(radius))
 
         # crop to original rect inside the padded/expanded image
-        crop_x = radius + int(rect.left() - expanded.left())
-        crop_y = radius + int(rect.top() - expanded.top())
-        crop_w = int(rect.width())
-        crop_h = int(rect.height())
+        crop_x = radius + rect.left() - expanded.left()
+        crop_y = radius + rect.top() - expanded.top()
+        crop_w = rect.width()
+        crop_h = rect.height()
         pil_blur = pil_blur.crop((crop_x, crop_y, crop_x + crop_w, crop_y + crop_h))
 
         edge = min(self.edge_width, crop_w // 2, crop_h // 2)
@@ -133,7 +133,7 @@ class BlurTool(BaseTool):
             mask = mask.filter(ImageFilter.GaussianBlur(edge))
             pil_blur.putalpha(mask)
 
-        return pil_to_qpixmap(pil_blur), rect.topLeft()
+        return pil_to_qpixmap(pil_blur), QPointF(rect.topLeft())
 
     def _create_blur_item(self, rect: QRectF):
         result = self._generate_blur_pixmap(rect)
