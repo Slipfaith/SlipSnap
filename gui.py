@@ -104,9 +104,7 @@ class SelectionOverlayBase(QWidget):
                     draw.ellipse((0, 0, w, h), fill=255)
                 else:
                     draw.rounded_rectangle((0, 0, w, h), radius=12, fill=255)
-                out = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-                out.paste(crop, (0, 0), mask)
-                crop = out
+                crop.putalpha(mask)
                 qimg = ImageQt.ImageQt(crop).convertToFormat(QImage.Format_ARGB32)
                 QGuiApplication.clipboard().setImage(qimg)
                 self.captured.emit(qimg)
