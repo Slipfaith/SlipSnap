@@ -68,7 +68,7 @@ class BlurTool(BaseTool):
                     self.canvas.bring_to_front(item)
 
     def _generate_blur_pixmap(self, rect: QRectF):
-        img_rect = self.canvas.pixmap_item.boundingRect()
+        img_rect = self.canvas.pixmap_item.pixmap().rect()
         img_rect = self.canvas.pixmap_item.mapRectToScene(img_rect).toAlignedRect()
 
         rect = rect.intersected(img_rect).toAlignedRect()
