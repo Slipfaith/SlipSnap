@@ -7,7 +7,9 @@ from PySide6.QtWidgets import (
     QDialog,
     QGridLayout,
     QHBoxLayout,
+    QLabel,
     QPushButton,
+    QScrollArea,
     QToolButton,
     QVBoxLayout,
 )
@@ -48,6 +50,7 @@ class CollageDialog(QDialog):
                 )
                 btn.setIconSize(QSize(160, 90))
             btn.setToolTip(p.name)
+            btn.clicked.connect(lambda checked=False, path=p: self._preview_image(path))
             self._buttons.append((btn, p))
             self.grid.addWidget(btn, i // 5, i % 5)
 
@@ -67,4 +70,20 @@ class CollageDialog(QDialog):
             if btn.isChecked():
                 out.append(path)
         return out
+
+    def _preview_image(self, path: Path) -> None:
+        """Open a simple dialog to preview the screenshot."""
+        dlg = QDialog(self)
+        dlg.setWindowTitle(path.name)
+        vbox = QVBoxLayout(dlg)
+        scroll = QScrollArea(dlg)
+        label = QLabel()
+        pix = QPixmap(str(path))
+        if not pix.isNull():
+            label.setPixmap(pix)
+            label.setAlignment(Qt.AlignCenter)
+        scroll.setWidget(label)
+        vbox.addWidget(scroll)
+        dlg.resize(min(pix.width() + 20, 800), min(pix.height() + 20, 600))
+        dlg.exec()
 
