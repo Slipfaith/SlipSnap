@@ -38,6 +38,7 @@ class EditableTextItem(QGraphicsTextItem):
         self.setFlag(QGraphicsItem.ItemIsSelectable, True)
         self.setFlag(QGraphicsItem.ItemIsFocusable, True)
         self.setTextInteractionFlags(Qt.TextEditorInteraction)
+        self.setAcceptHoverEvents(True)
 
         # Устанавливаем начальные параметры
         self.setFont(self._font)
@@ -218,20 +219,26 @@ class EditableTextItem(QGraphicsTextItem):
             painter.setBrush(Qt.NoBrush)
             painter.drawRoundedRect(rect, 8, 8)
 
-            # Рисуем квадрат для изменения размера в правом нижнем углу
+            # Рисуем квадраты для изменения размера в углах
             handle_size = 6
-            handle_pos = rect.bottomRight()
+            handle_positions = [
+                rect.topLeft(),
+                rect.topRight(),
+                rect.bottomLeft(),
+                rect.bottomRight(),
+            ]
 
             painter.setBrush(QColor(70, 130, 240))
             painter.setPen(QPen(QColor(255, 255, 255), 1))
 
-            handle_rect = QRectF(
-                handle_pos.x() - handle_size / 2,
-                handle_pos.y() - handle_size / 2,
-                handle_size,
-                handle_size,
-            )
-            painter.drawRoundedRect(handle_rect, 2, 2)
+            for handle_pos in handle_positions:
+                handle_rect = QRectF(
+                    handle_pos.x() - handle_size / 2,
+                    handle_pos.y() - handle_size / 2,
+                    handle_size,
+                    handle_size,
+                )
+                painter.drawRoundedRect(handle_rect, 2, 2)
 
             painter.restore()
 
@@ -242,6 +249,9 @@ class EditableTextItem(QGraphicsTextItem):
             rect = self.boundingRect()
             handle_size = 6
             handles = {
+                "top-left": rect.topLeft(),
+                "top-right": rect.topRight(),
+                "bottom-left": rect.bottomLeft(),
                 "bottom-right": rect.bottomRight(),
             }
             for name, handle in handles.items():
@@ -260,12 +270,66 @@ class EditableTextItem(QGraphicsTextItem):
                     return
         super().mousePressEvent(event)
 
+    def hoverMoveEvent(self, event):
+        rect = self.boundingRect()
+        handle_size = 6
+        handles = {
+            "top-left": rect.topLeft(),
+            "top-right": rect.topRight(),
+            "bottom-left": rect.bottomLeft(),
+            "bottom-right": rect.bottomRight(),
+        }
+        for name, handle in handles.items():
+            handle_rect = QRectF(
+                handle.x() - handle_size / 2,
+                handle.y() - handle_size / 2,
+                handle_size,
+                handle_size,
+            )
+            if handle_rect.contains(event.pos()):
+                if name in ("top-left", "bottom-right"):
+                    self.setCursor(Qt.SizeFDiagCursor)
+                else:
+                    self.setCursor(Qt.SizeBDiagCursor)
+                return
+        self.setCursor(Qt.IBeamCursor if self._is_editing else Qt.ArrowCursor)
+
+    def hoverLeaveEvent(self, event):
+        self.setCursor(Qt.IBeamCursor if self._is_editing else Qt.ArrowCursor)
+        super().hoverLeaveEvent(event)
+
     def mouseMoveEvent(self, event):
-        if self._resizing and self._resize_handle == "bottom-right":
+        if self._resizing and self._resize_handle:
             delta = event.pos() - self._resize_start_pos
-            new_width = max(20, self._resize_start_rect.width() + delta.x())
-            new_height = max(20, self._resize_start_rect.height() + delta.y())
+            w0 = self._resize_start_rect.width()
+            h0 = self._resize_start_rect.height()
+
+            if self._resize_handle == "bottom-right":
+                new_w = w0 + delta.x()
+                new_h = h0 + delta.y()
+                new_x = self.x()
+                new_y = self.y()
+            elif self._resize_handle == "bottom-left":
+                new_w = w0 - delta.x()
+                new_h = h0 + delta.y()
+                new_x = self.x() + (w0 - max(20, new_w))
+                new_y = self.y()
+            elif self._resize_handle == "top-right":
+                new_w = w0 + delta.x()
+                new_h = h0 - delta.y()
+                new_x = self.x()
+                new_y = self.y() + (h0 - max(20, new_h))
+            else:  # top-left
+                new_w = w0 - delta.x()
+                new_h = h0 - delta.y()
+                new_x = self.x() + (w0 - max(20, new_w))
+                new_y = self.y() + (h0 - max(20, new_h))
+
+            new_width = max(20, new_w)
+            new_height = max(20, new_h)
+
             self.prepareGeometryChange()
+            self.setPos(new_x, new_y)
             self.setTextWidth(new_width)
             self.document().setPageSize(QSizeF(new_width, new_height))
             self.update()
@@ -277,6 +341,7 @@ class EditableTextItem(QGraphicsTextItem):
         if self._resizing and event.button() == Qt.LeftButton:
             self._resizing = False
             self._resize_handle = None
+            self.setCursor(Qt.IBeamCursor if self._is_editing else Qt.ArrowCursor)
             event.accept()
             return
         super().mouseReleaseEvent(event)
