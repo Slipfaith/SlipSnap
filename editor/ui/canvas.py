@@ -21,7 +21,7 @@ from editor.tools.shape_tools import RectangleTool, EllipseTool
 from editor.tools.blur_tool import BlurTool
 from editor.tools.eraser_tool import EraserTool
 from editor.tools.line_arrow_tool import LineTool, ArrowTool
-from editor.undo_commands import AddCommand, MoveCommand, ScaleCommand, ZValueCommand
+from editor.undo_commands import AddCommand, MoveCommand, ScaleCommand, ZValueCommand, RemoveCommand
 
 MARKER_ALPHA = 80
 PENCIL_WIDTH = 3
@@ -105,7 +105,26 @@ class Canvas(QGraphicsView):
     def _apply_lock_state(self):
         lock = self._tool not in ("none", "select")
         self._set_pixmap_items_interactive(not lock)
-        self.setDragMode(QGraphicsView.NoDrag)
+        if self._tool == "select":
+            self.setDragMode(QGraphicsView.RubberBandDrag)
+        else:
+            self.setDragMode(QGraphicsView.NoDrag)
+
+    def set_base_image(self, image: QImage):
+        """Replace the main screenshot and clear existing items."""
+        self.scene.clear()
+        self.pixmap_item = QGraphicsPixmapItem(QPixmap.fromImage(image))
+        self.pixmap_item.setFlag(QGraphicsItem.ItemIsMovable, True)
+        self.pixmap_item.setFlag(QGraphicsItem.ItemIsSelectable, True)
+        self.pixmap_item.setFlag(QGraphicsItem.ItemIsFocusable, True)
+        self.pixmap_item.setZValue(0)
+        self.pixmap_item.setData(0, "screenshot")
+        self.scene.addItem(self.pixmap_item)
+        self.pil_image = qimage_to_pil(image)
+        self.undo_stack.clear()
+        if self._text_manager:
+            self._text_manager.finish_current_editing()
+        self._apply_lock_state()
 
     def set_tool(self, tool: str):
         if self._text_manager:
@@ -203,6 +222,37 @@ class Canvas(QGraphicsView):
             it.setSelected(True)
         if focus_item:
             focus_item.setFocus()
+        return qimage_to_pil(img)
+
+    def export_selection(self) -> QImage:
+        selected = [it for it in self.scene.selectedItems()]
+        if not selected:
+            return self.export_image()
+        rect = selected[0].sceneBoundingRect()
+        for it in selected[1:]:
+            rect = rect.united(it.sceneBoundingRect())
+        dpr = getattr(self.window().windowHandle(), "devicePixelRatio", lambda: 1.0)()
+        try:
+            dpr = float(dpr)
+        except Exception:
+            dpr = 1.0
+        w = max(1, int(math.ceil(rect.width() * dpr)))
+        h = max(1, int(math.ceil(rect.height() * dpr)))
+        img = QImage(w, h, QImage.Format_RGBA8888)
+        img.setDevicePixelRatio(dpr)
+        img.fill(Qt.transparent)
+        hidden = []
+        for it in self.scene.items():
+            if it not in selected:
+                hidden.append((it, it.isVisible()))
+                it.setVisible(False)
+        p = QPainter(img)
+        p.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
+        p.scale(dpr, dpr)
+        self.scene.render(p, QRectF(0, 0, rect.width(), rect.height()), rect)
+        p.end()
+        for it, vis in hidden:
+            it.setVisible(vis)
         return qimage_to_pil(img)
 
     def undo(self):
@@ -351,11 +401,19 @@ class Canvas(QGraphicsView):
             menu = QMenu(self)
             act_front = menu.addAction("На передний план")
             act_back = menu.addAction("На задний план")
+            act_del = menu.addAction("Удалить")
             chosen = menu.exec(event.globalPos())
             if chosen == act_front:
                 self.bring_to_front(item)
             elif chosen == act_back:
                 self.send_to_back(item)
+            elif chosen == act_del:
+                targets = [it for it in self.scene.selectedItems() if it != self.pixmap_item]
+                if item not in targets and item != self.pixmap_item:
+                    targets = [item]
+                for it in targets:
+                    self.scene.removeItem(it)
+                    self.undo_stack.push(RemoveCommand(self.scene, it))
             event.accept()
             return
         super().contextMenuEvent(event)
