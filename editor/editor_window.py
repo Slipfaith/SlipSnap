@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 from PySide6.QtCore import Qt, QTimer, QRectF
-from PySide6.QtGui import QImage, QPixmap, QPainter, QPainterPath
+from PySide6.QtGui import QImage, QPixmap, QPainter, QPainterPath, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
@@ -52,10 +52,13 @@ class EditorWindow(QMainWindow):
         if hasattr(self, 'act_collage'):
             self._update_collage_enabled()
 
+        self.shortcut_collage = QShortcut(QKeySequence("Ctrl+Shift+N"), self)
+        self.shortcut_collage.activated.connect(lambda: self.add_screenshot(collage=True))
+
         QTimer.singleShot(0, lambda q=qimg: size_to_image(self, q))
 
         self.statusBar().showMessage(
-            "Готово | Ctrl+N: новый скриншот | Ctrl+K: история | Ctrl+L: Live | Del: удалить | Ctrl +/-: масштаб",
+            "Готово | Ctrl+N: новый скриншот | Ctrl+Shift+N: коллаж | Ctrl+K: история | Ctrl+L: Live | Del: удалить | Ctrl +/-: масштаб",
             5000,
         )
 
@@ -67,6 +70,7 @@ class EditorWindow(QMainWindow):
     def show_shortcuts(self):
         text = (
             "Ctrl+N — новый снимок\n"
+            "Ctrl+Shift+N — коллаж\n"
             "Ctrl+K — история\n"
             "Ctrl+L — Live Text\n"
             "Ctrl+C — копировать\n"
@@ -142,18 +146,21 @@ class EditorWindow(QMainWindow):
         super().keyPressEvent(event)
 
     # ---- screenshots ----
-    def add_screenshot(self):
+    def add_screenshot(self, collage: bool = False):
         try:
             from gui import OverlayManager
             self.setWindowState(self.windowState() | Qt.WindowMinimized)
             self.hide()
             QApplication.processEvents()
             self.overlay_manager = OverlayManager(self.cfg)
-            self.overlay_manager.captured.connect(self._on_new_screenshot)
+            self.overlay_manager.captured.connect(lambda q: self._on_new_screenshot(q, collage))
             QTimer.singleShot(25, self.overlay_manager.start)
         except Exception as e:
             self.show()
             QMessageBox.critical(self, "Ошибка", f"Не удалось захватить скриншот: {e}")
+
+    def new_screenshot(self):
+        self.add_screenshot(collage=False)
 
     def _rounded_pixmap(self, qimg: QImage, radius: int = 12) -> QPixmap:
         pixmap = QPixmap(qimg.size())
@@ -190,7 +197,7 @@ class EditorWindow(QMainWindow):
         self._update_collage_enabled()
         self.canvas._apply_lock_state()
 
-    def _on_new_screenshot(self, qimg: QImage):
+    def _on_new_screenshot(self, qimg: QImage, collage: bool):
         try:
             self.overlay_manager.close_all()
         except Exception:
@@ -206,11 +213,15 @@ class EditorWindow(QMainWindow):
         except Exception:
             pass
 
-        self._insert_screenshot_item(qimg)
-        self.statusBar().showMessage(
-            "📸 Новый скриншот добавлен (можно двигать и масштабировать)", 2500
-        )
-
+        if collage:
+            self._insert_screenshot_item(qimg)
+            self.statusBar().showMessage(
+                "📸 Новый скриншот добавлен (можно двигать и масштабировать)", 2500
+            )
+        else:
+            self.canvas.set_base_image(qimg)
+            self.statusBar().showMessage("📸 Новый скриншот", 2000)
+        
     # ---- collage ----
     def open_collage(self):
         from collage import CollageDialog

@@ -14,7 +14,10 @@ class EditorLogic:
         return self.canvas.export_image()
 
     def copy_to_clipboard(self):
-        img = self.export_image()
+        if self.canvas.scene.selectedItems():
+            img = self.canvas.export_selection()
+        else:
+            img = self.export_image()
         qim = ImageQt.ImageQt(img)
         QApplication.clipboard().setImage(qim)
 
