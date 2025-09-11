@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QKeySequenceEdit,
 )
-from qhotkey import QHotkey
+from pyqtkeybind import keybinder
 
 from logic import load_config, save_config, ScreenGrabber, qimage_to_pil, save_history
 from editor.editor_window import EditorWindow
@@ -496,9 +496,9 @@ class App(QObject):
         self.launcher.start_capture.connect(self.capture)
         self.launcher.toggle_shape.connect(self._toggle_shape)
         self.launcher.hotkey_changed.connect(self._update_hotkey)
-        self._hotkey = QHotkey(parent=self)
+        keybinder.init()
+        self._hotkey_seq = None
         self._register_hotkey(self.cfg.get("capture_hotkey", "Ctrl+Alt+S"))
-        self._hotkey.activated.connect(self.capture)
         self.launcher.show()
         self._captured_once = False
 
@@ -507,7 +507,10 @@ class App(QObject):
             self.ovm.set_shape(self.cfg.get("shape", "rect"))
 
     def _register_hotkey(self, seq: str):
-        self._hotkey.setShortcut(QKeySequence(seq), register=True)
+        if self._hotkey_seq:
+            keybinder.unregister_hotkey(None, self._hotkey_seq)
+        keybinder.register_hotkey(None, seq, self.capture)
+        self._hotkey_seq = seq
 
     def _update_hotkey(self, seq: str):
         self._register_hotkey(seq)
