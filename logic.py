@@ -18,6 +18,7 @@ DEFAULT_CONFIG = {
     "tesseract_path": "",
     "pen_width": 3,
     "font_px": 18,
+    "capture_hotkey": "Ctrl+Alt+S",
 }
 
 def load_config() -> dict:
