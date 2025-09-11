@@ -508,9 +508,16 @@ class App(QObject):
 
     def _register_hotkey(self, seq: str):
         if self._hotkey_seq:
-            keybinder.unregister_hotkey(None, self._hotkey_seq)
-        keybinder.register_hotkey(None, seq, self.capture)
-        self._hotkey_seq = seq
+            try:
+                keybinder.unregister_hotkey(None, self._hotkey_seq)
+            except KeyError:
+                pass
+
+        if keybinder.register_hotkey(None, seq, self.capture):
+            self._hotkey_seq = seq
+        else:
+            self._hotkey_seq = None
+            QMessageBox.warning(None, "SlipSnap", f"Не удалось зарегистрировать горячую клавишу: {seq}")
 
     def _update_hotkey(self, seq: str):
         self._register_hotkey(seq)
