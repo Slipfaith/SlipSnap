@@ -2,11 +2,27 @@ from typing import List, Tuple
 from PIL import Image, ImageFilter, ImageDraw, ImageQt
 from PySide6.QtCore import Qt, QRect, QRectF, QPoint, QSize, Signal, QObject
 from PySide6.QtGui import (
-    QGuiApplication, QPainter, QPen, QColor, QPixmap, QImage, QPainterPath
+    QGuiApplication,
+    QPainter,
+    QPen,
+    QColor,
+    QPixmap,
+    QImage,
+    QPainterPath,
+    QKeySequence,
 )
 from PySide6.QtWidgets import (
-    QWidget, QLabel, QHBoxLayout, QVBoxLayout, QToolButton, QMessageBox
+    QWidget,
+    QLabel,
+    QHBoxLayout,
+    QVBoxLayout,
+    QToolButton,
+    QMessageBox,
+    QDialog,
+    QDialogButtonBox,
+    QKeySequenceEdit,
 )
+from qhotkey import QHotkey
 
 from logic import load_config, save_config, ScreenGrabber, qimage_to_pil, save_history
 from editor.editor_window import EditorWindow
@@ -336,6 +352,7 @@ class OverlayManager(QObject):
 class Launcher(QWidget):
     start_capture = Signal()
     toggle_shape = Signal()
+    hotkey_changed = Signal(str)
 
     def __init__(self, cfg: dict):
         super().__init__()
@@ -406,6 +423,12 @@ class Launcher(QWidget):
         self.btn_shape.clicked.connect(self._on_shape)
         btns.addWidget(self.btn_shape)
 
+        self.btn_hotkey = QToolButton()
+        self.btn_hotkey.setText(self.cfg.get("capture_hotkey", "Ctrl+Alt+S"))
+        self.btn_hotkey.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        self.btn_hotkey.clicked.connect(self._on_hotkey)
+        btns.addWidget(self.btn_hotkey)
+
         self.btn_close = QToolButton()
         self.btn_close.setIcon(make_icon_close())
         self.btn_close.setIconSize(QSize(20, 20))
@@ -447,6 +470,23 @@ class Launcher(QWidget):
         self.btn_shape.setText("Круг" if self.cfg["shape"] == "ellipse" else "Квадрат")
         self.toggle_shape.emit()
 
+    def _on_hotkey(self):
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Горячая клавиша")
+        lay = QVBoxLayout(dlg)
+        edit = QKeySequenceEdit(self.cfg.get("capture_hotkey", "Ctrl+Alt+S"))
+        lay.addWidget(edit)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        lay.addWidget(buttons)
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        if dlg.exec() and not edit.keySequence().isEmpty():
+            seq = edit.keySequence().toString()
+            self.cfg["capture_hotkey"] = seq
+            save_config(self.cfg)
+            self.btn_hotkey.setText(seq)
+            self.hotkey_changed.emit(seq)
+
 
 class App(QObject):
     def __init__(self):
@@ -455,12 +495,22 @@ class App(QObject):
         self.launcher = Launcher(self.cfg)
         self.launcher.start_capture.connect(self.capture)
         self.launcher.toggle_shape.connect(self._toggle_shape)
+        self.launcher.hotkey_changed.connect(self._update_hotkey)
+        self._hotkey = QHotkey(parent=self)
+        self._register_hotkey(self.cfg.get("capture_hotkey", "Ctrl+Alt+S"))
+        self._hotkey.activated.connect(self.capture)
         self.launcher.show()
         self._captured_once = False
 
     def _toggle_shape(self):
         if hasattr(self, "ovm"):
             self.ovm.set_shape(self.cfg.get("shape", "rect"))
+
+    def _register_hotkey(self, seq: str):
+        self._hotkey.setShortcut(QKeySequence(seq), register=True)
+
+    def _update_hotkey(self, seq: str):
+        self._register_hotkey(seq)
 
     def capture(self):
         self.launcher.hide()
