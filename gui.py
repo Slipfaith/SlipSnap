@@ -509,11 +509,11 @@ class App(QObject):
     def _register_hotkey(self, seq: str):
         if self._hotkey_seq:
             try:
-                keybinder.unregister_hotkey(None, self._hotkey_seq)
-            except KeyError:
+                keybinder.unregister_hotkey(0, self._hotkey_seq)
+            except (KeyError, AttributeError):
                 pass
 
-        if keybinder.register_hotkey(None, seq, self.capture):
+        if keybinder.register_hotkey(0, seq, self.capture):
             self._hotkey_seq = seq
         else:
             self._hotkey_seq = None
