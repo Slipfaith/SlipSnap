@@ -509,11 +509,14 @@ class App(QObject):
     def _register_hotkey(self, seq: str):
         if self._hotkey_seq:
             try:
-                keybinder.unregister_hotkey(0, self._hotkey_seq)
+                # Passing ``None`` lets the backend decide which window handle
+                # to use. Using ``0`` breaks registration on X11 backends
+                # (pyqtkeybind expects ``None`` for the root window).
+                keybinder.unregister_hotkey(None, self._hotkey_seq)
             except (KeyError, AttributeError):
                 pass
 
-        if keybinder.register_hotkey(0, seq, self.capture):
+        if keybinder.register_hotkey(None, seq, self.capture):
             self._hotkey_seq = seq
         else:
             self._hotkey_seq = None
