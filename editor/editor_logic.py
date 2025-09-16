@@ -26,8 +26,13 @@ def _qimage_to_dib_bytes(qimg: QImage) -> bytes:
     img_size = bytes_per_line * height
 
     ptr = qimg.constBits()
-    ptr.setsize(img_size)
-    buffer = bytes(ptr)
+    if hasattr(ptr, "setsize"):
+        ptr.setsize(img_size)
+        buffer = bytes(ptr)
+    else:
+        buffer = ptr.tobytes()
+        if len(buffer) > img_size:
+            buffer = buffer[:img_size]
 
     header = struct.pack(
         "<IiiHHIIiiIIIII9iIIIIIII",
