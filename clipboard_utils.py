@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import struct
 from io import BytesIO
+import sys
 from typing import Tuple
 
 from PIL import Image
@@ -99,10 +100,27 @@ def set_clipboard_from_qimage(qimg: QImage, png_data: bytes) -> None:
     bmp_bytes = qimage_to_dib_bytes(qimg)
 
     mime = QMimeData()
+    png_bytes = QByteArray(png_data)
     mime.setImageData(qimg)
-    mime.setData("image/png", QByteArray(png_data))
+    mime.setData("image/png", png_bytes)
+    if sys.platform.startswith("win"):
+        mime.setData("PNG", png_bytes)
+        mime.setData(
+            "application/x-qt-windows-mime;value=\"PNG\"",
+            png_bytes,
+        )
     if bmp_bytes:
-        mime.setData("image/bmp", QByteArray(bmp_bytes))
+        bmp_qbytes = QByteArray(bmp_bytes)
+        mime.setData("image/bmp", bmp_qbytes)
+        if sys.platform.startswith("win"):
+            mime.setData(
+                "application/x-qt-windows-mime;value=\"CF_DIB\"",
+                bmp_qbytes,
+            )
+            mime.setData(
+                "application/x-qt-windows-mime;value=\"CF_DIBV5\"",
+                bmp_qbytes,
+            )
 
     QGuiApplication.clipboard().setMimeData(mime)
 
