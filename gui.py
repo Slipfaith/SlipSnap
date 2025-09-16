@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 from pyqtkeybind import keybinder
 
 from logic import load_config, save_config, ScreenGrabber, qimage_to_pil, save_history
+from clipboard_utils import copy_pil_image_to_clipboard
 from editor.editor_window import EditorWindow
 from icons import make_icon_capture, make_icon_shape, make_icon_close
 
@@ -125,8 +126,7 @@ class SelectionOverlayBase(QWidget):
                     draw.rounded_rectangle((0, 0, w * scale, h * scale), radius=12 * scale, fill=255)
                 mask = mask.resize((w, h), Image.LANCZOS)
                 crop.putalpha(mask)
-                qimg = ImageQt.ImageQt(crop).convertToFormat(QImage.Format_ARGB32)
-                QGuiApplication.clipboard().setImage(qimg)
+                qimg = copy_pil_image_to_clipboard(crop)
                 self.captured.emit(qimg)
         self.releaseKeyboard()
         self.cancel_all.emit()
