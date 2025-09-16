@@ -1,6 +1,16 @@
 from typing import List, Tuple
 from PIL import Image, ImageFilter, ImageDraw, ImageQt
-from PySide6.QtCore import Qt, QRect, QRectF, QPoint, QSize, Signal, QObject
+from PySide6.QtCore import (
+    Qt,
+    QRect,
+    QRectF,
+    QPoint,
+    QSize,
+    Signal,
+    QObject,
+    QAbstractNativeEventFilter,
+    QAbstractEventDispatcher,
+)
 from PySide6.QtGui import (
     QGuiApplication,
     QPainter,
@@ -22,12 +32,17 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QKeySequenceEdit,
 )
-from pyqtkeybind import keybinder
-
 from logic import load_config, save_config, ScreenGrabber, qimage_to_pil, save_history
 from clipboard_utils import copy_pil_image_to_clipboard
 from editor.editor_window import EditorWindow
 from icons import make_icon_capture, make_icon_shape, make_icon_close
+from pyqtkeybind import keybinder
+
+
+class _KeybinderEventFilter(QAbstractNativeEventFilter):
+    def nativeEventFilter(self, eventType, message):
+        handled = keybinder.handler(eventType, message)
+        return handled, 0
 
 
 class SelectionOverlayBase(QWidget):
@@ -497,6 +512,11 @@ class App(QObject):
         self.launcher.toggle_shape.connect(self._toggle_shape)
         self.launcher.hotkey_changed.connect(self._update_hotkey)
         keybinder.init()
+        dispatcher = QAbstractEventDispatcher.instance()
+        self._keybinder_event_filter = None
+        if dispatcher is not None:
+            self._keybinder_event_filter = _KeybinderEventFilter()
+            dispatcher.installNativeEventFilter(self._keybinder_event_filter)
         self._hotkey_seq = None
         self._register_hotkey(self.cfg.get("capture_hotkey", "Ctrl+Alt+S"))
         self.launcher.show()
