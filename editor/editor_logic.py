@@ -34,32 +34,42 @@ def _qimage_to_dib_bytes(qimg: QImage) -> bytes:
         if len(buffer) > img_size:
             buffer = buffer[:img_size]
 
-    header = struct.pack(
-        "<IiiHHIIiiIIIII9iIIIIIII",
-        124,  # bV5Size
-        width,
-        -height,  # top-down DIB
-        1,  # planes
-        32,  # bit count
-        3,  # BI_BITFIELDS
-        img_size,
-        3780,  # ~96 DPI
-        3780,  # ~96 DPI
-        0,  # clr used
-        0,  # clr important
-        0x00FF0000,  # red mask
-        0x0000FF00,  # green mask
-        0x000000FF,  # blue mask
-        0xFF000000,  # alpha mask
-        0x57696E20,  # LCS_WINDOWS_COLOR_SPACE
-        0, 0, 0, 0, 0, 0, 0, 0, 0,  # CIEXYZ endpoints
-        0,  # gamma red
-        0,  # gamma green
-        0,  # gamma blue
-        4,  # LCS_GM_IMAGES
-        0,  # profile data
-        0,  # profile size
-        0,  # reserved
+    header = b"".join(
+        (
+            struct.pack(
+                "<IiiHHIIiiII",
+                124,  # bV5Size
+                width,
+                -height,  # top-down DIB
+                1,  # planes
+                32,  # bit count
+                3,  # BI_BITFIELDS
+                img_size,
+                3780,  # ~96 DPI
+                3780,  # ~96 DPI
+                0,  # clr used
+                0,  # clr important
+            ),
+            struct.pack(
+                "<IIII",
+                0x00FF0000,  # red mask
+                0x0000FF00,  # green mask
+                0x000000FF,  # blue mask
+                0xFF000000,  # alpha mask
+            ),
+            struct.pack("<I", 0x57696E20),  # LCS_WINDOWS_COLOR_SPACE
+            struct.pack("<9i", *([0] * 9)),  # CIEXYZ endpoints
+            struct.pack(
+                "<IIIIIII",
+                0,  # gamma red
+                0,  # gamma green
+                0,  # gamma blue
+                4,  # LCS_GM_IMAGES
+                0,  # profile data
+                0,  # profile size
+                0,  # reserved
+            ),
+        )
     )
 
     return header + buffer
