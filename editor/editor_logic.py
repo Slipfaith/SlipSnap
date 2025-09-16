@@ -1,5 +1,9 @@
+from io import BytesIO
 from pathlib import Path
-from PIL import Image, ImageQt
+
+from PIL import Image
+from PySide6.QtCore import QMimeData, QByteArray
+from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QApplication, QFileDialog
 
 from logic import HISTORY_DIR
@@ -18,8 +22,20 @@ class EditorLogic:
             img = self.canvas.export_selection()
         else:
             img = self.export_image()
-        qim = ImageQt.ImageQt(img)
-        QApplication.clipboard().setImage(qim)
+        if img.mode != "RGBA":
+            img = img.convert("RGBA")
+
+        buffer = BytesIO()
+        img.save(buffer, format="PNG")
+        data = buffer.getvalue()
+        qimg = QImage.fromData(data, "PNG")
+
+        mime = QMimeData()
+        mime.setImageData(qimg)
+        mime.setData("image/png", QByteArray(data))
+
+        clipboard = QApplication.clipboard()
+        clipboard.setMimeData(mime)
 
     def save_image(self, parent):
         img = self.export_image()
