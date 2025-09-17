@@ -1,4 +1,4 @@
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 from PIL import Image, ImageFilter, ImageDraw, ImageQt
 from PySide6.QtCore import (
     Qt,
@@ -523,6 +523,7 @@ class App(QObject):
         self.launcher.show()
         self._captured_once = False
         self._hidden_editors: List[EditorWindow] = []
+        self._capture_target_editor: Optional[EditorWindow] = None
 
     def _toggle_shape(self):
         if hasattr(self, "ovm"):
@@ -555,6 +556,22 @@ class App(QObject):
 
     def _hide_editor_windows(self):
         self._hidden_editors = []
+        self._capture_target_editor = None
+
+        focus_window = QApplication.focusWindow()
+        target: Optional[EditorWindow] = None
+        if isinstance(focus_window, EditorWindow):
+            target = focus_window
+        else:
+            focus_widget = QApplication.focusWidget()
+            if focus_widget is not None:
+                try:
+                    candidate = focus_widget.window()
+                except Exception:
+                    candidate = None
+                if isinstance(candidate, EditorWindow):
+                    target = candidate
+
         for win in self._editor_windows():
             if not win.isVisible():
                 continue
@@ -564,6 +581,9 @@ class App(QObject):
                 continue
             self._hidden_editors.append(win)
 
+        if target and target in self._hidden_editors:
+            self._capture_target_editor = target
+
     def _restore_hidden_editors(self):
         for win in self._hidden_editors:
             try:
@@ -571,6 +591,7 @@ class App(QObject):
             except Exception:
                 continue
         self._hidden_editors = []
+        self._capture_target_editor = None
 
     def capture(self):
         self._hide_editor_windows()
@@ -594,7 +615,18 @@ class App(QObject):
         try:
             img = qimage_to_pil(qimg)
             save_history(img)
-            EditorWindow(qimg, self.cfg).show()
+            target_window: Optional[EditorWindow] = None
+            candidate = self._capture_target_editor
+            if candidate and candidate in self._hidden_editors and hasattr(candidate, "load_base_screenshot"):
+                try:
+                    candidate.load_base_screenshot(qimg)
+                    target_window = candidate
+                except Exception:
+                    target_window = None
+
+            if target_window is None:
+                EditorWindow(qimg, self.cfg).show()
+            self._capture_target_editor = None
             self._captured_once = True
             self.launcher.close()
         except Exception as e:
