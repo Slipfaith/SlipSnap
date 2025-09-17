@@ -382,7 +382,10 @@ def create_actions_toolbar(window, canvas):
 
     window.addToolBar(tb)
 
-    def add_action(text, fn, checkable=False, sc=None, icon_text="", show_text=False):
+    actions: Dict[str, QAction] = {}
+    buttons: Dict[str, QToolButton] = {}
+
+    def add_action(key, text, fn, checkable=False, sc=None, icon_text="", show_text=False):
         a = QAction(text, window)
         a.setCheckable(checkable)
         if sc:
@@ -399,6 +402,8 @@ def create_actions_toolbar(window, canvas):
         btn.setToolTip(text + (f" ({sc})" if sc else ""))
         btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
         tb.addWidget(btn)
+        actions[key] = a
+        buttons[key] = btn
         return a, btn
 
     color_btn = ColorButton(QColor(ModernColors.PRIMARY))
@@ -420,12 +425,11 @@ def create_actions_toolbar(window, canvas):
     tb.addWidget(zoom_label)
     tb.addSeparator()
 
-    actions: Dict[str, QAction] = {}
-    actions['live'], _ = add_action("Live", window.toggle_live_text, sc="Ctrl+L", icon_text="🔍", show_text=False)
-    actions['new'], new_btn = add_action("Новый снимок", window.new_screenshot, sc="Ctrl+N", icon_text="📸", show_text=False)
-    actions['collage'], _ = add_action("История", window.open_collage, sc="Ctrl+K", icon_text="🖼", show_text=False)
-    add_action("Копировать", window.copy_to_clipboard, sc="Ctrl+C", icon_text="📋", show_text=False)
-    add_action("Сохранить", window.save_image, sc="Ctrl+S", icon_text="💾", show_text=False)
+    add_action("live", "Live", window.toggle_live_text, sc="Ctrl+L", icon_text="🔍", show_text=False)
+    add_action("new", "Новый снимок", window.new_screenshot, sc="Ctrl+N", icon_text="📸", show_text=False)
+    add_action("collage", "История", window.open_collage, sc="Ctrl+K", icon_text="🖼", show_text=False)
+    add_action("copy", "Копировать", window.copy_to_clipboard, sc="Ctrl+C", icon_text="📋", show_text=False)
+    add_action("save", "Сохранить", window.save_image, sc="Ctrl+S", icon_text="💾", show_text=False)
 
     undo_act = canvas.undo_stack.createUndoAction(window, "Отмена")
     undo_act.setShortcut(QKeySequence("Ctrl+Z"))
@@ -442,20 +446,25 @@ def create_actions_toolbar(window, canvas):
 
     # Контекстное меню для выбора формы скриншота
     def show_shape_menu(pos):
-        menu = QMenu(new_btn)
+        new_button = buttons.get("new")
+        if new_button is None:
+            return
+        menu = QMenu(new_button)
         rect_act = menu.addAction("Прямоугольник")
         circle_act = menu.addAction("Круг")
-        chosen = menu.exec(new_btn.mapToGlobal(pos))
+        chosen = menu.exec(new_button.mapToGlobal(pos))
         if chosen == rect_act:
             window.cfg["shape"] = "rect"
         elif chosen == circle_act:
             window.cfg["shape"] = "ellipse"
         save_config(window.cfg)
 
-    new_btn.setContextMenuPolicy(Qt.CustomContextMenu)
-    new_btn.customContextMenuRequested.connect(show_shape_menu)
+    new_btn = buttons.get("new")
+    if new_btn is not None:
+        new_btn.setContextMenuPolicy(Qt.CustomContextMenu)
+        new_btn.customContextMenuRequested.connect(show_shape_menu)
 
     # Применяем улучшенные стили
     tb.setStyleSheet(enhanced_actions_toolbar_style())
 
-    return color_btn, actions
+    return color_btn, actions, buttons
