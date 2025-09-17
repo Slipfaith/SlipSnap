@@ -96,8 +96,14 @@ class EditorWindow(QMainWindow):
                 self.text_manager.apply_color_to_selected(selected_items, focus_item)
 
     def copy_to_clipboard(self):
-        self.logic.copy_to_clipboard()
-        self.statusBar().showMessage("✅ Скопировано в буфер обмена", 2000)
+        result = self.logic.copy_to_clipboard()
+        if result == "text":
+            message = "✅ Текст скопирован в буфер обмена"
+        elif result == "selection":
+            message = "✅ Фрагмент скриншота скопирован"
+        else:
+            message = "✅ Скриншот скопирован"
+        self.statusBar().showMessage(message, 2000)
 
     def save_image(self):
         name = self.logic.save_image(self)
@@ -158,6 +164,18 @@ class EditorWindow(QMainWindow):
         self.activateWindow()
         QApplication.processEvents()
         QTimer.singleShot(0, lambda: (self.raise_(), self.activateWindow()))
+
+    def load_base_screenshot(self, qimg: QImage, message: str = "📸 Новый скриншот", duration: int = 2000):
+        try:
+            if getattr(self, "live_manager", None):
+                self.live_manager.disable()
+        except Exception:
+            pass
+        self.canvas.set_base_image(qimg)
+        self.canvas.setFocus(Qt.OtherFocusReason)
+        self._update_collage_enabled()
+        if message:
+            self.statusBar().showMessage(message, duration)
 
     def add_screenshot(self, collage: bool = False):
         try:
@@ -225,8 +243,7 @@ class EditorWindow(QMainWindow):
                 "📸 Новый скриншот добавлен (можно двигать и масштабировать)", 2500
             )
         else:
-            self.canvas.set_base_image(qimg)
-            self.statusBar().showMessage("📸 Новый скриншот", 2000)
+            self.load_base_screenshot(qimg)
         
     # ---- collage ----
     def open_collage(self):
