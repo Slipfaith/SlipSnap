@@ -16,9 +16,17 @@ def keys_from_string(keys):
     # Calculate the modifiers
     mods = 0
     qtmods = 0
-    shift = int(Qt.ShiftModifier)
-    alt = int(Qt.AltModifier)
-    ctrl = int(Qt.ControlModifier)
+    try:
+        shift = int(Qt.ShiftModifier)
+        alt = int(Qt.AltModifier)
+        ctrl = int(Qt.ControlModifier)
+    except TypeError:
+        # PySide 6.7+ returns QtCore.Qt.KeyboardModifier instances that are no
+        # longer directly convertible to ``int``.  Fall back to their numeric
+        # value to keep backward compatibility with older releases.
+        shift = Qt.ShiftModifier.value
+        alt = Qt.AltModifier.value
+        ctrl = Qt.ControlModifier.value
 
     if ks & shift == shift:
         mods |= ModsTbl.index(Qt.ShiftModifier)
