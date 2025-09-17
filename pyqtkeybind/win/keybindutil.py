@@ -12,6 +12,12 @@ from .keycodes import KeyTbl, ModsTbl
 def keys_from_string(keys):
     keysequence = QKeySequence(keys)
     ks = keysequence[0]
+    # PySide6 6.7+ returns ``QKeyCombination`` objects instead of the previous
+    # integer representation.  The downstream bitwise operations expect an
+    # ``int`` so convert the combination when necessary while keeping
+    # backwards compatibility with older versions that still return integers.
+    if hasattr(ks, "toCombined"):
+        ks = ks.toCombined()
 
     # Calculate the modifiers
     mods = 0
