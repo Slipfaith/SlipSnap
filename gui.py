@@ -22,6 +22,7 @@ from PySide6.QtGui import (
     QKeySequence,
 )
 from PySide6.QtWidgets import (
+    QApplication,
     QWidget,
     QLabel,
     QHBoxLayout,
@@ -521,6 +522,7 @@ class App(QObject):
         self._register_hotkey(self.cfg.get("capture_hotkey", "Ctrl+Alt+S"))
         self.launcher.show()
         self._captured_once = False
+        self._hidden_editors: List[EditorWindow] = []
 
     def _toggle_shape(self):
         if hasattr(self, "ovm"):
@@ -545,7 +547,33 @@ class App(QObject):
     def _update_hotkey(self, seq: str):
         self._register_hotkey(seq)
 
+    def _editor_windows(self) -> List[EditorWindow]:
+        app = QApplication.instance()
+        if app is None:
+            return []
+        return [w for w in app.topLevelWidgets() if isinstance(w, EditorWindow)]
+
+    def _hide_editor_windows(self):
+        self._hidden_editors = []
+        for win in self._editor_windows():
+            if not win.isVisible():
+                continue
+            try:
+                win.begin_capture_hide()
+            except Exception:
+                continue
+            self._hidden_editors.append(win)
+
+    def _restore_hidden_editors(self):
+        for win in self._hidden_editors:
+            try:
+                win.restore_from_capture()
+            except Exception:
+                continue
+        self._hidden_editors = []
+
     def capture(self):
+        self._hide_editor_windows()
         self.launcher.hide()
         try:
             self.ovm = OverlayManager(self.cfg)
@@ -554,9 +582,11 @@ class App(QObject):
             self.ovm.start()
         except Exception as e:
             self.launcher.show()
+            self._restore_hidden_editors()
             QMessageBox.critical(None, "SlipSnap", f"Ошибка съёмки: {e}")
 
     def _on_finished(self):
+        self._restore_hidden_editors()
         if not self._captured_once:
             self.launcher.show()
 
@@ -570,3 +600,4 @@ class App(QObject):
         except Exception as e:
             QMessageBox.critical(None, "SlipSnap", f"Ошибка обработки: {e}")
             self.launcher.show()
+            self._restore_hidden_editors()
