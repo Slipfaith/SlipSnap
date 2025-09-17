@@ -53,7 +53,14 @@ class EditorLogic:
         return Path(path).name
 
     def toggle_live_text(self):
-        return self.live_manager.toggle()
+        if not self.live_manager:
+            return "error"
+        if self.live_manager.active:
+            self.live_manager.disable()
+            return "disabled"
+        if self.live_manager.enable():
+            return "enabled"
+        return "error"
 
     def collage_available(self):
         return any(HISTORY_DIR.glob("*.png")) or any(HISTORY_DIR.glob("*.jpg")) or any(

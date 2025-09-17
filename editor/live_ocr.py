@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 from typing import List, Dict, Optional
 from dataclasses import dataclass
 
@@ -17,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 import pytesseract
+from pytesseract import TesseractNotFoundError
 from PIL import Image
 from logic import qimage_to_pil
 
@@ -321,26 +323,44 @@ class _ViewportFilter(QObject):
 class LiveTextManager:
     """Создаёт/удаляет LiveTextLayer для заданного Canvas."""
 
-    def __init__(self, canvas: QGraphicsView, lang: str = "eng+rus"):
+    def __init__(
+        self,
+        canvas: QGraphicsView,
+        lang: str = "eng+rus",
+        tesseract_cmd: Optional[str] = None,
+    ):
         self.canvas = canvas
         self.lang = lang
         self.layer: Optional[LiveTextLayer] = None
         self.pixmap_item: Optional[QGraphicsPixmapItem] = None
         self._filter = _ViewportFilter(canvas, self)
         self.active = False
+        self._tesseract_cmd: Optional[str] = None
+        self.last_error: Optional[Dict[str, str]] = None
+        if tesseract_cmd:
+            try:
+                candidate = Path(tesseract_cmd)
+            except (TypeError, ValueError):
+                candidate = None
+            if candidate and candidate.exists():
+                self.set_tesseract_cmd(str(candidate))
 
     # ---------- public ----------
     def toggle(self) -> bool:
         if self.active:
             self.disable()
             return False
-        return self.enable()
+        ok = self.enable()
+        if not ok:
+            self.active = False
+        return ok
 
     def enable(self) -> bool:
         if self.active:
             return True
         pm = self._pick_pixmap_item()
         if pm is None:
+            self.last_error = {"code": "no_pixmap", "message": "Нет изображения для распознавания"}
             return False
         self.pixmap_item = pm
 
@@ -349,9 +369,24 @@ class LiveTextManager:
         pil_img: Image.Image = qimage_to_pil(qimg)
 
         # OCR → боксы слов
-        data = pytesseract.image_to_data(
-            pil_img, lang=self.lang, output_type=pytesseract.Output.DICT
-        )
+        try:
+            if self._tesseract_cmd:
+                pytesseract.pytesseract.tesseract_cmd = self._tesseract_cmd
+            data = pytesseract.image_to_data(
+                pil_img, lang=self.lang, output_type=pytesseract.Output.DICT
+            )
+        except TesseractNotFoundError as exc:
+            self.last_error = {"code": "not_found", "message": str(exc)}
+            self.pixmap_item = None
+            return False
+        except RuntimeError as exc:
+            self.last_error = {"code": "runtime", "message": str(exc)}
+            self.pixmap_item = None
+            return False
+        except Exception as exc:
+            self.last_error = {"code": "unknown", "message": str(exc)}
+            self.pixmap_item = None
+            return False
         boxes = self._collect_boxes(data)
 
         # Слой поверх картинки
@@ -361,6 +396,7 @@ class LiveTextManager:
         # Перехват мыши для выделения
         self.canvas.viewport().installEventFilter(self._filter)
         self.active = True
+        self.last_error = None
         return True
 
     def disable(self) -> None:
@@ -395,6 +431,32 @@ class LiveTextManager:
         if self.layer:
             return self.layer.selected_text()
         return ""
+
+    def set_tesseract_cmd(self, path: Optional[str]) -> None:
+        if path:
+            self._tesseract_cmd = str(path)
+            pytesseract.pytesseract.tesseract_cmd = str(path)
+        else:
+            self._tesseract_cmd = None
+            pytesseract.pytesseract.tesseract_cmd = "tesseract"
+
+    @staticmethod
+    def validate_tesseract_path(path: Path) -> bool:
+        try:
+            candidate = Path(path)
+        except TypeError:
+            return False
+        if not candidate.exists() or not candidate.is_file():
+            return False
+        original = pytesseract.pytesseract.tesseract_cmd
+        try:
+            pytesseract.pytesseract.tesseract_cmd = str(candidate)
+            pytesseract.get_tesseract_version()
+            return True
+        except Exception:
+            return False
+        finally:
+            pytesseract.pytesseract.tesseract_cmd = original
 
     # ---------- helpers ----------
     def _pick_pixmap_item(self) -> Optional[QGraphicsPixmapItem]:
