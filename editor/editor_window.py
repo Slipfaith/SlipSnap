@@ -146,12 +146,23 @@ class EditorWindow(QMainWindow):
         super().keyPressEvent(event)
 
     # ---- screenshots ----
+    def begin_capture_hide(self):
+        self.setWindowState(self.windowState() | Qt.WindowMinimized)
+        self.hide()
+        QApplication.processEvents()
+
+    def restore_from_capture(self):
+        self.setWindowState(self.windowState() & ~Qt.WindowMinimized)
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+        QApplication.processEvents()
+        QTimer.singleShot(0, lambda: (self.raise_(), self.activateWindow()))
+
     def add_screenshot(self, collage: bool = False):
         try:
             from gui import OverlayManager
-            self.setWindowState(self.windowState() | Qt.WindowMinimized)
-            self.hide()
-            QApplication.processEvents()
+            self.begin_capture_hide()
             self.overlay_manager = OverlayManager(self.cfg)
             self.overlay_manager.captured.connect(lambda q: self._on_new_screenshot(q, collage))
             QTimer.singleShot(25, self.overlay_manager.start)
@@ -202,12 +213,7 @@ class EditorWindow(QMainWindow):
             self.overlay_manager.close_all()
         except Exception:
             pass
-        self.setWindowState(self.windowState() & ~Qt.WindowMinimized)
-        self.showNormal()
-        self.raise_()
-        self.activateWindow()
-        QApplication.processEvents()
-        QTimer.singleShot(0, lambda: (self.raise_(), self.activateWindow()))
+        self.restore_from_capture()
         try:
             save_history(qimage_to_pil(qimg))
         except Exception:
