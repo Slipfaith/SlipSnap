@@ -1,4 +1,10 @@
 # -*- coding: utf-8 -*-
+import os
+import shutil
+import sys
+from pathlib import Path
+from typing import List, Optional, Set
+
 from PySide6.QtCore import Qt, QTimer, QRectF
 from PySide6.QtGui import QImage, QPixmap, QPainter, QPainterPath, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
@@ -7,9 +13,11 @@ from PySide6.QtWidgets import (
     QApplication,
     QGraphicsItem,
     QGraphicsPixmapItem,
+    QFileDialog,
+    QMenu,
 )
 
-from logic import APP_NAME, APP_VERSION, qimage_to_pil, save_history
+from logic import APP_NAME, APP_VERSION, qimage_to_pil, save_history, save_config
 from editor.text_tools import TextManager
 from editor.live_ocr import LiveTextManager
 from editor.editor_logic import EditorLogic
@@ -45,8 +53,10 @@ class EditorWindow(QMainWindow):
         self.setStyleSheet(main_window_style())
 
         self._tool_buttons = create_tools_toolbar(self, self.canvas)
-        self.color_btn, actions = create_actions_toolbar(self, self.canvas)
+        self.color_btn, actions, action_buttons = create_actions_toolbar(self, self.canvas)
         self.act_live = actions['live']
+        self.btn_live = action_buttons.get('live')
+        self._live_button_default_style = self.btn_live.styleSheet() if self.btn_live else ""
         self.act_new = actions['new']
         self.act_collage = actions['collage']
         if hasattr(self, 'act_collage'):
@@ -54,6 +64,12 @@ class EditorWindow(QMainWindow):
 
         self.shortcut_collage = QShortcut(QKeySequence("Ctrl+Shift+N"), self)
         self.shortcut_collage.activated.connect(lambda: self.add_screenshot(collage=True))
+
+        self._live_ocr_available = True
+        if self.btn_live is not None:
+            self.btn_live.setContextMenuPolicy(Qt.CustomContextMenu)
+            self.btn_live.customContextMenuRequested.connect(self._show_live_context_menu)
+        self._init_live_ocr()
 
         QTimer.singleShot(0, lambda q=qimg: size_to_image(self, q))
 
@@ -88,6 +104,257 @@ class EditorWindow(QMainWindow):
         text = f"{APP_NAME}\nВерсия: {APP_VERSION}\nАвтор: slipfaith"
         QMessageBox.about(self, "О программе", text)
 
+    # ---- live ocr helpers ----
+    def _init_live_ocr(self) -> None:
+        enabled = self.cfg.get("live_ocr_enabled", True)
+        if not enabled:
+            self._set_live_ocr_available(False)
+            return
+        if self._ensure_tesseract_path(interactive=False):
+            self._set_live_ocr_available(True)
+            return
+        if self._ensure_tesseract_path(interactive=True):
+            self._set_live_ocr_available(True)
+        else:
+            self._disable_live_ocr(notify=True)
+
+    def _set_live_ocr_available(self, available: bool) -> None:
+        self._live_ocr_available = available
+        if self.btn_live is None:
+            return
+        if available:
+            self.btn_live.setStyleSheet(self._live_button_default_style)
+            self.btn_live.setCursor(Qt.PointingHandCursor)
+            self.btn_live.setToolTip("Live Text (Ctrl+L)")
+        else:
+            parts = [self._live_button_default_style] if self._live_button_default_style else []
+            parts.append("color: rgba(120, 120, 120, 180);")
+            self.btn_live.setStyleSheet(" ".join(p for p in parts if p))
+            self.btn_live.setCursor(Qt.ArrowCursor)
+            self.btn_live.setToolTip("Live Text недоступен. Правый клик — указать tesseract.exe")
+
+    def _current_tesseract_exists(self) -> bool:
+        path = self.cfg.get("tesseract_path")
+        if not path:
+            return False
+        try:
+            candidate = Path(path)
+        except (TypeError, ValueError):
+            return False
+        return candidate.exists() and candidate.is_file()
+
+    def _ensure_tesseract_path(self, interactive: bool, manual: bool = False) -> bool:
+        candidate = self._locate_tesseract_existing()
+        if candidate:
+            self._apply_tesseract_path(candidate)
+            return True
+        if not interactive:
+            return False
+        if not manual:
+            answer = QMessageBox.question(
+                self,
+                "Tesseract OCR",
+                "SlipSnap не нашёл установленный Tesseract OCR. Указать путь к tesseract.exe?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
+            if answer != QMessageBox.Yes:
+                return False
+        chosen = self._ask_user_for_tesseract()
+        if chosen:
+            self._apply_tesseract_path(chosen)
+            return True
+        return False
+
+    def _locate_tesseract_existing(self) -> Optional[Path]:
+        for candidate in self._tesseract_candidates():
+            if LiveTextManager.validate_tesseract_path(candidate):
+                return candidate
+        return None
+
+    def _tesseract_candidates(self) -> List[Path]:
+        exe_name = "tesseract.exe" if os.name == "nt" else "tesseract"
+        candidates: List[Path] = []
+        seen: Set[str] = set()
+
+        def add(path_like) -> None:
+            if not path_like:
+                return
+            try:
+                p = Path(path_like)
+            except (TypeError, ValueError):
+                return
+            try:
+                resolved = p.resolve()
+            except Exception:
+                resolved = p
+            key = str(resolved)
+            if key in seen:
+                return
+            seen.add(key)
+            candidates.append(resolved)
+
+        add(self.cfg.get("tesseract_path"))
+
+        for name in ("tesseract.exe", "tesseract"):
+            env_path = shutil.which(name)
+            if env_path:
+                add(env_path)
+
+        for base in self._candidate_directories():
+            add(base / exe_name)
+            add(base / "tesseract" / exe_name)
+
+        if os.name == "nt":
+            for env_var in ("PROGRAMFILES", "ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"):
+                base_dir = os.environ.get(env_var)
+                if base_dir:
+                    add(Path(base_dir) / "Tesseract-OCR" / exe_name)
+
+        return [p for p in candidates if p.exists() and p.is_file()]
+
+    def _candidate_directories(self) -> List[Path]:
+        dirs: List[Path] = []
+        try:
+            dirs.append(Path(sys.executable).resolve().parent)
+        except Exception:
+            pass
+        try:
+            dirs.append(Path(sys.argv[0]).resolve().parent)
+        except Exception:
+            pass
+        bundle = getattr(sys, "_MEIPASS", None)
+        if bundle:
+            try:
+                dirs.append(Path(bundle))
+            except Exception:
+                pass
+        module_dir = Path(__file__).resolve().parent
+        dirs.extend([module_dir, module_dir.parent, Path.cwd()])
+
+        unique: List[Path] = []
+        seen: Set[str] = set()
+        for d in dirs:
+            try:
+                resolved = d.resolve()
+            except Exception:
+                resolved = d
+            if not resolved.exists():
+                continue
+            key = str(resolved)
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(resolved)
+        return unique
+
+    def _apply_tesseract_path(self, path: Path) -> None:
+        self.cfg["tesseract_path"] = str(path)
+        self.cfg["live_ocr_enabled"] = True
+        save_config(self.cfg)
+        self.live_manager.set_tesseract_cmd(str(path))
+
+    def _ask_user_for_tesseract(self) -> Optional[Path]:
+        exe_name = "tesseract.exe" if os.name == "nt" else "tesseract"
+        while True:
+            directory = QFileDialog.getExistingDirectory(self, "Укажите папку с Tesseract OCR")
+            if not directory:
+                return None
+            candidate = Path(directory) / exe_name
+            if not candidate.exists():
+                retry = QMessageBox.question(
+                    self,
+                    "Tesseract OCR",
+                    f"В папке «{directory}» не найден {exe_name}. Повторить поиск?",
+                    QMessageBox.Retry | QMessageBox.Cancel,
+                    QMessageBox.Retry,
+                )
+                if retry == QMessageBox.Retry:
+                    continue
+                return None
+            if LiveTextManager.validate_tesseract_path(candidate):
+                return candidate
+            retry = QMessageBox.question(
+                self,
+                "Tesseract OCR",
+                f"Не удалось запустить {exe_name} по указанному пути. Повторить поиск?",
+                QMessageBox.Retry | QMessageBox.Cancel,
+                QMessageBox.Retry,
+            )
+            if retry != QMessageBox.Retry:
+                return None
+
+    def _show_live_context_menu(self, pos) -> None:
+        if self.btn_live is None:
+            return
+        menu = QMenu(self.btn_live)
+        find_action = menu.addAction("Найти tesseract.exe…")
+        chosen = menu.exec(self.btn_live.mapToGlobal(pos))
+        if chosen == find_action:
+            if self._ensure_tesseract_path(interactive=True, manual=True):
+                self._set_live_ocr_available(True)
+                self.statusBar().showMessage("🔍 Tesseract OCR найден", 3000)
+            elif not self._current_tesseract_exists():
+                self._disable_live_ocr()
+
+    def _disable_live_ocr(self, notify: bool = False) -> None:
+        self.cfg["live_ocr_enabled"] = False
+        self.cfg["tesseract_path"] = ""
+        save_config(self.cfg)
+        try:
+            self.live_manager.disable()
+        except Exception:
+            pass
+        try:
+            self.live_manager.set_tesseract_cmd(None)
+        except Exception:
+            pass
+        self._set_live_ocr_available(False)
+        if notify:
+            QMessageBox.information(
+                self,
+                "Tesseract OCR",
+                "Live Text отключён. Правый клик по иконке позволит указать путь к tesseract.exe.",
+            )
+
+    def _handle_live_text_error(self) -> None:
+        error = getattr(self.live_manager, "last_error", None)
+        code = message = None
+        if isinstance(error, dict):
+            code = error.get("code")
+            message = error.get("message")
+        if code == "not_found":
+            QMessageBox.warning(
+                self,
+                "Tesseract OCR",
+                "Не удалось найти tesseract.exe. Укажите путь вручную.",
+            )
+            if self._ensure_tesseract_path(interactive=True, manual=True):
+                self._set_live_ocr_available(True)
+                retry = self.logic.toggle_live_text()
+                if retry == "enabled":
+                    self.statusBar().showMessage("🔍 Live Text — включено", 3500)
+                    return
+                if retry == "disabled":
+                    self.statusBar().showMessage("🔍 Live Text — выключено", 2000)
+                    return
+                next_error = getattr(self.live_manager, "last_error", None)
+                extra = ""
+                if isinstance(next_error, dict):
+                    extra = next_error.get("message", "") or ""
+                text = "Не удалось включить Live Text."
+                if extra:
+                    text += f"\n{extra}"
+                QMessageBox.warning(self, "SlipSnap", text)
+                return
+            self._disable_live_ocr()
+            self.statusBar().showMessage("🔍 Live Text — выключено", 3000)
+        else:
+            text = "Не удалось включить Live Text."
+            if message:
+                text += f"\n{message}"
+            QMessageBox.warning(self, "SlipSnap", text)
+
     # ---- actions ----
     def choose_color(self):
         selected_items = list(self.canvas.scene.selectedItems())
@@ -117,11 +384,25 @@ class EditorWindow(QMainWindow):
             self.statusBar().showMessage(f"✅ Сохранено: {name}", 3000)
 
     def toggle_live_text(self):
-        ok = self.logic.toggle_live_text()
-        if ok:
+        if not getattr(self, "_live_ocr_available", True):
+            self.statusBar().showMessage(
+                "🔍 Live Text недоступен — правый клик чтобы указать путь к tesseract.exe",
+                4000,
+            )
+            return
+        if not self._current_tesseract_exists():
+            if not self._ensure_tesseract_path(interactive=True, manual=True):
+                self._disable_live_ocr()
+                self.statusBar().showMessage("🔍 Live Text — выключено", 3000)
+                return
+            self._set_live_ocr_available(True)
+        result = self.logic.toggle_live_text()
+        if result == "enabled":
             self.statusBar().showMessage("🔍 Live Text — включено", 3500)
-        else:
+        elif result == "disabled":
             self.statusBar().showMessage("🔍 Live Text — выключено", 2000)
+        else:
+            self._handle_live_text_error()
 
     def _update_collage_enabled(self):
         try:
