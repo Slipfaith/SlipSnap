@@ -9,6 +9,7 @@ import mss
 from PIL import Image
 
 APP_NAME = "SlipSnap"
+APP_VERSION = "1.0.0"
 CONFIG_PATH = Path.home() / ".slipsnap_config.json"
 HISTORY_DIR = Path(tempfile.gettempdir()) / "slipsnap_history"
 HISTORY_DIR.mkdir(parents=True, exist_ok=True)

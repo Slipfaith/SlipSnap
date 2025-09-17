@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QGraphicsPixmapItem,
 )
 
-from logic import qimage_to_pil, save_history
+from logic import APP_NAME, APP_VERSION, qimage_to_pil, save_history
 from editor.text_tools import TextManager
 from editor.live_ocr import LiveTextManager
 from editor.editor_logic import EditorLogic
@@ -66,6 +66,8 @@ class EditorWindow(QMainWindow):
         help_menu = self.menuBar().addMenu("Справка")
         act_shortcuts = help_menu.addAction("Горячие клавиши")
         act_shortcuts.triggered.connect(self.show_shortcuts)
+        act_about = help_menu.addAction("О программе")
+        act_about.triggered.connect(self.show_about)
 
     def show_shortcuts(self):
         text = (
@@ -81,6 +83,10 @@ class EditorWindow(QMainWindow):
             "Ctrl+Plus/Minus — масштаб"
         )
         QMessageBox.information(self, "Горячие клавиши", text)
+
+    def show_about(self):
+        text = f"{APP_NAME}\nВерсия: {APP_VERSION}\nАвтор: slipfaith"
+        QMessageBox.about(self, "О программе", text)
 
     # ---- actions ----
     def choose_color(self):
