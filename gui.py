@@ -1,5 +1,10 @@
 from typing import List, Tuple, Optional
 from PIL import Image, ImageFilter, ImageDraw, ImageQt
+
+try:
+    LANCZOS = Image.Resampling.LANCZOS  # Pillow >= 9.1.0
+except AttributeError:  # pragma: no cover - fallback for older Pillow
+    LANCZOS = Image.LANCZOS
 from PySide6.QtCore import (
     Qt,
     QRect,
@@ -130,22 +135,53 @@ class SelectionOverlayBase(QWidget):
             gr = self._norm(self.origin, self.current)
             if gr.width() > 5 and gr.height() > 5:
                 left, top, w, h = self._map_rect_to_image_coords(gr)
-                crop = self.base_img.crop((left, top, left + w, top + h))
-                # Используем увеличенную маску и последующее уменьшение,
-                # чтобы получить сглаженные края выделения
-                scale = 4
-                mask = Image.new("L", (w * scale, h * scale), 0)
-                draw = ImageDraw.Draw(mask)
-                if self.shape == "ellipse":
-                    draw.ellipse((0, 0, w * scale, h * scale), fill=255)
-                else:
-                    draw.rounded_rectangle((0, 0, w * scale, h * scale), radius=12 * scale, fill=255)
-                mask = mask.resize((w, h), Image.LANCZOS)
-                crop.putalpha(mask)
-                qimg = copy_pil_image_to_clipboard(crop)
-                self.captured.emit(qimg)
+                if w > 0 and h > 0:
+                    crop = self.base_img.crop((left, top, left + w, top + h))
+                    mask = self._create_selection_mask(w, h)
+                    result = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+                    result.paste(crop, (0, 0), mask)
+                    qimg = copy_pil_image_to_clipboard(result)
+                    self.captured.emit(qimg)
         self.releaseKeyboard()
         self.cancel_all.emit()
+
+    def _create_selection_mask(self, width: int, height: int) -> Image.Image:
+        """Build a smooth alpha mask for the current selection shape."""
+
+        width = max(1, int(width))
+        height = max(1, int(height))
+        max_dim = max(width, height)
+        max_allowed = 16000  # keep memory usage under control for huge selections
+        base_scale = 8
+        scale = max(1, min(base_scale, max_allowed // max(1, max_dim)))
+        if max_dim * 4 <= max_allowed:
+            scale = max(scale, 4)
+
+        scaled_w = max(1, width * scale)
+        scaled_h = max(1, height * scale)
+        mask = Image.new("L", (scaled_w, scaled_h), 0)
+        draw = ImageDraw.Draw(mask)
+
+        if self.shape == "ellipse":
+            draw.ellipse((0, 0, scaled_w, scaled_h), fill=255)
+        else:
+            base_radius = max(12.0, min(width, height) * 0.12)
+            scaled_radius = int(round(base_radius * scale))
+            scaled_radius = max(scaled_radius, scale)
+            max_radius = min(scaled_w, scaled_h) // 2
+            draw.rounded_rectangle(
+                (0, 0, scaled_w, scaled_h),
+                radius=min(scaled_radius, max_radius),
+                fill=255,
+            )
+
+        blur_radius = max(scale / 2.0, 0.8)
+        mask = mask.filter(ImageFilter.GaussianBlur(blur_radius))
+
+        if scale != 1:
+            mask = mask.resize((width, height), LANCZOS)
+
+        return mask
 
     def _norm(self, p1: QPoint, p2: QPoint) -> QRect:
         x1, y1 = p1.x(), p1.y()
@@ -157,6 +193,7 @@ class SelectionOverlayBase(QWidget):
     def paintEvent(self, e):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
+        p.setRenderHint(QPainter.HighQualityAntialiasing)
         p.drawPixmap(self.rect(), self._bg_blurred_scaled)
 
         if self.selecting:
