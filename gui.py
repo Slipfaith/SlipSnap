@@ -193,7 +193,6 @@ class SelectionOverlayBase(QWidget):
     def paintEvent(self, e):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        p.setRenderHint(QPainter.HighQualityAntialiasing)
         p.drawPixmap(self.rect(), self._bg_blurred_scaled)
 
         if self.selecting:
