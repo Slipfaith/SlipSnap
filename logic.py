@@ -20,6 +20,9 @@ DEFAULT_CONFIG = {
     "pen_width": 3,
     "font_px": 18,
     "capture_hotkey": "Ctrl+Alt+S",
+    "teams_webhook_url": "",
+    "teams_user_name": "",
+    "teams_user_email": "",
 }
 
 def load_config() -> dict:
