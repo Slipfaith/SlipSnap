@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+import io
+
 from PySide6.QtCore import Qt, QTimer, QRectF
 from PySide6.QtGui import QImage, QPixmap, QPainter, QPainterPath, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
@@ -7,9 +9,10 @@ from PySide6.QtWidgets import (
     QApplication,
     QGraphicsItem,
     QGraphicsPixmapItem,
+    QInputDialog,
 )
 
-from logic import APP_NAME, APP_VERSION, qimage_to_pil, save_history
+from logic import APP_NAME, APP_VERSION, qimage_to_pil, save_history, save_config
 from editor.text_tools import TextManager
 from editor.live_ocr import LiveTextManager
 from editor.editor_logic import EditorLogic
@@ -21,6 +24,8 @@ from .ui.styles import main_window_style
 from .ui.color_widgets import HexColorDialog
 from .ui.toolbar_factory import create_tools_toolbar, create_actions_toolbar
 from .ui.window_utils import size_to_image
+from .ui.teams_dialog import TeamsSettingsDialog
+from teams_integration import send_message_to_teams, TeamsSendError
 
 
 class EditorWindow(QMainWindow):
@@ -49,6 +54,7 @@ class EditorWindow(QMainWindow):
         self.act_live = actions['live']
         self.act_new = actions['new']
         self.act_collage = actions['collage']
+        self.act_teams = actions['teams']
         if hasattr(self, 'act_collage'):
             self._update_collage_enabled()
 
@@ -58,7 +64,7 @@ class EditorWindow(QMainWindow):
         QTimer.singleShot(0, lambda q=qimg: size_to_image(self, q))
 
         self.statusBar().showMessage(
-            "Готово | Ctrl+N: новый скриншот | Ctrl+Shift+N: коллаж | Ctrl+K: история | Ctrl+L: Live | Del: удалить | Ctrl +/-: масштаб",
+            "Готово | Ctrl+N: новый скриншот | Ctrl+Shift+N: коллаж | Ctrl+K: история | Ctrl+L: Live | Ctrl+Shift+T: Teams | Del: удалить | Ctrl +/-: масштаб",
             5000,
         )
 
@@ -75,6 +81,7 @@ class EditorWindow(QMainWindow):
             "Ctrl+Shift+N — коллаж\n"
             "Ctrl+K — история\n"
             "Ctrl+L — Live Text\n"
+            "Ctrl+Shift+T — отправить в Teams\n"
             "Ctrl+C — копировать\n"
             "Ctrl+S — сохранить\n"
             "Ctrl+Z — отмена\n"
@@ -122,6 +129,73 @@ class EditorWindow(QMainWindow):
             self.statusBar().showMessage("🔍 Live Text — включено", 3500)
         else:
             self.statusBar().showMessage("🔍 Live Text — выключено", 2000)
+
+    def open_teams_settings(self) -> bool:
+        dlg = TeamsSettingsDialog(self, self.cfg)
+        if dlg.exec():
+            self.cfg.update(dlg.values())
+            save_config(self.cfg)
+            self.statusBar().showMessage("🟣 Настройки Teams сохранены", 2500)
+            return True
+        return False
+
+    def _ensure_teams_identity(self) -> bool:
+        name = self.cfg.get("teams_user_name", "").strip()
+        webhook = self.cfg.get("teams_webhook_url", "").strip()
+        if name and webhook:
+            return True
+        return self.open_teams_settings()
+
+    def send_to_teams(self):
+        if not self._ensure_teams_identity():
+            return
+
+        default_text = ""
+        try:
+            if getattr(self, "live_manager", None):
+                default_text = (self.live_manager.selected_text() or "").strip()
+        except Exception:
+            default_text = ""
+
+        message_text, ok = QInputDialog.getMultiLineText(
+            self,
+            "Отправить в Microsoft Teams",
+            "Сообщение:",
+            default_text,
+        )
+        if not ok:
+            return
+
+        try:
+            img = self.logic.export_image()
+        except Exception as exc:
+            QMessageBox.critical(self, "Microsoft Teams", f"Не удалось подготовить изображение: {exc}")
+            return
+
+        buffer = io.BytesIO()
+        try:
+            img.save(buffer, format="PNG")
+        except Exception as exc:
+            QMessageBox.critical(self, "Microsoft Teams", f"Не удалось сформировать PNG: {exc}")
+            return
+
+        webhook = self.cfg.get("teams_webhook_url", "").strip()
+        user_name = self.cfg.get("teams_user_name", "").strip()
+        user_email = self.cfg.get("teams_user_email", "").strip()
+
+        try:
+            send_message_to_teams(
+                webhook,
+                user_name=user_name,
+                user_email=user_email,
+                message=message_text,
+                image_bytes=buffer.getvalue(),
+            )
+        except TeamsSendError as exc:
+            QMessageBox.critical(self, "Microsoft Teams", f"Не удалось отправить сообщение: {exc}")
+            return
+
+        self.statusBar().showMessage("🟣 Сообщение отправлено в Microsoft Teams", 3000)
 
     def _update_collage_enabled(self):
         try:
