@@ -426,6 +426,18 @@ def create_actions_toolbar(window, canvas):
     actions['collage'], _ = add_action("История", window.open_collage, sc="Ctrl+K", icon_text="🖼", show_text=False)
     add_action("Копировать", window.copy_to_clipboard, sc="Ctrl+C", icon_text="📋", show_text=False)
     add_action("Сохранить", window.save_image, sc="Ctrl+S", icon_text="💾", show_text=False)
+    actions['teams'], teams_btn = add_action(
+        "Отправить в Teams",
+        window.send_to_teams,
+        sc="Ctrl+Shift+T",
+        icon_text="🟣",
+        show_text=False,
+    )
+    teams_btn.setPopupMode(QToolButton.MenuButtonPopup)
+    teams_menu = QMenu(teams_btn)
+    cfg_act = teams_menu.addAction("Настройки Teams…")
+    cfg_act.triggered.connect(window.open_teams_settings)
+    teams_btn.setMenu(teams_menu)
 
     undo_act = canvas.undo_stack.createUndoAction(window, "Отмена")
     undo_act.setShortcut(QKeySequence("Ctrl+Z"))
