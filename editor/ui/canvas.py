@@ -151,16 +151,6 @@ class Canvas(QGraphicsView):
 
         self._apply_lock_state()
 
-        win = self.window()
-        try:
-            if tool != "select" and hasattr(win, "live_manager") and win.live_manager and win.live_manager.active:
-                win.live_manager.disable()
-                if hasattr(win, "statusBar"):
-                    win.statusBar().showMessage(
-                        "🔍 Live Text — выключено (переключился на инструмент рисования)", 2200)
-        except Exception:
-            pass
-
     def set_text_manager(self, text_manager: TextManager):
         self._text_manager = text_manager
 
