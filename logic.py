@@ -16,8 +16,6 @@ HISTORY_DIR.mkdir(parents=True, exist_ok=True)
 
 DEFAULT_CONFIG = {
     "shape": "rect",
-    "tesseract_path": "",
-    "live_ocr_enabled": True,
     "pen_width": 3,
     "font_px": 18,
     "capture_hotkey": "Ctrl+Alt+S",
