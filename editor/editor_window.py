@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 from logic import APP_NAME, APP_VERSION, qimage_to_pil, save_history
 from editor.text_tools import TextManager
 from editor.editor_logic import EditorLogic
+from editor.image_utils import images_from_mime
 
 from editor.undo_commands import AddCommand, RemoveCommand, ScaleCommand
 
@@ -42,6 +43,7 @@ class EditorWindow(QMainWindow):
 
         self.setCentralWidget(self.canvas)
         self._apply_modern_stylesheet()
+        self.canvas.imageDropped.connect(self._insert_screenshot_item)
 
         self._tool_buttons = create_tools_toolbar(self, self.canvas)
         self.color_btn, actions, action_buttons = create_actions_toolbar(self, self.canvas)
@@ -349,6 +351,11 @@ class EditorWindow(QMainWindow):
                     self.canvas.undo_stack.push(RemoveCommand(self.canvas.scene, item))
             if selected_items:
                 self.statusBar().showMessage("✕ Удалены выбранные элементы", 2000)
+        elif event.matches(QKeySequence.Paste):
+            if self._paste_from_clipboard():
+                self.statusBar().showMessage("◉ Вставлено из буфера обмена", 2000)
+            else:
+                self.statusBar().showMessage("⚠️ В буфере нет изображения", 2000)
         elif event.modifiers() & Qt.ControlModifier:
             selected_items = [it for it in self.canvas.scene.selectedItems()]
             if selected_items:
@@ -435,6 +442,16 @@ class EditorWindow(QMainWindow):
         self.canvas.setFocus(Qt.OtherFocusReason)
         self._update_collage_enabled()
         self.canvas._apply_lock_state()
+
+    def _paste_from_clipboard(self) -> bool:
+        clipboard = QApplication.clipboard()
+        images = images_from_mime(clipboard.mimeData())
+        inserted = False
+        for qimg in images:
+            if not qimg.isNull():
+                self._insert_screenshot_item(qimg)
+                inserted = True
+        return inserted
 
     def _on_new_screenshot(self, qimg: QImage, collage: bool):
         try:

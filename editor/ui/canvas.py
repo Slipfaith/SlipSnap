@@ -1,7 +1,7 @@
 from typing import Optional, Dict
 import math
 
-from PySide6.QtCore import Qt, QPointF, QRectF
+from PySide6.QtCore import Qt, QPointF, QRectF, Signal
 from PySide6.QtGui import QPainter, QPen, QColor, QImage, QPixmap, QUndoStack
 from PySide6.QtWidgets import (
     QGraphicsView,
@@ -22,6 +22,7 @@ from editor.tools.blur_tool import BlurTool
 from editor.tools.eraser_tool import EraserTool
 from editor.tools.line_arrow_tool import LineTool, ArrowTool
 from editor.undo_commands import AddCommand, MoveCommand, ScaleCommand, ZValueCommand, RemoveCommand
+from editor.image_utils import images_from_mime
 
 MARKER_ALPHA = 80
 PENCIL_WIDTH = 3
@@ -31,11 +32,14 @@ MARKER_WIDTH = 15
 class Canvas(QGraphicsView):
     """Drawing canvas holding the image and drawn items."""
 
+    imageDropped = Signal(QImage)
+
     def __init__(self, image: QImage):
         super().__init__()
         self.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
         self.scene = QGraphicsScene(self)
         self.setScene(self.scene)
+        self.setAcceptDrops(True)
 
         self.pixmap_item = QGraphicsPixmapItem(QPixmap.fromImage(image))
         self.pil_image = qimage_to_pil(image)  # store original PIL image
@@ -93,6 +97,29 @@ class Canvas(QGraphicsView):
         self._pencil_cursor = create_pencil_cursor()
         self._select_cursor = create_select_cursor()
         self._apply_lock_state()
+
+    # ---- drag & drop ----
+    def dragEnterEvent(self, event):
+        if images_from_mime(event.mimeData()):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        if images_from_mime(event.mimeData()):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        images = images_from_mime(event.mimeData())
+        if not images:
+            event.ignore()
+            return
+
+        for qimg in images:
+            self.imageDropped.emit(qimg)
+        event.acceptProposedAction()
 
     def _set_pixmap_items_interactive(self, enabled: bool):
         for it in self.scene.items():
