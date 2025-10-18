@@ -1,35 +1,54 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller specification for building SlipSnap into a single-file Windows executable."""
-from pathlib import Path
-import sys
+"""
+PyInstaller spec for building SlipSnap as a single-file Windows executable.
+Compatible with PyInstaller 6+ and Python 3.13+
+"""
 
+import os
+import sys
+from pathlib import Path
 from PyInstaller.utils.hooks import collect_submodules
 
-project_dir = Path(__file__).parent.resolve()
+# ----------------------------------------------------------------------
+# 💡 Project base directory
+# ----------------------------------------------------------------------
+if "__file__" in globals():
+    project_dir = Path(__file__).parent.resolve()
+else:
+    project_dir = Path(os.getcwd()).resolve()
+
+# Ensure the project path is importable
 if str(project_dir) not in sys.path:
     sys.path.insert(0, str(project_dir))
+
 block_cipher = None
 
-# Collect platform-specific helper modules that PyInstaller might miss during analysis.
+# ----------------------------------------------------------------------
+# 🔍 Hidden imports
+# ----------------------------------------------------------------------
 hiddenimports = [
     "mss.windows",
     "pyqtkeybind.win",
     "pyqtkeybind.win.keybindutil",
     "pyqtkeybind.win.keycodes",
 ]
-# Ensure package-local dynamic imports are bundled when building on non-Windows hosts.
 hiddenimports += collect_submodules("editor")
 hiddenimports += collect_submodules("pyqtkeybind")
 
+# ----------------------------------------------------------------------
+# 🧩 Path & icon
+# ----------------------------------------------------------------------
 pathex = [str(project_dir)]
 icon_path = project_dir / "SlipSnap.ico"
 
-
+# ----------------------------------------------------------------------
+# ⚙️ Analysis configuration
+# ----------------------------------------------------------------------
 a = Analysis(
     [str(project_dir / "main.py")],
     pathex=pathex,
     binaries=[],
-    datas=[],
+    datas=[],  # можно добавить ресурсы: [("assets", "assets")]
     hiddenimports=hiddenimports,
     hookspath=[],
     runtime_hooks=[],
@@ -39,7 +58,12 @@ a = Analysis(
     cipher=block_cipher,
     noarchive=False,
 )
+
+# ----------------------------------------------------------------------
+# 📦 Create executable
+# ----------------------------------------------------------------------
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+
 exe = EXE(
     pyz,
     a.scripts,
@@ -54,10 +78,11 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,
+    console=False,  # ❌ без консоли
     disable_windowed_traceback=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
     icon=str(icon_path) if icon_path.exists() else None,
+    onefile=True,  # ✅ один .exe-файл
 )
