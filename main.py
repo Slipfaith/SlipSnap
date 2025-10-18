@@ -8,6 +8,7 @@ from gui import App
 
 def main():
     app = QApplication(sys.argv)
+    app.setQuitOnLastWindowClosed(False)
     app.setApplicationName("SlipSnap")
 
     icon_path = Path(__file__).resolve().with_name("SlipSnap.ico")

@@ -1,4 +1,5 @@
 from typing import List, Tuple, Optional, TYPE_CHECKING, Type
+from pathlib import Path
 from time import perf_counter
 from PIL import Image, ImageFilter, ImageDraw, ImageQt
 
@@ -26,6 +27,7 @@ from PySide6.QtGui import (
     QImage,
     QPainterPath,
     QKeySequence,
+    QIcon,
 )
 from PySide6.QtWidgets import (
     QApplication,
@@ -38,6 +40,8 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QKeySequenceEdit,
+    QSystemTrayIcon,
+    QMenu,
 )
 from logic import load_config, save_config, qimage_to_pil, save_history
 from clipboard_utils import copy_pil_image_to_clipboard
@@ -420,6 +424,7 @@ class Launcher(QWidget):
     start_capture = Signal()
     toggle_shape = Signal()
     hotkey_changed = Signal(str)
+    request_hide = Signal()
 
     def __init__(self, cfg: dict):
         super().__init__()
@@ -501,7 +506,7 @@ class Launcher(QWidget):
         self.btn_close.setIconSize(QSize(20, 20))
         self.btn_close.setText("Закрыть")
         self.btn_close.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
-        self.btn_close.clicked.connect(self.close)
+        self.btn_close.clicked.connect(self._on_close_clicked)
         btns.addWidget(self.btn_close)
 
         layout.addLayout(btns)
@@ -513,6 +518,12 @@ class Launcher(QWidget):
 
         # Добавляем тень
         self.setGraphicsEffect(self._create_shadow_effect())
+
+    def _on_close_clicked(self):
+        self.request_hide.emit()
+
+    def force_close(self):
+        super().close()
 
     def _create_shadow_effect(self):
         from PySide6.QtWidgets import QGraphicsDropShadowEffect
@@ -564,6 +575,7 @@ class App(QObject):
         self.launcher.start_capture.connect(self.capture_region)
         self.launcher.toggle_shape.connect(self._toggle_shape)
         self.launcher.hotkey_changed.connect(self._update_hotkey)
+        self.launcher.request_hide.connect(self._on_launcher_hide_request)
         keybinder.init()
         dispatcher = QAbstractEventDispatcher.instance()
         self._keybinder_event_filter = None
@@ -580,6 +592,17 @@ class App(QObject):
         self._main_editor: Optional["EditorWindow"] = None
         self._screen_grabber: Optional["ScreenGrabber"] = None
         self._editor_window_cls: Optional[Type["EditorWindow"]] = None
+        self._tray_icon: Optional[QSystemTrayIcon] = None
+        self._tray_menu: Optional[QMenu] = None
+        self._tray_action_capture = None
+        self._tray_action_show = None
+        self._tray_action_exit = None
+        self._cleaned_up = False
+        self._is_background = False
+        self._init_tray_icon()
+        app = QApplication.instance()
+        if app is not None:
+            app.aboutToQuit.connect(self._cleanup_on_exit)
         elapsed = perf_counter() - init_started
         print(f"[SlipSnap] App initialized in {elapsed:.3f}s")
 
@@ -667,6 +690,9 @@ class App(QObject):
         self._hidden_editors = []
         self._capture_target_editor = None
 
+    def _on_launcher_hide_request(self):
+        self._enter_background(from_user=True)
+
     def capture_region(self):
         self._hide_editor_windows()
         self.launcher.hide()
@@ -689,6 +715,7 @@ class App(QObject):
             return
 
         self._full_capture_in_progress = True
+        self._update_tray_actions()
         self._hide_editor_windows()
         self.launcher.hide()
 
@@ -697,6 +724,7 @@ class App(QObject):
             img = grabber.grab_virtual()
         except Exception as e:
             self._full_capture_in_progress = False
+            self._update_tray_actions()
             self.launcher.show()
             self._restore_hidden_editors()
             QMessageBox.critical(None, "SlipSnap", f"Ошибка съёмки: {e}")
@@ -706,6 +734,7 @@ class App(QObject):
             qimg = copy_pil_image_to_clipboard(img)
         except Exception as e:
             self._full_capture_in_progress = False
+            self._update_tray_actions()
             self.launcher.show()
             self._restore_hidden_editors()
             QMessageBox.critical(None, "SlipSnap", f"Ошибка обработки: {e}")
@@ -714,11 +743,12 @@ class App(QObject):
         self._on_captured(qimg)
         self._restore_hidden_editors()
         self._full_capture_in_progress = False
+        self._update_tray_actions()
 
     def _on_finished(self):
         self._restore_hidden_editors()
         if not self._captured_once:
-            self.launcher.show()
+            self._show_launcher()
 
     def _on_captured(self, qimg: QImage):
         try:
@@ -775,7 +805,7 @@ class App(QObject):
 
             self._capture_target_editor = None
             self._captured_once = True
-            self.launcher.close()
+            self._enter_background()
         except Exception as e:
             QMessageBox.critical(None, "SlipSnap", f"Ошибка обработки: {e}")
             self.launcher.show()
@@ -783,3 +813,122 @@ class App(QObject):
 
     def _on_main_editor_destroyed(self, *_):
         self._main_editor = None
+
+    def _init_tray_icon(self):
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            return
+
+        icon = self._resolve_tray_icon()
+        self._tray_icon = QSystemTrayIcon(self)
+        self._tray_icon.setIcon(icon)
+        self._tray_icon.setToolTip("SlipSnap")
+
+        menu = QMenu("SlipSnap")
+        self._tray_action_capture = menu.addAction("Сделать скриншот")
+        self._tray_action_capture.triggered.connect(self.capture_region)
+        self._tray_action_show = menu.addAction("Открыть окно")
+        self._tray_action_show.triggered.connect(self._show_launcher)
+        menu.addSeparator()
+        self._tray_action_exit = menu.addAction("Выход")
+        self._tray_action_exit.triggered.connect(self._exit_from_tray)
+
+        self._tray_menu = menu
+        self._tray_icon.setContextMenu(menu)
+        self._tray_icon.activated.connect(self._on_tray_activated)
+        self._tray_icon.show()
+        self._update_tray_actions()
+
+    def _resolve_tray_icon(self) -> QIcon:
+        icon = QIcon()
+        app = QApplication.instance()
+        if app is not None:
+            icon = app.windowIcon()
+
+        if icon.isNull():
+            icon_path = Path(__file__).resolve().with_name("SlipSnap.ico")
+            if icon_path.exists():
+                icon = QIcon(str(icon_path))
+
+        if icon.isNull():
+            icon = make_icon_capture(40)
+
+        return icon
+
+    def _show_launcher(self):
+        if self.launcher.isHidden():
+            self.launcher.show()
+        try:
+            self.launcher.raise_()
+            self.launcher.activateWindow()
+        except Exception:
+            pass
+        self._is_background = False
+        self._update_tray_actions()
+
+    def _enter_background(self, from_user: bool = False):
+        if self._tray_icon is None:
+            if from_user:
+                self._exit_from_tray()
+            else:
+                self._show_launcher()
+            return
+
+        if not self.launcher.isHidden():
+            self.launcher.hide()
+        self._is_background = True
+        self._release_background_resources()
+        self._update_tray_actions()
+
+    def _release_background_resources(self):
+        self._hidden_editors = []
+        self._capture_target_editor = None
+        if self._main_editor is not None and not self._main_editor.isVisible():
+            self._main_editor = None
+        if getattr(self, "ovm", None) is not None:
+            try:
+                self.ovm.deleteLater()
+            except Exception:
+                pass
+            self.ovm = None
+        self._screen_grabber = None
+        self._editor_window_cls = None
+
+    def _on_tray_activated(self, reason):
+        if reason in (QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick):
+            if self._is_background or self.launcher.isHidden():
+                self._show_launcher()
+            else:
+                self._enter_background()
+
+    def _exit_from_tray(self):
+        self._cleanup_on_exit()
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()
+
+    def _cleanup_on_exit(self):
+        if self._cleaned_up:
+            return
+
+        self._cleaned_up = True
+        if self._hotkey_seq:
+            try:
+                keybinder.unregister_hotkey(None, self._hotkey_seq)
+            except (KeyError, AttributeError):
+                pass
+            self._hotkey_seq = None
+
+        if self._tray_icon is not None:
+            self._tray_icon.hide()
+            self._tray_icon.deleteLater()
+            self._tray_icon = None
+
+        if self._tray_menu is not None:
+            self._tray_menu.deleteLater()
+            self._tray_menu = None
+
+        self._release_background_resources()
+
+    def _update_tray_actions(self):
+        if self._tray_action_capture is not None:
+            self._tray_action_capture.setEnabled(not self._full_capture_in_progress)
