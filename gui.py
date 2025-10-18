@@ -545,7 +545,7 @@ class App(QObject):
         super().__init__()
         self.cfg = load_config()
         self.launcher = Launcher(self.cfg)
-        self.launcher.start_capture.connect(self.capture)
+        self.launcher.start_capture.connect(self.capture_region)
         self.launcher.toggle_shape.connect(self._toggle_shape)
         self.launcher.hotkey_changed.connect(self._update_hotkey)
         keybinder.init()
@@ -560,6 +560,7 @@ class App(QObject):
         self._captured_once = False
         self._hidden_editors: List[EditorWindow] = []
         self._capture_target_editor: Optional[EditorWindow] = None
+        self._full_capture_in_progress = False
 
     def _toggle_shape(self):
         if hasattr(self, "ovm"):
@@ -575,7 +576,7 @@ class App(QObject):
             except (KeyError, AttributeError):
                 pass
 
-        if keybinder.register_hotkey(None, seq, self.capture):
+        if keybinder.register_hotkey(None, seq, self.capture_fullscreen):
             self._hotkey_seq = seq
         else:
             self._hotkey_seq = None
@@ -629,7 +630,7 @@ class App(QObject):
         self._hidden_editors = []
         self._capture_target_editor = None
 
-    def capture(self):
+    def capture_region(self):
         self._hide_editor_windows()
         self.launcher.hide()
         try:
@@ -641,6 +642,41 @@ class App(QObject):
             self.launcher.show()
             self._restore_hidden_editors()
             QMessageBox.critical(None, "SlipSnap", f"Ошибка съёмки: {e}")
+
+    def capture(self):
+        """Backward-compatible alias for region capture."""
+        self.capture_region()
+
+    def capture_fullscreen(self):
+        if self._full_capture_in_progress:
+            return
+
+        self._full_capture_in_progress = True
+        self._hide_editor_windows()
+        self.launcher.hide()
+
+        try:
+            grabber = ScreenGrabber()
+            img = grabber.grab_virtual()
+        except Exception as e:
+            self._full_capture_in_progress = False
+            self.launcher.show()
+            self._restore_hidden_editors()
+            QMessageBox.critical(None, "SlipSnap", f"Ошибка съёмки: {e}")
+            return
+
+        try:
+            qimg = copy_pil_image_to_clipboard(img)
+        except Exception as e:
+            self._full_capture_in_progress = False
+            self.launcher.show()
+            self._restore_hidden_editors()
+            QMessageBox.critical(None, "SlipSnap", f"Ошибка обработки: {e}")
+            return
+
+        self._on_captured(qimg)
+        self._restore_hidden_editors()
+        self._full_capture_in_progress = False
 
     def _on_finished(self):
         self._restore_hidden_editors()
