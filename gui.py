@@ -1,4 +1,5 @@
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, TYPE_CHECKING, Type
+from time import perf_counter
 from PIL import Image, ImageFilter, ImageDraw, ImageQt
 
 try:
@@ -38,11 +39,15 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QKeySequenceEdit,
 )
-from logic import load_config, save_config, ScreenGrabber, qimage_to_pil, save_history
+from logic import load_config, save_config, qimage_to_pil, save_history
 from clipboard_utils import copy_pil_image_to_clipboard
-from editor.editor_window import EditorWindow
 from icons import make_icon_capture, make_icon_shape, make_icon_close
 from pyqtkeybind import keybinder
+
+
+if TYPE_CHECKING:
+    from editor.editor_window import EditorWindow
+    from logic import ScreenGrabber
 
 
 class _KeybinderEventFilter(QAbstractNativeEventFilter):
@@ -310,11 +315,18 @@ class OverlayManager(QObject):
     captured = Signal(QImage)
     finished = Signal()
 
-    def __init__(self, cfg: dict):
+    def __init__(self, cfg: dict, grabber: Optional["ScreenGrabber"] = None):
         super().__init__()
         self.cfg = cfg
-        self._grabber = ScreenGrabber()
+        self._grabber: Optional["ScreenGrabber"] = grabber
         self._overlays: List[SelectionOverlayBase] = []
+
+    def _ensure_grabber(self) -> "ScreenGrabber":
+        if self._grabber is None:
+            from logic import ScreenGrabber
+
+            self._grabber = ScreenGrabber()
+        return self._grabber
 
     def _screen_phys_rect(self, s) -> Tuple[int, int, int, int]:
         g = s.geometry()
@@ -330,7 +342,8 @@ class OverlayManager(QObject):
         )
 
     def _match_monitors(self) -> List[Tuple[object, dict]]:
-        sct = self._grabber._sct
+        grabber = self._ensure_grabber()
+        sct = grabber._sct
         mons = sct.monitors[1:]
         out: List[Tuple[object, dict]] = []
         for s in QGuiApplication.screens():
@@ -367,9 +380,10 @@ class OverlayManager(QObject):
 
     def _start_virtual(self):
         virt = QGuiApplication.primaryScreen().virtualGeometry()
-        img = self._grabber.grab_virtual()
+        grabber = self._ensure_grabber()
+        img = grabber.grab_virtual()
         mapping = self._match_monitors()
-        base_origin = (self._grabber._sct.monitors[0]["left"], self._grabber._sct.monitors[0]["top"])
+        base_origin = (grabber._sct.monitors[0]["left"], grabber._sct.monitors[0]["top"])
         ov = VirtualOverlay(img, self.cfg, virt, mapping, base_origin)
         ov.captured.connect(self._on_captured)
         ov.cancel_all.connect(self.close_all)
@@ -379,8 +393,9 @@ class OverlayManager(QObject):
 
     def _start_per_screen(self):
         mapping = self._match_monitors()
+        grabber = self._ensure_grabber()
         for s, mon in mapping:
-            img = self._grabber.grab(s)
+            img = grabber.grab(s)
             ov = ScreenOverlay(s, img, self.cfg)
             ov.captured.connect(self._on_captured)
             ov.cancel_all.connect(self.close_all)
@@ -543,6 +558,7 @@ class Launcher(QWidget):
 class App(QObject):
     def __init__(self):
         super().__init__()
+        init_started = perf_counter()
         self.cfg = load_config()
         self.launcher = Launcher(self.cfg)
         self.launcher.start_capture.connect(self.capture_region)
@@ -558,10 +574,14 @@ class App(QObject):
         self._register_hotkey(self.cfg.get("capture_hotkey", "Ctrl+Alt+S"))
         self.launcher.show()
         self._captured_once = False
-        self._hidden_editors: List[EditorWindow] = []
-        self._capture_target_editor: Optional[EditorWindow] = None
+        self._hidden_editors: List["EditorWindow"] = []
+        self._capture_target_editor: Optional["EditorWindow"] = None
         self._full_capture_in_progress = False
-        self._main_editor: Optional[EditorWindow] = None
+        self._main_editor: Optional["EditorWindow"] = None
+        self._screen_grabber: Optional["ScreenGrabber"] = None
+        self._editor_window_cls: Optional[Type["EditorWindow"]] = None
+        elapsed = perf_counter() - init_started
+        print(f"[SlipSnap] App initialized in {elapsed:.3f}s")
 
     def _toggle_shape(self):
         if hasattr(self, "ovm"):
@@ -586,18 +606,34 @@ class App(QObject):
     def _update_hotkey(self, seq: str):
         self._register_hotkey(seq)
 
-    def _editor_windows(self) -> List[EditorWindow]:
+    def _get_screen_grabber(self) -> "ScreenGrabber":
+        if self._screen_grabber is None:
+            from logic import ScreenGrabber
+
+            self._screen_grabber = ScreenGrabber()
+        return self._screen_grabber
+
+    def _get_editor_window_class(self) -> Type["EditorWindow"]:
+        if self._editor_window_cls is None:
+            from editor.editor_window import EditorWindow
+
+            self._editor_window_cls = EditorWindow
+        return self._editor_window_cls
+
+    def _editor_windows(self) -> List["EditorWindow"]:
         app = QApplication.instance()
         if app is None:
             return []
+        EditorWindow = self._get_editor_window_class()
         return [w for w in app.topLevelWidgets() if isinstance(w, EditorWindow)]
 
     def _hide_editor_windows(self):
+        EditorWindow = self._get_editor_window_class()
         self._hidden_editors = []
         self._capture_target_editor = None
 
         focus_window = QApplication.focusWindow()
-        target: Optional[EditorWindow] = None
+        target: Optional["EditorWindow"] = None
         if isinstance(focus_window, EditorWindow):
             target = focus_window
         else:
@@ -635,7 +671,7 @@ class App(QObject):
         self._hide_editor_windows()
         self.launcher.hide()
         try:
-            self.ovm = OverlayManager(self.cfg)
+            self.ovm = OverlayManager(self.cfg, self._get_screen_grabber())
             self.ovm.captured.connect(self._on_captured)
             self.ovm.finished.connect(self._on_finished)
             self.ovm.start()
@@ -657,7 +693,7 @@ class App(QObject):
         self.launcher.hide()
 
         try:
-            grabber = ScreenGrabber()
+            grabber = self._get_screen_grabber()
             img = grabber.grab_virtual()
         except Exception as e:
             self._full_capture_in_progress = False
@@ -688,7 +724,8 @@ class App(QObject):
         try:
             img = qimage_to_pil(qimg)
             save_history(img)
-            target_window: Optional[EditorWindow] = None
+            EditorWindow = self._get_editor_window_class()
+            target_window: Optional["EditorWindow"] = None
             candidate = self._capture_target_editor
             if candidate and candidate in self._hidden_editors and hasattr(candidate, "load_base_screenshot"):
                 try:
@@ -698,7 +735,7 @@ class App(QObject):
                     target_window = None
 
             if target_window is None:
-                existing: List[EditorWindow] = []
+                existing: List["EditorWindow"] = []
                 try:
                     existing = self._editor_windows()
                 except Exception:
