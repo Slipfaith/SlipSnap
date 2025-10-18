@@ -561,6 +561,7 @@ class App(QObject):
         self._hidden_editors: List[EditorWindow] = []
         self._capture_target_editor: Optional[EditorWindow] = None
         self._full_capture_in_progress = False
+        self._main_editor: Optional[EditorWindow] = None
 
     def _toggle_shape(self):
         if hasattr(self, "ovm"):
@@ -576,7 +577,7 @@ class App(QObject):
             except (KeyError, AttributeError):
                 pass
 
-        if keybinder.register_hotkey(None, seq, self.capture_fullscreen):
+        if keybinder.register_hotkey(None, seq, self.capture_region):
             self._hotkey_seq = seq
         else:
             self._hotkey_seq = None
@@ -697,7 +698,44 @@ class App(QObject):
                     target_window = None
 
             if target_window is None:
-                EditorWindow(qimg, self.cfg).show()
+                existing: List[EditorWindow] = []
+                try:
+                    existing = self._editor_windows()
+                except Exception:
+                    existing = []
+
+                if self._main_editor and self._main_editor in existing:
+                    try:
+                        self._main_editor.load_base_screenshot(qimg)
+                        target_window = self._main_editor
+                    except Exception:
+                        target_window = None
+
+                if target_window is None and existing:
+                    primary = existing[0]
+                    try:
+                        primary.load_base_screenshot(qimg)
+                        target_window = primary
+                    except Exception:
+                        target_window = None
+
+            if target_window is None:
+                target_window = EditorWindow(qimg, self.cfg)
+                target_window.destroyed.connect(self._on_main_editor_destroyed)
+                self._main_editor = target_window
+                target_window.show()
+            else:
+                if self._main_editor is None or self._main_editor is not target_window:
+                    target_window.destroyed.connect(self._on_main_editor_destroyed)
+                self._main_editor = target_window
+
+            try:
+                target_window.showNormal()
+                target_window.raise_()
+                target_window.activateWindow()
+            except Exception:
+                pass
+
             self._capture_target_editor = None
             self._captured_once = True
             self.launcher.close()
@@ -705,3 +743,6 @@ class App(QObject):
             QMessageBox.critical(None, "SlipSnap", f"Ошибка обработки: {e}")
             self.launcher.show()
             self._restore_hidden_editors()
+
+    def _on_main_editor_destroyed(self, *_):
+        self._main_editor = None
