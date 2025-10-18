@@ -95,7 +95,23 @@ def smart_grid(n: int) -> Tuple[int, int]:
 class ScreenGrabber:
     def __init__(self):
         self._sct = mss.mss()
-        self._monitors = [m for m in self._sct.monitors[1:]]
+        self._monitors = []
+        self._refresh_monitors()
+
+    def _refresh_monitors(self) -> None:
+        """Refresh cached monitor information from the MSS backend."""
+
+        try:
+            monitors = self._sct.monitors
+        except Exception:
+            monitors = None
+
+        if monitors:
+            # ``monitors`` returns a list where index 0 is the virtual monitor
+            # spanning all screens. Keep only physical monitors for matching.
+            self._monitors = [m for m in monitors[1:]]
+        else:
+            self._monitors = []
 
     def _qt_rect_phys(self, qs) -> "QRect":
         from PySide6.QtCore import QRect
@@ -131,6 +147,7 @@ class ScreenGrabber:
         return best
 
     def grab(self, qs) -> Image.Image:
+        self._refresh_monitors()
         mon = self._match_monitor(qs)
         if not mon:
             raise RuntimeError("Не удалось сопоставить монитор MSS с QScreen")
@@ -138,6 +155,10 @@ class ScreenGrabber:
         return Image.frombytes("RGB", (shot.width, shot.height), shot.rgb)
 
     def grab_virtual(self) -> Image.Image:
-        mon = self._sct.monitors[0]
+        self._refresh_monitors()
+        monitors = self._sct.monitors
+        if not monitors:
+            raise RuntimeError("Не удалось получить список мониторов MSS")
+        mon = monitors[0]
         shot = self._sct.grab(mon)
         return Image.frombytes("RGB", (shot.width, shot.height), shot.rgb)
