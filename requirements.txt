@@ -3,3 +3,4 @@ Pillow
 mss
 pytesseract
 pyqtkeybind
+psutil

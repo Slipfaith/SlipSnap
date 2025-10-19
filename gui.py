@@ -47,6 +47,7 @@ from logic import load_config, save_config, qimage_to_pil, save_history
 from clipboard_utils import copy_pil_image_to_clipboard
 from icons import make_icon_capture, make_icon_shape, make_icon_close
 from pyqtkeybind import keybinder
+from resource_monitor import ResourceMonitor
 
 from editor.series_capture import SeriesCaptureController
 
@@ -573,6 +574,11 @@ class App(QObject):
         super().__init__()
         init_started = perf_counter()
         self.cfg = load_config()
+        self._resource_monitor = ResourceMonitor(self)
+        self._resource_monitor.increment_counter("app_sessions")
+        self._resource_monitor.stats_updated.connect(self._update_tray_stats)
+        self._resource_monitor.start()
+        self._tray_summary = ""
         self.launcher = Launcher(self.cfg)
         self.launcher.start_capture.connect(self.capture_region)
         self.launcher.toggle_shape.connect(self._toggle_shape)
@@ -609,10 +615,24 @@ class App(QObject):
             app.aboutToQuit.connect(self._cleanup_on_exit)
         elapsed = perf_counter() - init_started
         print(f"[SlipSnap] App initialized in {elapsed:.3f}s")
+        self._resource_monitor.record_event_duration("app_initialization", elapsed)
 
     def _toggle_shape(self):
         if hasattr(self, "ovm"):
             self.ovm.set_shape(self.cfg.get("shape", "rect"))
+
+    def _update_tray_stats(self, summary: str):
+        self._tray_summary = summary or ""
+        self._apply_tray_summary()
+
+    def _apply_tray_summary(self):
+        if self._tray_icon is None:
+            return
+
+        tooltip = "SlipSnap"
+        if self._tray_summary:
+            tooltip += f"\n{self._tray_summary}"
+        self._tray_icon.setToolTip(tooltip)
 
     def _register_hotkey(self, seq: str):
         if self._hotkey_seq:
@@ -734,21 +754,24 @@ class App(QObject):
         self._enter_background(from_user=True)
 
     def capture_region(self):
-        self._hide_editor_windows()
-        self.launcher.hide()
-        try:
-            self.ovm = OverlayManager(self.cfg, self._get_screen_grabber())
-            if self._series_controller.is_active():
-                self.ovm.captured.connect(self._on_series_captured)
-                self.ovm.finished.connect(self._on_series_overlay_finished)
-            else:
-                self.ovm.captured.connect(self._on_captured)
-                self.ovm.finished.connect(self._on_finished)
-            self.ovm.start()
-        except Exception as e:
-            self.launcher.show()
-            self._restore_hidden_editors()
-            QMessageBox.critical(None, "SlipSnap", f"Ошибка съёмки: {e}")
+        self._resource_monitor.increment_counter("capture_region_requests")
+        with self._resource_monitor.measure("capture_region_setup"):
+            self._hide_editor_windows()
+            self.launcher.hide()
+            try:
+                self.ovm = OverlayManager(self.cfg, self._get_screen_grabber())
+                if self._series_controller.is_active():
+                    self.ovm.captured.connect(self._on_series_captured)
+                    self.ovm.finished.connect(self._on_series_overlay_finished)
+                else:
+                    self.ovm.captured.connect(self._on_captured)
+                    self.ovm.finished.connect(self._on_finished)
+                self.ovm.start()
+            except Exception as e:
+                self._resource_monitor.increment_counter("capture_region_failures")
+                self.launcher.show()
+                self._restore_hidden_editors()
+                QMessageBox.critical(None, "SlipSnap", f"Ошибка съёмки: {e}")
 
     def capture(self):
         """Backward-compatible alias for region capture."""
@@ -756,38 +779,43 @@ class App(QObject):
 
     def capture_fullscreen(self):
         if self._full_capture_in_progress:
+            self._resource_monitor.increment_counter("capture_fullscreen_skipped")
             return
 
-        self._full_capture_in_progress = True
-        self._update_tray_actions()
-        self._hide_editor_windows()
-        self.launcher.hide()
+        self._resource_monitor.increment_counter("capture_fullscreen_requests")
+        with self._resource_monitor.measure("capture_fullscreen_total"):
+            self._full_capture_in_progress = True
+            self._update_tray_actions()
+            self._hide_editor_windows()
+            self.launcher.hide()
 
-        try:
-            grabber = self._get_screen_grabber()
-            img = grabber.grab_virtual()
-        except Exception as e:
+            try:
+                grabber = self._get_screen_grabber()
+                img = grabber.grab_virtual()
+            except Exception as e:
+                self._resource_monitor.increment_counter("capture_fullscreen_failures")
+                self._full_capture_in_progress = False
+                self._update_tray_actions()
+                self.launcher.show()
+                self._restore_hidden_editors()
+                QMessageBox.critical(None, "SlipSnap", f"Ошибка съёмки: {e}")
+                return
+
+            try:
+                qimg = copy_pil_image_to_clipboard(img)
+            except Exception as e:
+                self._resource_monitor.increment_counter("capture_fullscreen_failures")
+                self._full_capture_in_progress = False
+                self._update_tray_actions()
+                self.launcher.show()
+                self._restore_hidden_editors()
+                QMessageBox.critical(None, "SlipSnap", f"Ошибка обработки: {e}")
+                return
+
+            self._on_captured(qimg)
+            self._restore_hidden_editors()
             self._full_capture_in_progress = False
             self._update_tray_actions()
-            self.launcher.show()
-            self._restore_hidden_editors()
-            QMessageBox.critical(None, "SlipSnap", f"Ошибка съёмки: {e}")
-            return
-
-        try:
-            qimg = copy_pil_image_to_clipboard(img)
-        except Exception as e:
-            self._full_capture_in_progress = False
-            self._update_tray_actions()
-            self.launcher.show()
-            self._restore_hidden_editors()
-            QMessageBox.critical(None, "SlipSnap", f"Ошибка обработки: {e}")
-            return
-
-        self._on_captured(qimg)
-        self._restore_hidden_editors()
-        self._full_capture_in_progress = False
-        self._update_tray_actions()
 
     def _on_finished(self):
         self._restore_hidden_editors()
@@ -795,74 +823,78 @@ class App(QObject):
             self._show_launcher()
 
     def _on_captured(self, qimg: QImage):
-        try:
-            img = qimage_to_pil(qimg)
-            save_history(img)
-            EditorWindow = self._get_editor_window_class()
-            target_window: Optional["EditorWindow"] = None
-            candidate = self._capture_target_editor
-            if candidate and candidate in self._hidden_editors and hasattr(candidate, "load_base_screenshot"):
-                try:
-                    candidate.load_base_screenshot(qimg)
-                    target_window = candidate
-                except Exception:
-                    target_window = None
-
-            if target_window is None:
-                existing: List["EditorWindow"] = []
-                try:
-                    existing = self._editor_windows()
-                except Exception:
-                    existing = []
-
-                if self._main_editor and self._main_editor in existing:
+        with self._resource_monitor.measure("capture_processing"):
+            try:
+                img = qimage_to_pil(qimg)
+                with self._resource_monitor.measure("capture_history_save"):
+                    save_history(img)
+                EditorWindow = self._get_editor_window_class()
+                target_window: Optional["EditorWindow"] = None
+                candidate = self._capture_target_editor
+                if candidate and candidate in self._hidden_editors and hasattr(candidate, "load_base_screenshot"):
                     try:
-                        self._main_editor.load_base_screenshot(qimg)
-                        target_window = self._main_editor
+                        candidate.load_base_screenshot(qimg)
+                        target_window = candidate
                     except Exception:
                         target_window = None
 
-                if target_window is None and existing:
-                    primary = existing[0]
+                if target_window is None:
+                    existing: List["EditorWindow"] = []
                     try:
-                        primary.load_base_screenshot(qimg)
-                        target_window = primary
+                        existing = self._editor_windows()
                     except Exception:
-                        target_window = None
+                        existing = []
 
-            if target_window is None:
-                target_window = EditorWindow(qimg, self.cfg)
-                target_window.destroyed.connect(self._on_main_editor_destroyed)
-                self._main_editor = target_window
-                target_window.show()
-            else:
-                if self._main_editor is None or self._main_editor is not target_window:
+                    if self._main_editor and self._main_editor in existing:
+                        try:
+                            self._main_editor.load_base_screenshot(qimg)
+                            target_window = self._main_editor
+                        except Exception:
+                            target_window = None
+
+                    if target_window is None and existing:
+                        primary = existing[0]
+                        try:
+                            primary.load_base_screenshot(qimg)
+                            target_window = primary
+                        except Exception:
+                            target_window = None
+
+                if target_window is None:
+                    target_window = EditorWindow(qimg, self.cfg)
                     target_window.destroyed.connect(self._on_main_editor_destroyed)
-                self._main_editor = target_window
+                    self._main_editor = target_window
+                    target_window.show()
+                else:
+                    if self._main_editor is None or self._main_editor is not target_window:
+                        target_window.destroyed.connect(self._on_main_editor_destroyed)
+                    self._main_editor = target_window
 
-            if hasattr(target_window, "set_series_controls"):
+                if hasattr(target_window, "set_series_controls"):
+                    try:
+                        target_window.set_series_controls(
+                            self._start_series_capture, self._series_controller.is_active
+                        )
+                    except Exception:
+                        pass
+
                 try:
-                    target_window.set_series_controls(
-                        self._start_series_capture, self._series_controller.is_active
-                    )
+                    target_window.showNormal()
+                    target_window.raise_()
+                    target_window.activateWindow()
                 except Exception:
                     pass
 
-            try:
-                target_window.showNormal()
-                target_window.raise_()
-                target_window.activateWindow()
-            except Exception:
-                pass
-
-            self._capture_target_editor = None
-            self._captured_once = True
-            self._update_editor_series_buttons()
-            self._enter_background()
-        except Exception as e:
-            QMessageBox.critical(None, "SlipSnap", f"Ошибка обработки: {e}")
-            self.launcher.show()
-            self._restore_hidden_editors()
+                self._capture_target_editor = None
+                self._captured_once = True
+                self._update_editor_series_buttons()
+                self._enter_background()
+                self._resource_monitor.increment_counter("captures_completed")
+            except Exception as e:
+                self._resource_monitor.increment_counter("capture_processing_failures")
+                QMessageBox.critical(None, "SlipSnap", f"Ошибка обработки: {e}")
+                self.launcher.show()
+                self._restore_hidden_editors()
 
     def _on_main_editor_destroyed(self, *_):
         self._main_editor = None
@@ -889,6 +921,7 @@ class App(QObject):
         self._tray_icon.setContextMenu(menu)
         self._tray_icon.activated.connect(self._on_tray_activated)
         self._tray_icon.show()
+        self._apply_tray_summary()
         self._update_tray_actions()
 
     def _resolve_tray_icon(self) -> QIcon:
@@ -954,14 +987,19 @@ class App(QObject):
                 self._enter_background()
 
     def _exit_from_tray(self):
-        self._cleanup_on_exit()
+        if not self._cleanup_on_exit():
+            return
         app = QApplication.instance()
         if app is not None:
             app.quit()
 
     def _cleanup_on_exit(self):
         if self._cleaned_up:
-            return
+            return True
+
+        parent = self.launcher if self.launcher is not None else None
+        if not self._resource_monitor.prepare_shutdown(parent):
+            return False
 
         self._cleaned_up = True
         if self._hotkey_seq:
@@ -981,6 +1019,7 @@ class App(QObject):
             self._tray_menu = None
 
         self._release_background_resources()
+        return True
 
     def _update_tray_actions(self):
         if self._tray_action_capture is not None:
