@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 from PySide6.QtCore import Qt, QTimer, QRectF
-from PySide6.QtGui import QImage, QPixmap, QPainter, QPainterPath, QKeySequence, QShortcut
+from PySide6.QtGui import QImage, QPixmap, QPainter, QPainterPath, QKeySequence
 from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
@@ -48,17 +48,15 @@ class EditorWindow(QMainWindow):
         self._tool_buttons = create_tools_toolbar(self, self.canvas)
         self.color_btn, actions, action_buttons = create_actions_toolbar(self, self.canvas)
         self.act_new = actions['new']
+        self.act_series = actions.get('series')
         self.act_collage = actions['collage']
         if hasattr(self, 'act_collage'):
             self._update_collage_enabled()
 
-        self.shortcut_collage = QShortcut(QKeySequence("Ctrl+Shift+N"), self)
-        self.shortcut_collage.activated.connect(lambda: self.add_screenshot(collage=True))
-
         QTimer.singleShot(0, lambda q=qimg: size_to_image(self, q))
 
         self.statusBar().showMessage(
-            "◉ Готово | Ctrl+N: новый скриншот | Ctrl+Shift+N: коллаж | Ctrl+K: история | Del: удалить | Ctrl +/-: масштаб",
+            "◉ Готово | Ctrl+N: новый скриншот | Ctrl+Shift+N: серия | Ctrl+K: история | Ctrl+S: сохранить | Del: удалить | Ctrl +/-: масштаб",
             5000,
         )
 
