@@ -17,6 +17,7 @@ from PySide6.QtCore import (
     QObject,
     QAbstractNativeEventFilter,
     QAbstractEventDispatcher,
+    QTimer,
 )
 from PySide6.QtGui import (
     QGuiApplication,
@@ -102,9 +103,31 @@ class SelectionOverlayBase(QWidget):
         self.help.adjustSize()
         self.help.move(24, 24)
 
+        self.shape_hint = QLabel(self)
+        self.shape_hint.setAlignment(Qt.AlignCenter)
+        self.shape_hint.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.shape_hint.setStyleSheet(
+            """
+            QLabel {
+                color: #e2e8f0;
+                background: rgba(30, 30, 35, 220);
+                padding: 8px 16px;
+                font-size: 12px;
+                font-weight: 500;
+                border-radius: 10px;
+                border: 1px solid rgba(255, 255, 255, 0.08);
+            }
+        """
+        )
+        self.shape_hint.hide()
+        self._shape_hint_timer = QTimer(self)
+        self._shape_hint_timer.setSingleShot(True)
+        self._shape_hint_timer.timeout.connect(self.shape_hint.hide)
+
     def set_shape(self, shape: str):
         self.shape = shape
         self.update()
+        self._show_shape_hint()
 
     def showEvent(self, e):
         super().showEvent(e)
@@ -115,6 +138,7 @@ class SelectionOverlayBase(QWidget):
     def resizeEvent(self, e):
         self._bg_blurred_scaled = self._bg_blurred.scaled(self.size(), Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
         self._bg_original_scaled = self._bg_original.scaled(self.size(), Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+        self._position_shape_hint()
         super().resizeEvent(e)
 
     def keyPressEvent(self, e):
@@ -125,6 +149,7 @@ class SelectionOverlayBase(QWidget):
         if e.key() == Qt.Key_Space:
             self.shape = "ellipse" if self.shape == "rect" else "rect"
             self.update()
+            self._show_shape_hint()
 
     def mousePressEvent(self, e):
         if e.button() == Qt.LeftButton:
@@ -244,6 +269,25 @@ class SelectionOverlayBase(QWidget):
 
     def _map_rect_to_image_coords(self, gr: QRect) -> Tuple[int, int, int, int]:
         raise NotImplementedError
+
+    def _shape_display_name(self) -> str:
+        return "Круг" if self.shape == "ellipse" else "Прямоугольник"
+
+    def _position_shape_hint(self, force: bool = False):
+        if not force and not self.shape_hint.isVisible():
+            return
+        self.shape_hint.adjustSize()
+        margin = 24
+        x = max(margin, (self.width() - self.shape_hint.width()) // 2)
+        y = self.help.y() + self.help.height() + 12
+        self.shape_hint.move(x, y)
+
+    def _show_shape_hint(self):
+        self._shape_hint_timer.stop()
+        self.shape_hint.setText(f"Форма: {self._shape_display_name()}")
+        self._position_shape_hint(force=True)
+        self.shape_hint.show()
+        self._shape_hint_timer.start(1400)
 
 
 class ScreenOverlay(SelectionOverlayBase):
