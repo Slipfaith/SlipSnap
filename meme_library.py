@@ -1,4 +1,4 @@
-"""Utility helpers for managing the local meme library."""
+"""Utility helpers for managing the local meme stash."""
 
 from __future__ import annotations
 
@@ -90,7 +90,7 @@ def list_memes() -> List[Path]:
 
 
 def delete_memes(paths: Iterable[Path]) -> None:
-    """Remove provided meme files from the library."""
+    """Remove provided meme files from the stash."""
 
     for path in paths:
         if path.parent != MEME_DIR:

@@ -133,21 +133,46 @@ def make_icon_select() -> QIcon:
     return QIcon(pm)
 
 
-def make_icon_meme_library() -> QIcon:
+def make_icon_memes() -> QIcon:
     pm = _base_pixmap()
     p = QPainter(pm)
     p.setRenderHint(QPainter.Antialiasing)
 
-    base_color = QColor(ModernColors.PRIMARY)
-    base_color.setAlpha(220)
-    p.setBrush(QBrush(base_color))
+    # clown hair
+    hair = QColor(ModernColors.PRIMARY)
+    hair.setAlpha(220)
+    p.setBrush(QBrush(hair))
     p.setPen(Qt.NoPen)
-    p.drawRoundedRect(8, 10, 24, 20, 6, 6)
+    p.drawEllipse(5, 10, 10, 20)
+    p.drawEllipse(25, 10, 10, 20)
 
-    p.setPen(QPen(QColor("white"), 2))
+    # face
+    face = QColor(255, 255, 255, 245)
+    p.setBrush(QBrush(face))
+    outline = QColor(ModernColors.PRIMARY)
+    outline.setAlpha(200)
+    p.setPen(QPen(outline, 2))
+    p.drawEllipse(10, 8, 20, 24)
+
+    # eyes
+    p.setBrush(QBrush(QColor(255, 255, 255)))
+    p.setPen(Qt.NoPen)
+    p.drawEllipse(15, 15, 5, 5)
+    p.drawEllipse(20, 15, 5, 5)
+    p.setBrush(QBrush(QColor(63, 63, 63)))
+    p.drawEllipse(17, 17, 2, 2)
+    p.drawEllipse(22, 17, 2, 2)
+
+    # nose
+    nose = QColor(239, 68, 68)
+    nose.setAlpha(230)
+    p.setBrush(QBrush(nose))
+    p.drawEllipse(18, 20, 6, 6)
+
+    # smile
+    p.setPen(QPen(nose, 2, Qt.SolidLine, Qt.RoundCap))
     p.setBrush(Qt.NoBrush)
-    p.drawEllipse(15, 16, 10, 10)
-    p.drawArc(16, 22, 8, 6, 0, -180 * 16)
+    p.drawArc(13, 20, 14, 12, 200 * 16, 140 * 16)
 
     p.end()
     return QIcon(pm)

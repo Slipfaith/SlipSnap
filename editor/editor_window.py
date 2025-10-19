@@ -27,7 +27,7 @@ from .ui.styles import main_window_style
 from .ui.color_widgets import HexColorDialog
 from .ui.toolbar_factory import create_tools_toolbar, create_actions_toolbar
 from .ui.window_utils import size_to_image
-from .ui.meme_library_dialog import MemeLibraryDialog
+from .ui.meme_library_dialog import MemesDialog
 from icons import make_icon_series
 
 
@@ -83,8 +83,8 @@ class EditorWindow(QMainWindow):
             5000,
         )
 
-        self._meme_library_dialog = MemeLibraryDialog(self)
-        self._meme_library_dialog.memeSelected.connect(self._insert_meme_from_library)
+        self._memes_dialog = MemesDialog(self)
+        self._memes_dialog.memeSelected.connect(self._insert_meme_from_dialog)
 
         # Меню справки с горячими клавишами
         help_menu = self.menuBar().addMenu("Справка")
@@ -527,22 +527,22 @@ class EditorWindow(QMainWindow):
                 inserted = True
         return inserted
 
-    def open_meme_library(self):
-        self._meme_library_dialog.show()
-        self._meme_library_dialog.raise_()
-        self._meme_library_dialog.activateWindow()
+    def open_memes_dialog(self):
+        self._memes_dialog.show()
+        self._memes_dialog.raise_()
+        self._memes_dialog.activateWindow()
 
-    def _insert_meme_from_library(self, path: Path):
+    def _insert_meme_from_dialog(self, path: Path):
         qimg = QImage(str(path))
         if qimg.isNull():
-            QMessageBox.warning(self, "Ошибка", "Не удалось загрузить мем из библиотеки.")
+            QMessageBox.warning(self, "Ошибка", "Не удалось загрузить мем.")
             return
         self._insert_screenshot_item(qimg, item_tag="meme")
         self.statusBar().showMessage("◉ Мем добавлен на холст", 2500)
 
     def notify_meme_saved(self, path: Path):
-        self.statusBar().showMessage(f"◉ Мем сохранён в библиотеку: {path.name}", 2500)
-        self._meme_library_dialog.refresh_if_visible()
+        self.statusBar().showMessage(f"◉ Мем сохранён: {path.name}", 2500)
+        self._memes_dialog.refresh_if_visible()
 
     def _on_new_screenshot(self, qimg: QImage, collage: bool):
         try:
