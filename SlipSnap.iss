@@ -1,7 +1,7 @@
 [Setup]
 AppName=SlipSnap
 AppVersion=1.0.0
-AppPublisher=SlipFaith
+AppPublisher=slipfaith
 DefaultDirName={pf}\SlipSnap
 DefaultGroupName=SlipSnap
 UninstallDisplayIcon={app}\SlipSnap.exe
