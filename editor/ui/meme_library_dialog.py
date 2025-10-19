@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QListView,
     QMessageBox,
     QPushButton,
     QSpacerItem,
@@ -45,11 +46,16 @@ class MemeLibraryDialog(QWidget):
 
         self._list = QListWidget(self)
         self._list.setViewMode(QListWidget.IconMode)
-        self._list.setIconSize(QSize(128, 128))
+        self._list.setFlow(QListView.LeftToRight)
+        self._list.setWrapping(True)
+        self._list.setIconSize(QSize(112, 112))
+        self._list.setGridSize(QSize(136, 136))
         self._list.setResizeMode(QListWidget.Adjust)
+        self._list.setUniformItemSizes(True)
         self._list.setMovement(QListWidget.Static)
-        self._list.setSpacing(12)
+        self._list.setSpacing(10)
         self._list.setSelectionMode(QListWidget.ExtendedSelection)
+        self._list.setSelectionRectVisible(True)
         self._list.itemDoubleClicked.connect(self._on_item_double_clicked)
         layout.addWidget(self._list)
 
@@ -78,18 +84,22 @@ class MemeLibraryDialog(QWidget):
             }
             QListWidget {
                 border: 1px solid #d1d5db;
-                border-radius: 12px;
-                padding: 12px;
-                background: white;
+                border-radius: 14px;
+                padding: 16px;
+                background: #ffffff;
             }
             QListWidget::item {
-                border-radius: 12px;
+                border-radius: 14px;
                 margin: 4px;
                 padding: 6px;
+                background: transparent;
+            }
+            QListWidget::item:hover {
+                background: rgba(37, 99, 235, 0.08);
             }
             QListWidget::item:selected {
                 border: 2px solid #2563eb;
-                background: rgba(37, 99, 235, 30);
+                background: rgba(37, 99, 235, 0.15);
             }
             QPushButton {
                 background: #2563eb;
@@ -127,13 +137,15 @@ class MemeLibraryDialog(QWidget):
             pixmap = QPixmap(str(path))
             if pixmap.isNull():
                 continue
-            scaled = pixmap.scaled(128, 128, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            item = QListWidgetItem(QIcon(scaled), path.stem)
+            scaled = pixmap.scaled(112, 112, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            item = QListWidgetItem(QIcon(scaled), "")
+            item.setSizeHint(QSize(136, 136))
             item.setToolTip(path.name)
             item.setData(Qt.UserRole, path)
             self._list.addItem(item)
 
         self._empty_label.setVisible(self._list.count() == 0)
+        self._list.setVisible(self._list.count() > 0)
 
     def refresh_if_visible(self) -> None:
         if self.isVisible():
