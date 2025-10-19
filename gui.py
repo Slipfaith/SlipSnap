@@ -45,7 +45,7 @@ from PySide6.QtWidgets import (
 )
 from logic import load_config, save_config, qimage_to_pil, save_history
 from clipboard_utils import copy_pil_image_to_clipboard
-from icons import make_icon_capture, make_icon_shape, make_icon_close, make_icon_series
+from icons import make_icon_capture, make_icon_shape, make_icon_close
 from pyqtkeybind import keybinder
 
 from editor.series_capture import SeriesCaptureController
@@ -427,7 +427,6 @@ class Launcher(QWidget):
     toggle_shape = Signal()
     hotkey_changed = Signal(str)
     request_hide = Signal()
-    start_series = Signal()
 
     def __init__(self, cfg: dict):
         super().__init__()
@@ -435,7 +434,7 @@ class Launcher(QWidget):
         self.setWindowTitle("SlipSnap")
         self.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setFixedSize(300, 85)
+        self.setFixedSize(260, 85)
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
@@ -489,14 +488,6 @@ class Launcher(QWidget):
         self.btn_capture.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
         self.btn_capture.clicked.connect(self.start_capture.emit)
         btns.addWidget(self.btn_capture)
-
-        self.btn_series = QToolButton()
-        self.btn_series.setIcon(make_icon_series())
-        self.btn_series.setIconSize(QSize(20, 20))
-        self.btn_series.setText("Серия")
-        self.btn_series.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
-        self.btn_series.clicked.connect(self.start_series.emit)
-        btns.addWidget(self.btn_series)
 
         self.btn_shape = QToolButton()
         self.btn_shape.setIcon(make_icon_shape(self.cfg.get("shape", "rect")))
@@ -587,7 +578,6 @@ class App(QObject):
         self.launcher.toggle_shape.connect(self._toggle_shape)
         self.launcher.hotkey_changed.connect(self._update_hotkey)
         self.launcher.request_hide.connect(self._on_launcher_hide_request)
-        self.launcher.start_series.connect(self._start_series_capture)
         keybinder.init()
         dispatcher = QAbstractEventDispatcher.instance()
         self._keybinder_event_filter = None
@@ -612,6 +602,7 @@ class App(QObject):
         self._cleaned_up = False
         self._is_background = False
         self._series_controller = SeriesCaptureController(self.cfg)
+        self._series_parent: Optional[QWidget] = None
         self._init_tray_icon()
         app = QApplication.instance()
         if app is not None:
@@ -642,16 +633,33 @@ class App(QObject):
     def _update_hotkey(self, seq: str):
         self._register_hotkey(seq)
 
-    def _start_series_capture(self):
-        if self._series_controller.begin_session(self.launcher):
+    def _start_series_capture(self, parent: Optional[QWidget] = None) -> bool:
+        if parent is None:
+            parent = self.launcher
+        if self._series_controller.begin_session(parent):
             save_config(self.cfg)
+            self._series_parent = parent
+            self._update_editor_series_buttons()
+            return True
+        if not self._series_controller.is_active():
+            self._series_parent = None
+        self._update_editor_series_buttons()
+        return False
 
     def _on_series_captured(self, qimg: QImage):
-        self._series_controller.save_capture(self.launcher, qimg)
+        parent = self._series_parent or self.launcher
+        result = self._series_controller.save_capture(parent, qimg)
+        if result is None and not self._series_controller.is_active():
+            self._series_parent = None
+            self._update_editor_series_buttons()
 
     def _on_series_overlay_finished(self):
         self._restore_hidden_editors()
-        self._series_controller.handle_overlay_finished(self.launcher)
+        parent = self._series_parent or self.launcher
+        finished = self._series_controller.handle_overlay_finished(parent)
+        if finished or not self._series_controller.is_active():
+            self._series_parent = None
+        self._update_editor_series_buttons()
         self._show_launcher()
 
     def _get_screen_grabber(self) -> "ScreenGrabber":
@@ -674,6 +682,13 @@ class App(QObject):
             return []
         EditorWindow = self._get_editor_window_class()
         return [w for w in app.topLevelWidgets() if isinstance(w, EditorWindow)]
+
+    def _update_editor_series_buttons(self):
+        for win in self._editor_windows():
+            try:
+                win.update_series_state()
+            except Exception:
+                continue
 
     def _hide_editor_windows(self):
         EditorWindow = self._get_editor_window_class()
@@ -825,6 +840,14 @@ class App(QObject):
                     target_window.destroyed.connect(self._on_main_editor_destroyed)
                 self._main_editor = target_window
 
+            if hasattr(target_window, "set_series_controls"):
+                try:
+                    target_window.set_series_controls(
+                        self._start_series_capture, self._series_controller.is_active
+                    )
+                except Exception:
+                    pass
+
             try:
                 target_window.showNormal()
                 target_window.raise_()
@@ -834,6 +857,7 @@ class App(QObject):
 
             self._capture_target_editor = None
             self._captured_once = True
+            self._update_editor_series_buttons()
             self._enter_background()
         except Exception as e:
             QMessageBox.critical(None, "SlipSnap", f"Ошибка обработки: {e}")

@@ -1,15 +1,18 @@
 # -*- coding: utf-8 -*-
 
 from pathlib import Path
+from typing import Callable, Optional
 
 from PySide6.QtCore import Qt, QTimer, QRectF
-from PySide6.QtGui import QImage, QPixmap, QPainter, QPainterPath, QKeySequence, QShortcut
+from PySide6.QtGui import QAction, QImage, QPixmap, QPainter, QPainterPath, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QApplication,
     QGraphicsItem,
     QGraphicsPixmapItem,
+    QWidget,
+    QToolButton,
 )
 
 from logic import APP_NAME, APP_VERSION, qimage_to_pil, save_history
@@ -25,6 +28,7 @@ from .ui.color_widgets import HexColorDialog
 from .ui.toolbar_factory import create_tools_toolbar, create_actions_toolbar
 from .ui.window_utils import size_to_image
 from .ui.meme_library_dialog import MemeLibraryDialog
+from icons import make_icon_series
 
 
 class EditorWindow(QMainWindow):
@@ -48,8 +52,22 @@ class EditorWindow(QMainWindow):
         self._apply_modern_stylesheet()
         self.canvas.imageDropped.connect(self._insert_screenshot_item)
 
+        self._start_series_handler: Optional[Callable[[Optional[QWidget]], bool]] = None
+        self._series_state_getter: Optional[Callable[[], bool]] = None
+        self._series_action: Optional[QAction] = None
+        self._series_button: Optional[QToolButton] = None
+
         self._tool_buttons = create_tools_toolbar(self, self.canvas)
         self.color_btn, actions, action_buttons = create_actions_toolbar(self, self.canvas)
+        self._series_action = actions.get("series")
+        self._series_button = action_buttons.get("series")
+        if self._series_action is not None:
+            self._series_action.setIcon(make_icon_series())
+        if self._series_button is not None:
+            self._series_button.setToolButtonStyle(Qt.ToolButtonTextOnly)
+            self._series_button.setText("🎞")
+            self._series_button.setToolTip("Серия скриншотов")
+        self._update_series_button_state()
         self.act_new = actions['new']
         self.act_collage = actions['collage']
         if hasattr(self, 'act_collage'):
@@ -74,6 +92,49 @@ class EditorWindow(QMainWindow):
         act_shortcuts.triggered.connect(self.show_shortcuts)
         act_about = help_menu.addAction("ⓘ О программе")
         act_about.triggered.connect(self.show_about)
+
+    # ---- series controls ------------------------------------------
+    def set_series_controls(
+        self,
+        start_handler: Callable[[Optional[QWidget]], bool],
+        state_getter: Callable[[], bool],
+    ) -> None:
+        self._start_series_handler = start_handler
+        self._series_state_getter = state_getter
+        self.update_series_state()
+
+    def request_series_capture(self) -> None:
+        if not self._start_series_handler:
+            QMessageBox.information(
+                self,
+                "SlipSnap",
+                "Настройка серии сейчас недоступна.",
+            )
+            return
+
+        started = self._start_series_handler(self)
+        if started:
+            self.statusBar().showMessage("◉ Серия активирована", 3000)
+        self.update_series_state()
+
+    def update_series_state(self) -> None:
+        self._update_series_button_state()
+
+    def _update_series_button_state(self) -> None:
+        if self._series_button is None:
+            return
+        active = False
+        if self._series_state_getter is not None:
+            try:
+                active = bool(self._series_state_getter())
+            except Exception:
+                active = False
+        tooltip = "Начать серию скриншотов"
+        if active:
+            tooltip = (
+                "Серия активна — используйте Esc в режиме съёмки, чтобы завершить её."
+            )
+        self._series_button.setToolTip(tooltip)
 
     def _apply_modern_stylesheet(self):
         """Apply modern light theme with clean design."""
