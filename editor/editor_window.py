@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 
+from pathlib import Path
+
 from PySide6.QtCore import Qt, QTimer, QRectF
 from PySide6.QtGui import QImage, QPixmap, QPainter, QPainterPath, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
@@ -22,6 +24,7 @@ from .ui.styles import main_window_style
 from .ui.color_widgets import HexColorDialog
 from .ui.toolbar_factory import create_tools_toolbar, create_actions_toolbar
 from .ui.window_utils import size_to_image
+from .ui.meme_library_dialog import MemeLibraryDialog
 
 
 class EditorWindow(QMainWindow):
@@ -61,6 +64,9 @@ class EditorWindow(QMainWindow):
             "◉ Готово | Ctrl+N: новый скриншот | Ctrl+Shift+N: коллаж | Ctrl+K: история | Del: удалить | Ctrl +/-: масштаб",
             5000,
         )
+
+        self._meme_library_dialog = MemeLibraryDialog(self)
+        self._meme_library_dialog.memeSelected.connect(self._insert_meme_from_library)
 
         # Меню справки с горячими клавишами
         help_menu = self.menuBar().addMenu("Справка")
@@ -423,7 +429,7 @@ class EditorWindow(QMainWindow):
         painter.end()
         return pixmap
 
-    def _insert_screenshot_item(self, qimg: QImage):
+    def _insert_screenshot_item(self, qimg: QImage, item_tag: str = "screenshot"):
         pixmap = self._rounded_pixmap(qimg)
         screenshot_item = QGraphicsPixmapItem(pixmap)
         screenshot_item.setTransformationMode(Qt.SmoothTransformation)
@@ -431,7 +437,7 @@ class EditorWindow(QMainWindow):
         screenshot_item.setFlag(QGraphicsItem.ItemIsSelectable, True)
         screenshot_item.setFlag(QGraphicsItem.ItemIsFocusable, True)
         screenshot_item.setZValue(10)
-        screenshot_item.setData(0, "screenshot")
+        screenshot_item.setData(0, item_tag)
         self.canvas.scene.addItem(screenshot_item)
         self.canvas.undo_stack.push(AddCommand(self.canvas.scene, screenshot_item))
 
@@ -452,6 +458,23 @@ class EditorWindow(QMainWindow):
                 self._insert_screenshot_item(qimg)
                 inserted = True
         return inserted
+
+    def open_meme_library(self):
+        self._meme_library_dialog.show()
+        self._meme_library_dialog.raise_()
+        self._meme_library_dialog.activateWindow()
+
+    def _insert_meme_from_library(self, path: Path):
+        qimg = QImage(str(path))
+        if qimg.isNull():
+            QMessageBox.warning(self, "Ошибка", "Не удалось загрузить мем из библиотеки.")
+            return
+        self._insert_screenshot_item(qimg, item_tag="meme")
+        self.statusBar().showMessage("◉ Мем добавлен на холст", 2500)
+
+    def notify_meme_saved(self, path: Path):
+        self.statusBar().showMessage(f"◉ Мем сохранён в библиотеку: {path.name}", 2500)
+        self._meme_library_dialog.refresh_if_visible()
 
     def _on_new_screenshot(self, qimg: QImage, collage: bool):
         try:
