@@ -21,17 +21,30 @@ class AddCommand(QUndoCommand):
 class RemoveCommand(QUndoCommand):
     """Command to remove an item from the scene."""
 
-    def __init__(self, scene: QGraphicsScene, item: QGraphicsItem):
+    def __init__(
+        self,
+        scene: QGraphicsScene,
+        item: QGraphicsItem,
+        *,
+        on_removed=None,
+        on_restored=None,
+    ):
         super().__init__("Удалить")
         self.scene = scene
         self.item = item
+        self._on_removed = on_removed
+        self._on_restored = on_restored
 
     def undo(self):
         if self.item.scene() is None:
             self.scene.addItem(self.item)
+            if self._on_restored is not None:
+                self._on_restored(self.item)
 
     def redo(self):
         self.scene.removeItem(self.item)
+        if self._on_removed is not None:
+            self._on_removed(self.item)
 
 
 class MoveCommand(QUndoCommand):

@@ -43,13 +43,14 @@ class Canvas(QGraphicsView):
         self.setScene(self.scene)
         self.setAcceptDrops(True)
 
-        self.pixmap_item = QGraphicsPixmapItem(QPixmap.fromImage(image))
+        self.pixmap_item: Optional[QGraphicsPixmapItem] = QGraphicsPixmapItem(QPixmap.fromImage(image))
         self.pil_image = qimage_to_pil(image)  # store original PIL image
         self.pixmap_item.setFlag(QGraphicsItem.ItemIsMovable, True)
         self.pixmap_item.setFlag(QGraphicsItem.ItemIsSelectable, True)
         self.pixmap_item.setFlag(QGraphicsItem.ItemIsFocusable, True)
         self.pixmap_item.setZValue(0)
         self.pixmap_item.setData(0, "screenshot")
+        self.pixmap_item.setData(1, "base")
         self.scene.addItem(self.pixmap_item)
 
         self.setDragMode(QGraphicsView.NoDrag)
@@ -148,12 +149,25 @@ class Canvas(QGraphicsView):
         self.pixmap_item.setFlag(QGraphicsItem.ItemIsFocusable, True)
         self.pixmap_item.setZValue(0)
         self.pixmap_item.setData(0, "screenshot")
+        self.pixmap_item.setData(1, "base")
         self.scene.addItem(self.pixmap_item)
         self.pil_image = qimage_to_pil(image)
         self.undo_stack.clear()
         if self._text_manager:
             self._text_manager.finish_current_editing()
         self._apply_lock_state()
+
+    def handle_item_removed(self, item: QGraphicsItem) -> None:
+        if item is self.pixmap_item or item.data(1) == "base":
+            self.pixmap_item = None
+            self.pil_image = None
+
+    def handle_item_restored(self, item: QGraphicsItem) -> None:
+        if isinstance(item, QGraphicsPixmapItem) and item.data(1) == "base":
+            self.pixmap_item = item
+            qimg = item.pixmap().toImage()
+            if not qimg.isNull():
+                self.pil_image = qimage_to_pil(qimg)
 
     def set_tool(self, tool: str):
         if self._text_manager:
@@ -444,12 +458,20 @@ class Canvas(QGraphicsView):
             elif chosen == act_back:
                 self.send_to_back(item)
             elif chosen == act_del:
-                targets = [it for it in self.scene.selectedItems() if it != self.pixmap_item]
-                if item not in targets and item != self.pixmap_item:
+                targets = list(self.scene.selectedItems())
+                if item not in targets:
                     targets = [item]
                 for it in targets:
                     self.scene.removeItem(it)
-                    self.undo_stack.push(RemoveCommand(self.scene, it))
+                    self.handle_item_removed(it)
+                    self.undo_stack.push(
+                        RemoveCommand(
+                            self.scene,
+                            it,
+                            on_removed=self.handle_item_removed,
+                            on_restored=self.handle_item_restored,
+                        )
+                    )
             event.accept()
             return
         super().contextMenuEvent(event)
