@@ -91,7 +91,7 @@ class SelectionOverlayBase(QWidget):
 
         self.help = QLabel(self)
         self.help.setText("ЛКМ — выделить  •  ⎵ — форма  •  Esc — отмена")
-        self.help.setStyleSheet("""
+        shared_style = """
             QLabel {
                 color: #ffffff;
                 background: rgba(30, 30, 35, 200);
@@ -101,12 +101,19 @@ class SelectionOverlayBase(QWidget):
                 border-radius: 12px;
                 border: 1px solid rgba(255, 255, 255, 0.1);
             }
-        """)
+        """
+        self.help.setStyleSheet(shared_style)
         self.help.adjustSize()
         self.help.move(24, 24)
 
+        self.shape_hint = QLabel(self)
+        self.shape_hint.setStyleSheet(shared_style)
+        self.shape_hint.hide()
+        self._update_shape_hint()
+
     def set_shape(self, shape: str):
         self.shape = shape
+        self._update_shape_hint()
         self.update()
 
     def showEvent(self, e):
@@ -127,6 +134,7 @@ class SelectionOverlayBase(QWidget):
             return
         if e.key() == Qt.Key_Space:
             self.shape = "ellipse" if self.shape == "rect" else "rect"
+            self._update_shape_hint()
             self.update()
 
     def mousePressEvent(self, e):
@@ -247,6 +255,18 @@ class SelectionOverlayBase(QWidget):
 
     def _map_rect_to_image_coords(self, gr: QRect) -> Tuple[int, int, int, int]:
         raise NotImplementedError
+
+    def _shape_display_name(self) -> str:
+        return "Прямоугольник" if self.shape == "rect" else "Круг"
+
+    def _update_shape_hint(self):
+        text = f"Форма: {self._shape_display_name()}"
+        self.shape_hint.setText(text)
+        self.shape_hint.adjustSize()
+        help_geo = self.help.geometry()
+        spacing = 12
+        self.shape_hint.move(help_geo.x(), help_geo.bottom() + spacing)
+        self.shape_hint.show()
 
 
 class ScreenOverlay(SelectionOverlayBase):
