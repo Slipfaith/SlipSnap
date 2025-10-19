@@ -33,12 +33,8 @@ class MemesDialog(QWidget):
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(16)
-
-        title = QLabel("Мемы")
-        title.setObjectName("titleLabel")
-        layout.addWidget(title)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
 
         self._empty_label = QLabel("Добавьте мемы для быстрой вставки")
         self._empty_label.setAlignment(Qt.AlignCenter)
@@ -56,26 +52,32 @@ class MemesDialog(QWidget):
         self._list.setMovement(QListWidget.Static)
         self._list.setSpacing(8)
         self._list.setSelectionMode(QListWidget.ExtendedSelection)
+        self._list.setFocusPolicy(Qt.NoFocus)
         self._list.itemDoubleClicked.connect(self._on_item_double_clicked)
         layout.addWidget(self._list, 1)
         layout.addWidget(self._empty_label)
 
         buttons = QHBoxLayout()
-        buttons.setSpacing(12)
+        buttons.setSpacing(8)
 
-        add_btn = QPushButton("Добавить")
+        add_btn = QPushButton("➕")
         add_btn.setObjectName("addButton")
         add_btn.setCursor(Qt.PointingHandCursor)
+        add_btn.setFixedSize(36, 36)
+        add_btn.setToolTip("Добавить мемы")
         add_btn.clicked.connect(self._add_memes)
 
-        remove_btn = QPushButton("Удалить")
+        remove_btn = QPushButton("🗑️")
         remove_btn.setObjectName("removeButton")
         remove_btn.setCursor(Qt.PointingHandCursor)
+        remove_btn.setFixedSize(36, 36)
+        remove_btn.setToolTip("Удалить выбранные")
         remove_btn.clicked.connect(self._remove_selected)
         self._remove_btn = remove_btn
 
-        buttons.addWidget(add_btn, 1)
-        buttons.addWidget(remove_btn, 1)
+        buttons.addWidget(add_btn)
+        buttons.addWidget(remove_btn)
+        buttons.addStretch()
 
         layout.addLayout(buttons)
 
@@ -89,18 +91,12 @@ class MemesDialog(QWidget):
                 color: #1a1a1a;
             }
 
-            #titleLabel {
-                color: #1a1a1a;
-                font-size: 20px;
-                font-weight: 600;
-                padding-bottom: 4px;
-            }
-
             QListWidget {
                 border: 1px solid #e5e5e5;
                 border-radius: 8px;
                 padding: 12px;
                 background: #fafafa;
+                outline: none;
             }
 
             QListWidget::item {
@@ -126,9 +122,7 @@ class MemesDialog(QWidget):
                 color: #ffffff;
                 border: none;
                 border-radius: 6px;
-                padding: 10px 18px;
-                font-size: 14px;
-                font-weight: 500;
+                font-size: 16px;
             }
 
             QPushButton:hover {
