@@ -13,6 +13,8 @@ APP_VERSION = "1.0.0"
 CONFIG_PATH = Path.home() / ".slipsnap_config.json"
 HISTORY_DIR = Path(tempfile.gettempdir()) / "slipsnap_history"
 HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+MEME_DIR = Path(tempfile.gettempdir()) / "slipsnap_memes"
+MEME_DIR.mkdir(parents=True, exist_ok=True)
 
 DEFAULT_CONFIG = {
     "shape": "rect",

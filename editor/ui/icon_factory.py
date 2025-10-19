@@ -133,6 +133,26 @@ def make_icon_select() -> QIcon:
     return QIcon(pm)
 
 
+def make_icon_meme_library() -> QIcon:
+    pm = _base_pixmap()
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+
+    base_color = QColor(ModernColors.PRIMARY)
+    base_color.setAlpha(220)
+    p.setBrush(QBrush(base_color))
+    p.setPen(Qt.NoPen)
+    p.drawRoundedRect(8, 10, 24, 20, 6, 6)
+
+    p.setPen(QPen(QColor("white"), 2))
+    p.setBrush(Qt.NoBrush)
+    p.drawEllipse(15, 16, 10, 10)
+    p.drawArc(16, 22, 8, 6, 0, -180 * 16)
+
+    p.end()
+    return QIcon(pm)
+
+
 def create_pencil_cursor() -> QCursor:
     pm = QPixmap(24, 24)
     pm.fill(Qt.transparent)

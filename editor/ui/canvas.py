@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QGraphicsPixmapItem,
     QGraphicsItem,
     QMenu,
+    QMessageBox,
 )
 
 from .styles import ModernColors
@@ -23,6 +24,7 @@ from editor.tools.eraser_tool import EraserTool
 from editor.tools.line_arrow_tool import LineTool, ArrowTool
 from editor.undo_commands import AddCommand, MoveCommand, ScaleCommand, ZValueCommand, RemoveCommand
 from editor.image_utils import images_from_mime
+from meme_library import save_meme_image
 
 MARKER_ALPHA = 80
 PENCIL_WIDTH = 3
@@ -416,10 +418,27 @@ class Canvas(QGraphicsView):
         if items:
             item = items[0]
             menu = QMenu(self)
+            act_add_meme = None
+            if isinstance(item, QGraphicsPixmapItem) and item.data(0) in {"screenshot", "meme"}:
+                act_add_meme = menu.addAction("Добавить в мемы")
+                menu.addSeparator()
             act_front = menu.addAction("На передний план")
             act_back = menu.addAction("На задний план")
             act_del = menu.addAction("Удалить")
             chosen = menu.exec(event.globalPos())
+            if chosen == act_add_meme and act_add_meme is not None:
+                qimg = item.pixmap().toImage()
+                if not qimg.isNull():
+                    try:
+                        path = save_meme_image(qimage_to_pil(qimg))
+                    except Exception as exc:
+                        QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить мем: {exc}")
+                    else:
+                        win = self.window()
+                        if hasattr(win, "notify_meme_saved"):
+                            win.notify_meme_saved(path)
+                event.accept()
+                return
             if chosen == act_front:
                 self.bring_to_front(item)
             elif chosen == act_back:

@@ -20,6 +20,7 @@ from .icon_factory import (
     make_icon_blur,
     make_icon_eraser,
     make_icon_select,
+    make_icon_meme_library,
 )
 
 
@@ -259,6 +260,20 @@ def create_tools_toolbar(window, canvas):
 
     tool_buttons = []
     current_shape = "rect"
+
+    library_btn = QToolButton()
+    library_btn.setIcon(make_icon_meme_library())
+    library_btn.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
+    library_btn.setToolTip("Библиотека мемов")
+    library_btn.setCheckable(False)
+    library_btn.setFixedSize(52, 52)
+    open_library = getattr(window, "open_meme_library", None)
+    if callable(open_library):
+        library_btn.clicked.connect(open_library)
+    else:
+        library_btn.setEnabled(False)
+    tools_tb.addWidget(library_btn)
+    tools_tb.addSeparator()
 
     def add_tool(tool, icon, tooltip, shortcut=None):
         btn = QToolButton()
