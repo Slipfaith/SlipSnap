@@ -76,3 +76,24 @@ def make_icon_collage(size: int = 28) -> QIcon:
     p.drawLine(m, cy, size - m, cy)
     p.end()
     return QIcon(pm)
+
+
+def make_icon_series(size: int = 28) -> QIcon:
+    """Две перекрывающиеся рамки — «Серия»"""
+    pm = _pm(size)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+    pen = QPen(QColor(180, 200, 255), 2)
+    p.setPen(pen)
+    m = 6
+    offset = 4
+    # Задняя рамка
+    p.drawRoundedRect(m + offset, m, size - 2 * m, size - 2 * m, 6, 6)
+    # Передняя рамка
+    p.setPen(QPen(QColor(70, 130, 240), 2))
+    p.drawRoundedRect(m, m + offset, size - 2 * m, size - 2 * m, 6, 6)
+    # Индикатор счётчика
+    p.setPen(QPen(QColor(255, 255, 255), 2))
+    p.drawLine(size // 2 - 3, size - m - 2, size // 2 + 4, size - m - 2)
+    p.end()
+    return QIcon(pm)

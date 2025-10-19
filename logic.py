@@ -19,6 +19,8 @@ DEFAULT_CONFIG = {
     "pen_width": 3,
     "font_px": 18,
     "capture_hotkey": "Ctrl+Alt+S",
+    "series_prefix": "Series",
+    "series_folder": str(Path.home()),
 }
 
 def load_config() -> dict:
