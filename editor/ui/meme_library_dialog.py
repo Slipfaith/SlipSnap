@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
-from PySide6.QtCore import Qt, QSize, Signal
-from PySide6.QtGui import QIcon, QPixmap, QColor
+from PySide6.QtCore import Qt, QSize, Signal, QTimer, QRectF
+from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QGuiApplication, QImage, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -16,10 +16,97 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QVBoxLayout,
     QWidget,
-    QGraphicsDropShadowEffect,
 )
 
+from PIL import ImageFilter, ImageQt
+
 from meme_library import add_memes_from_paths, delete_memes, list_memes
+
+
+class BlurredPanel(QWidget):
+    """Panel that mimics frosted glass by blurring what's behind it."""
+
+    def __init__(
+        self,
+        parent=None,
+        *,
+        blur_radius: int = 24,
+        radius: int = 22,
+        tint: QColor | None = None,
+        border_color: QColor | None = None,
+    ):
+        super().__init__(parent)
+        self._blurred = QPixmap()
+        self._update_pending = False
+        self._blur_radius = blur_radius
+        self._tint = tint or QColor(24, 28, 36, 180)
+        self._radius = radius
+        self._border_color = border_color or QColor(255, 255, 255, 35)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._schedule_update()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._schedule_update()
+
+    def moveEvent(self, event):
+        super().moveEvent(event)
+        self._schedule_update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
+
+        rect = self.rect()
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(rect), self._radius, self._radius)
+        painter.setClipPath(path)
+
+        if not self._blurred.isNull():
+            painter.drawPixmap(rect, self._blurred)
+        painter.fillPath(path, self._tint)
+        painter.setClipPath(QPainterPath())
+        if self._border_color.alpha() > 0:
+            pen = QPen(self._border_color)
+            pen.setWidthF(1.0)
+            painter.setPen(pen)
+            painter.drawPath(path)
+        painter.end()
+
+    # ---- helpers -------------------------------------------------
+    def _schedule_update(self):
+        if self._update_pending:
+            return
+        self._update_pending = True
+        QTimer.singleShot(0, self._update_background)
+
+    def _update_background(self):
+        self._update_pending = False
+        rect = self.rect()
+        if rect.isEmpty():
+            return
+
+        screen = QGuiApplication.primaryScreen()
+        if screen is None:
+            self._blurred = QPixmap()
+            self.update()
+            return
+
+        top_left = self.mapToGlobal(rect.topLeft())
+        grab = screen.grabWindow(0, top_left.x(), top_left.y(), rect.width(), rect.height())
+        if grab.isNull():
+            self._blurred = QPixmap()
+            self.update()
+            return
+
+        qimage = grab.toImage().convertToFormat(QImage.Format_RGBA8888)
+        pil_img = ImageQt.fromqimage(qimage)
+        blurred = pil_img.filter(ImageFilter.GaussianBlur(self._blur_radius))
+        qimg_blurred = ImageQt.ImageQt(blurred)
+        self._blurred = QPixmap.fromImage(qimg_blurred)
+        self.update()
 
 
 class MemesDialog(QWidget):
@@ -41,13 +128,8 @@ class MemesDialog(QWidget):
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
 
-        glass = QWidget(self)
+        glass = BlurredPanel(self)
         glass.setObjectName("glassPanel")
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(45)
-        shadow.setOffset(0, 18)
-        shadow.setColor(QColor(20, 56, 102, 90))
-        glass.setGraphicsEffect(shadow)
 
         layout = QVBoxLayout(glass)
         layout.setContentsMargins(24, 24, 24, 24)
@@ -100,69 +182,62 @@ class MemesDialog(QWidget):
         self.setStyleSheet(
             """
             #glassPanel {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 rgba(255, 255, 255, 160),
-                    stop:1 rgba(190, 215, 255, 100));
-                border-radius: 26px;
-                border: 1px solid rgba(255, 255, 255, 180);
-            }
-            #glassPanel:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 rgba(255, 255, 255, 190),
-                    stop:1 rgba(210, 230, 255, 160));
+                border-radius: 22px;
+                border: 1px solid rgba(255, 255, 255, 35);
             }
             QListWidget {
-                border: 1px solid rgba(148, 163, 184, 120);
-                border-radius: 18px;
-                padding: 12px;
-                background: rgba(255, 255, 255, 170);
+                border: 1px solid rgba(255, 255, 255, 22);
+                border-radius: 16px;
+                padding: 10px;
+                background: rgba(18, 22, 30, 140);
+                color: rgba(240, 244, 255, 220);
             }
             QListWidget::item {
-                border-radius: 18px;
-                margin: 6px;
-                padding: 6px;
-                background: rgba(255, 255, 255, 60);
+                border-radius: 14px;
+                margin: 4px;
+                padding: 4px;
+                background: rgba(255, 255, 255, 20);
                 border: 1px solid transparent;
             }
             QListWidget::item:hover {
-                background: rgba(59, 130, 246, 90);
-                border: 1px solid rgba(59, 130, 246, 140);
+                background: rgba(96, 165, 250, 40);
+                border: 1px solid rgba(148, 197, 255, 80);
             }
             QListWidget::item:selected {
-                border: 2px solid rgba(37, 99, 235, 180);
-                background: rgba(37, 99, 235, 120);
+                border: 1px solid rgba(129, 178, 255, 160);
+                background: rgba(59, 130, 246, 90);
             }
             QPushButton {
-                background: rgba(59, 130, 246, 170);
-                color: white;
-                border: none;
-                border-radius: 18px;
-                padding: 10px 18px;
-                font-size: 18px;
+                background: rgba(59, 130, 246, 160);
+                color: rgba(244, 247, 255, 230);
+                border: 1px solid rgba(255, 255, 255, 40);
+                border-radius: 14px;
+                padding: 8px 16px;
+                font-size: 14px;
                 font-weight: 600;
-                min-width: 52px;
+                min-width: 96px;
             }
             QPushButton:hover {
-                background: rgba(37, 99, 235, 210);
-                padding: 11px 20px;
+                background: rgba(37, 99, 235, 180);
             }
             QPushButton:disabled {
-                background: rgba(148, 163, 184, 180);
-                color: rgba(226, 232, 240, 200);
+                background: rgba(71, 85, 105, 180);
+                color: rgba(203, 213, 225, 160);
+                border-color: rgba(255, 255, 255, 20);
             }
             QPushButton#removeButton {
-                background: rgba(239, 68, 68, 180);
+                background: rgba(248, 113, 113, 160);
             }
             QPushButton#removeButton:hover {
-                background: rgba(220, 38, 38, 210);
+                background: rgba(239, 68, 68, 180);
             }
             QPushButton#removeButton:disabled {
-                background: rgba(148, 163, 184, 180);
+                background: rgba(71, 85, 105, 180);
             }
             QLabel#emptyLabel {
-                color: rgba(71, 85, 105, 220);
-                font-size: 14px;
-                padding: 24px 12px;
+                color: rgba(226, 232, 240, 200);
+                font-size: 13px;
+                padding: 18px 8px;
             }
             """
         )
