@@ -411,11 +411,18 @@ class EditorWindow(QMainWindow):
     # ---- key events ----
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Delete:
-            selected_items = self.canvas.scene.selectedItems()
+            selected_items = list(self.canvas.scene.selectedItems())
             for item in selected_items:
-                if item != self.canvas.pixmap_item:
-                    self.canvas.scene.removeItem(item)
-                    self.canvas.undo_stack.push(RemoveCommand(self.canvas.scene, item))
+                self.canvas.scene.removeItem(item)
+                self.canvas.handle_item_removed(item)
+                self.canvas.undo_stack.push(
+                    RemoveCommand(
+                        self.canvas.scene,
+                        item,
+                        on_removed=self.canvas.handle_item_removed,
+                        on_restored=self.canvas.handle_item_restored,
+                    )
+                )
             if selected_items:
                 self.statusBar().showMessage("✕ Удалены выбранные элементы", 2000)
         elif event.matches(QKeySequence.Paste):

@@ -48,12 +48,12 @@ class MemeLibraryDialog(QWidget):
         self._list.setViewMode(QListWidget.IconMode)
         self._list.setFlow(QListView.LeftToRight)
         self._list.setWrapping(True)
-        self._list.setIconSize(QSize(112, 112))
-        self._list.setGridSize(QSize(136, 136))
+        self._list.setIconSize(QSize(60, 60))
+        self._list.setGridSize(QSize(70, 88))
         self._list.setResizeMode(QListWidget.Adjust)
         self._list.setUniformItemSizes(True)
         self._list.setMovement(QListWidget.Static)
-        self._list.setSpacing(10)
+        self._list.setSpacing(4)
         self._list.setSelectionMode(QListWidget.ExtendedSelection)
         self._list.setSelectionRectVisible(True)
         self._list.itemDoubleClicked.connect(self._on_item_double_clicked)
@@ -85,7 +85,7 @@ class MemeLibraryDialog(QWidget):
             QListWidget {
                 border: 1px solid #d1d5db;
                 border-radius: 14px;
-                padding: 16px;
+                padding: 10px;
                 background: #ffffff;
             }
             QListWidget::item {
@@ -137,10 +137,9 @@ class MemeLibraryDialog(QWidget):
             pixmap = QPixmap(str(path))
             if pixmap.isNull():
                 continue
-            scaled = pixmap.scaled(112, 112, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            scaled = pixmap.scaled(60, 60, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             item = QListWidgetItem(QIcon(scaled), "")
-            item.setSizeHint(QSize(136, 136))
-            item.setToolTip(path.name)
+            item.setSizeHint(QSize(70, 88))
             item.setData(Qt.UserRole, path)
             self._list.addItem(item)
 
@@ -181,6 +180,7 @@ class MemeLibraryDialog(QWidget):
         path = item.data(Qt.UserRole)
         if isinstance(path, Path):
             self.memeSelected.emit(path)
+            self.close()
 
     # ---- QWidget overrides -----------------------------------------
     def showEvent(self, event):
