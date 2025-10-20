@@ -99,7 +99,7 @@ def _bgr_dib_bytes(img: Image.Image) -> bytes:
         "<IiiHHIIiiII",
         40,  # biSize = BITMAPINFOHEADER
         width,  # biWidth
-        height,  # biHeight (positive -> bottom-up DIB)
+        -height,  # biHeight (negative -> top-down DIB)
         1,  # biPlanes
         24,  # biBitCount
         0,  # biCompression = BI_RGB
@@ -111,14 +111,17 @@ def _bgr_dib_bytes(img: Image.Image) -> bytes:
     )
 
     # CF_DIB expects pixel data in BGR byte order. Word/Outlook reject
-    # buffers that are supplied as RGB, so convert explicitly.
+    # buffers that are supplied as RGB, so convert explicitly.  Using a
+    # top-down DIB (negative height) keeps the in-memory layout identical to
+    # the PNG/Qt representations and avoids consumers that mis-handle
+    # bottom-up buffers.
     bgr_bytes = img.convert("RGB").tobytes("raw", "BGR")
     row_bytes = width * 3
     padding = stride - row_bytes
     pad = b"\x00" * padding
 
     rows = []
-    for row in range(height - 1, -1, -1):
+    for row in range(height):
         start = row * row_bytes
         end = start + row_bytes
         rows.append(bgr_bytes[start:end])
