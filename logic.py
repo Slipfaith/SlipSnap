@@ -8,6 +8,7 @@ from typing import Tuple, Optional
 import mss
 from PIL import Image
 
+from design_tokens import Typography
 APP_NAME = "SlipSnap"
 APP_VERSION = "1.0.0"
 CONFIG_PATH = Path.home() / ".slipsnap_config.json"
@@ -19,7 +20,7 @@ MEME_DIR.mkdir(parents=True, exist_ok=True)
 DEFAULT_CONFIG = {
     "shape": "rect",
     "pen_width": 3,
-    "font_px": 18,
+    "font_px": Typography.TEXT_TOOL_DEFAULT_POINT,
     "capture_hotkey": "Ctrl+Alt+S",
     "series_prefix": "Series",
     "series_folder": str(Path.home()),

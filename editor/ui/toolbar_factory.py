@@ -6,6 +6,8 @@ from PySide6.QtWidgets import QToolBar, QToolButton, QMenu, QSlider, QLabel
 
 from logic import save_config
 
+from design_tokens import Metrics
+
 from .styles import ModernColors, tools_toolbar_style
 from .color_widgets import ColorButton
 from .icon_factory import (
@@ -266,7 +268,7 @@ def create_tools_toolbar(window, canvas):
     memes_btn.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
     memes_btn.setToolTip("Мемы")
     memes_btn.setCheckable(False)
-    memes_btn.setFixedSize(52, 52)
+    memes_btn.setFixedSize(Metrics.TOOL_BUTTON, Metrics.TOOL_BUTTON)
     open_memes = getattr(window, "open_memes_dialog", None)
     if callable(open_memes):
         memes_btn.clicked.connect(open_memes)
@@ -282,7 +284,7 @@ def create_tools_toolbar(window, canvas):
         btn.setToolTip(tooltip + (f" ({shortcut})" if shortcut else ""))
         btn.setCheckable(True)
         btn.setAutoExclusive(True)
-        btn.setFixedSize(52, 52)
+        btn.setFixedSize(Metrics.TOOL_BUTTON, Metrics.TOOL_BUTTON)
         btn.clicked.connect(lambda checked, t=tool: canvas.set_tool(t))
         tools_tb.addWidget(btn)
         tool_buttons.append(btn)
@@ -301,7 +303,7 @@ def create_tools_toolbar(window, canvas):
     shape_btn.setToolTip("Фигуры (R/O)")
     shape_btn.setCheckable(True)
     shape_btn.setAutoExclusive(True)
-    shape_btn.setFixedSize(52, 52)
+    shape_btn.setFixedSize(Metrics.TOOL_BUTTON, Metrics.TOOL_BUTTON)
     shape_btn.clicked.connect(lambda checked: canvas.set_tool(current_shape))
     tools_tb.addWidget(shape_btn)
     tool_buttons.append(shape_btn)
@@ -432,7 +434,7 @@ def create_actions_toolbar(window, canvas):
     zoom_slider = QSlider(Qt.Horizontal)
     zoom_slider.setRange(10, 400)
     zoom_slider.setValue(100)
-    zoom_slider.setFixedWidth(120)
+    zoom_slider.setFixedWidth(Metrics.ZOOM_SLIDER_WIDTH)
     zoom_slider.setToolTip("Масштаб")
     zoom_label = QLabel("100%")
     zoom_slider.valueChanged.connect(lambda v: (canvas.set_zoom(v / 100), zoom_label.setText(f"{v}%")))

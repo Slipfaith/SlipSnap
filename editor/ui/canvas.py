@@ -26,9 +26,11 @@ from editor.undo_commands import AddCommand, MoveCommand, ScaleCommand, ZValueCo
 from editor.image_utils import images_from_mime
 from meme_library import save_meme_image
 
-MARKER_ALPHA = 80
-PENCIL_WIDTH = 3
-MARKER_WIDTH = 15
+from design_tokens import Metrics
+
+MARKER_ALPHA = Metrics.MARKER_ALPHA
+PENCIL_WIDTH = Metrics.PENCIL_WIDTH
+MARKER_WIDTH = Metrics.MARKER_WIDTH
 
 
 class Canvas(QGraphicsView):

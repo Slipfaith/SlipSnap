@@ -18,6 +18,8 @@ from PySide6.QtWidgets import (
 
 from meme_library import add_memes_from_paths, delete_memes, list_memes
 
+from design_tokens import Metrics, meme_dialog_stylesheet
+
 
 class MemesDialog(QWidget):
     """Минималистичное светлое окно для управления мемами"""
@@ -27,14 +29,15 @@ class MemesDialog(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent, Qt.Window | Qt.WindowCloseButtonHint)
         self.setWindowTitle("Мемы")
-        self.setMinimumSize(420, 480)
+        self.setMinimumSize(Metrics.MEME_DIALOG_MIN_WIDTH, Metrics.MEME_DIALOG_MIN_HEIGHT)
         self._build_ui()
         self.refresh()
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(12)
+        margin = Metrics.MEME_DIALOG_MARGIN
+        layout.setContentsMargins(margin, margin, margin, margin)
+        layout.setSpacing(Metrics.MEME_DIALOG_SPACING)
 
         self._empty_label = QLabel("Добавьте мемы для быстрой вставки")
         self._empty_label.setAlignment(Qt.AlignCenter)
@@ -45,12 +48,13 @@ class MemesDialog(QWidget):
         self._list.setViewMode(QListWidget.IconMode)
         self._list.setFlow(QListView.LeftToRight)
         self._list.setWrapping(True)
-        self._list.setIconSize(QSize(80, 80))
-        self._list.setGridSize(QSize(96, 106))
+        self._list.setIconSize(QSize(Metrics.MEME_LIST_ICON, Metrics.MEME_LIST_ICON))
+        grid_w, grid_h = Metrics.MEME_LIST_GRID
+        self._list.setGridSize(QSize(grid_w, grid_h))
         self._list.setResizeMode(QListWidget.Adjust)
         self._list.setUniformItemSizes(False)
         self._list.setMovement(QListWidget.Static)
-        self._list.setSpacing(8)
+        self._list.setSpacing(Metrics.MEME_LIST_SPACING)
         self._list.setSelectionMode(QListWidget.ExtendedSelection)
         self._list.setFocusPolicy(Qt.NoFocus)
         self._list.itemDoubleClicked.connect(self._on_item_double_clicked)
@@ -58,19 +62,19 @@ class MemesDialog(QWidget):
         layout.addWidget(self._empty_label)
 
         buttons = QHBoxLayout()
-        buttons.setSpacing(8)
+        buttons.setSpacing(Metrics.MEME_LIST_SPACING)
 
         add_btn = QPushButton("➕")
         add_btn.setObjectName("addButton")
         add_btn.setCursor(Qt.PointingHandCursor)
-        add_btn.setFixedSize(36, 36)
+        add_btn.setFixedSize(Metrics.MEME_BUTTON_SIZE, Metrics.MEME_BUTTON_SIZE)
         add_btn.setToolTip("Добавить мемы")
         add_btn.clicked.connect(self._add_memes)
 
         remove_btn = QPushButton("🗑️")
         remove_btn.setObjectName("removeButton")
         remove_btn.setCursor(Qt.PointingHandCursor)
-        remove_btn.setFixedSize(36, 36)
+        remove_btn.setFixedSize(Metrics.MEME_BUTTON_SIZE, Metrics.MEME_BUTTON_SIZE)
         remove_btn.setToolTip("Удалить выбранные")
         remove_btn.clicked.connect(self._remove_selected)
         self._remove_btn = remove_btn
@@ -84,84 +88,7 @@ class MemesDialog(QWidget):
         self._list.itemSelectionChanged.connect(self._update_remove_state)
         self._update_remove_state()
 
-        self.setStyleSheet(
-            """
-            QWidget {
-                background: #ffffff;
-                color: #1a1a1a;
-            }
-
-            QListWidget {
-                border: 1px solid #e5e5e5;
-                border-radius: 8px;
-                padding: 12px;
-                background: #fafafa;
-                outline: none;
-            }
-
-            QListWidget::item {
-                border-radius: 8px;
-                margin: 2px;
-                padding: 6px;
-                background: #ffffff;
-                border: 1px solid #f0f0f0;
-            }
-
-            QListWidget::item:hover {
-                background: #f5f5f5;
-                border: 1px solid #e0e0e0;
-            }
-
-            QListWidget::item:selected {
-                background: #e3f2fd;
-                border: 1px solid #2196f3;
-            }
-
-            QPushButton {
-                background: #2196f3;
-                color: #ffffff;
-                border: none;
-                border-radius: 6px;
-                font-size: 16px;
-            }
-
-            QPushButton:hover {
-                background: #1976d2;
-            }
-
-            QPushButton:pressed {
-                background: #1565c0;
-            }
-
-            QPushButton:disabled {
-                background: #e0e0e0;
-                color: #9e9e9e;
-            }
-
-            QPushButton#removeButton {
-                background: #f44336;
-            }
-
-            QPushButton#removeButton:hover {
-                background: #d32f2f;
-            }
-
-            QPushButton#removeButton:pressed {
-                background: #c62828;
-            }
-
-            QPushButton#removeButton:disabled {
-                background: #e0e0e0;
-                color: #9e9e9e;
-            }
-
-            QLabel#emptyLabel {
-                color: #757575;
-                font-size: 14px;
-                padding: 30px 20px;
-            }
-            """
-        )
+        self.setStyleSheet(meme_dialog_stylesheet())
 
     def refresh(self) -> None:
         self._list.clear()
@@ -172,7 +99,7 @@ class MemesDialog(QWidget):
                 continue
 
             original_size = pixmap.size()
-            max_dimension = 80
+            max_dimension = Metrics.MEME_LIST_ICON
 
             if original_size.width() > original_size.height():
                 new_width = max_dimension
@@ -183,7 +110,8 @@ class MemesDialog(QWidget):
 
             scaled = pixmap.scaled(new_width, new_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             item = QListWidgetItem(QIcon(scaled), "")
-            item.setSizeHint(QSize(new_width + 16, new_height + 26))
+            extra_w, extra_h = Metrics.MEME_ITEM_EXTRA_SIZE
+            item.setSizeHint(QSize(new_width + extra_w, new_height + extra_h))
             item.setData(Qt.UserRole, path)
             self._list.addItem(item)
 

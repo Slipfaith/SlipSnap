@@ -23,12 +23,13 @@ from editor.image_utils import images_from_mime
 from editor.undo_commands import AddCommand, RemoveCommand, ScaleCommand
 
 from .ui.canvas import Canvas
-from .ui.styles import main_window_style
 from .ui.color_widgets import HexColorDialog
 from .ui.toolbar_factory import create_tools_toolbar, create_actions_toolbar
 from .ui.window_utils import size_to_image
 from .ui.meme_library_dialog import MemesDialog
 from icons import make_icon_series
+
+from design_tokens import Metrics, editor_main_stylesheet, Palette, Typography
 
 
 class EditorWindow(QMainWindow):
@@ -39,9 +40,7 @@ class EditorWindow(QMainWindow):
         self.cfg = cfg
         self.setWindowTitle("SlipSnap — Редактор")
 
-        min_width = 680
-        min_height = 540
-        self.setMinimumSize(min_width, min_height)
+        self.setMinimumSize(Metrics.MAIN_WINDOW_MIN_WIDTH, Metrics.MAIN_WINDOW_MIN_HEIGHT)
 
         self.canvas = Canvas(qimg)
         self.text_manager = TextManager(self.canvas)
@@ -138,208 +137,7 @@ class EditorWindow(QMainWindow):
 
     def _apply_modern_stylesheet(self):
         """Apply modern light theme with clean design."""
-        self.setStyleSheet("""
-            QMainWindow {
-                background: #f8f9fa;
-            }
-
-            QMenuBar {
-                background: qlineargradient(
-                    x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #ffffff,
-                    stop:1 #f5f6f7
-                );
-                color: #1f2937;
-                border: none;
-                border-bottom: 1px solid #e5e7eb;
-                padding: 4px 8px;
-                font-size: 13px;
-                font-weight: 500;
-            }
-
-            QMenuBar::item {
-                background: transparent;
-                padding: 8px 16px;
-                border-radius: 8px;
-                margin: 2px;
-                color: #374151;
-            }
-
-            QMenuBar::item:selected {
-                background: qlineargradient(
-                    x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #e0e7ff,
-                    stop:1 #dbeafe
-                );
-                color: #1e40af;
-            }
-
-            QMenuBar::item:pressed {
-                background: #bfdbfe;
-            }
-
-            QMenu {
-                background: #ffffff;
-                border: 1px solid #d1d5db;
-                border-radius: 12px;
-                padding: 8px;
-                color: #1f2937;
-            }
-
-            QMenu::item {
-                padding: 10px 24px 10px 12px;
-                border-radius: 8px;
-                margin: 2px 4px;
-                font-size: 13px;
-                color: #374151;
-            }
-
-            QMenu::item:selected {
-                background: qlineargradient(
-                    x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #dbeafe,
-                    stop:1 #e0e7ff
-                );
-                color: #1e40af;
-            }
-
-            QMenu::separator {
-                height: 1px;
-                background: #e5e7eb;
-                margin: 6px 8px;
-            }
-
-            QToolBar {
-                background: qlineargradient(
-                    x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #ffffff,
-                    stop:1 #fafbfc
-                );
-                border: none;
-                border-bottom: 1px solid #e5e7eb;
-                spacing: 6px;
-                padding: 10px 12px;
-            }
-
-            QToolBar::separator {
-                width: 1px;
-                background: qlineargradient(
-                    x1:0, y1:0, x2:0, y2:1,
-                    stop:0 rgba(229, 231, 235, 0),
-                    stop:0.5 #d1d5db,
-                    stop:1 rgba(229, 231, 235, 0)
-                );
-                margin: 6px 10px;
-            }
-
-            QToolButton {
-                background: #ffffff;
-                border: 1px solid #e5e7eb;
-                border-radius: 10px;
-                padding: 9px;
-                color: #374151;
-                font-weight: 500;
-                min-width: 38px;
-                min-height: 38px;
-            }
-
-            QToolButton:hover {
-                background: qlineargradient(
-                    x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #dbeafe,
-                    stop:1 #bfdbfe
-                );
-                border: 1px solid #93c5fd;
-                color: #1e40af;
-            }
-
-            QToolButton:pressed {
-                background: #bfdbfe;
-                border: 1px solid #60a5fa;
-                padding: 10px 8px 8px 10px;
-            }
-
-            QToolButton:checked {
-                background: qlineargradient(
-                    x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #dbeafe,
-                    stop:1 #bfdbfe
-                );
-                border: 1px solid #60a5fa;
-                color: #1e40af;
-                font-weight: 600;
-            }
-
-            QToolButton:disabled {
-                background: #f3f4f6;
-                border: 1px solid #e5e7eb;
-                color: #9ca3af;
-            }
-
-            QStatusBar {
-                background: qlineargradient(
-                    x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #fafbfc,
-                    stop:1 #f3f4f6
-                );
-                color: #6b7280;
-                border-top: 1px solid #e5e7eb;
-                padding: 6px 16px;
-                font-size: 12px;
-                font-weight: 500;
-            }
-
-            QStatusBar::item {
-                border: none;
-            }
-
-            QMessageBox {
-                background: #ffffff;
-            }
-
-            QMessageBox QLabel {
-                color: #1f2937;
-                font-size: 13px;
-                padding: 8px;
-            }
-
-            QMessageBox QPushButton {
-                background: qlineargradient(
-                    x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #3b82f6,
-                    stop:1 #2563eb
-                );
-                border: 1px solid #1d4ed8;
-                border-radius: 8px;
-                padding: 10px 24px;
-                color: white;
-                font-weight: 600;
-                min-width: 80px;
-            }
-
-            QMessageBox QPushButton:hover {
-                background: qlineargradient(
-                    x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #60a5fa,
-                    stop:1 #3b82f6
-                );
-            }
-
-            QMessageBox QPushButton:pressed {
-                background: #2563eb;
-                padding: 11px 23px 9px 25px;
-            }
-
-            QGraphicsView {
-                background: qlineargradient(
-                    x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #f9fafb,
-                    stop:0.5 #f3f4f6,
-                    stop:1 #f9fafb
-                );
-                border: none;
-            }
-        """)
+        self.setStyleSheet(editor_main_stylesheet())
 
     def show_shortcuts(self):
         text = (
@@ -362,11 +160,14 @@ class EditorWindow(QMainWindow):
         msg.exec()
 
     def show_about(self):
+        primary = Palette.PRIMARY
+        footnote_color = Palette.TEXT_FOOTNOTE
+        footnote_size = Typography.ABOUT_FOOTNOTE_SIZE
         text = (
-            f"<h2 style='color: #2563eb;'>{APP_NAME}</h2>"
+            f"<h2 style='color: {primary};'>{APP_NAME}</h2>"
             f"<p><b>Версия:</b> {APP_VERSION}</p>"
             f"<p><b>Автор:</b> slipfaith</p>"
-            f"<p style='color: #6b7280; font-size: 11px;'>Современный редактор скриншотов</p>"
+            f"<p style='color: {footnote_color}; font-size: {footnote_size}px;'>Современный редактор скриншотов</p>"
         )
         msg = QMessageBox(self)
         msg.setWindowTitle("ⓘ О программе")

@@ -2,8 +2,9 @@ from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QPainter, QPen, QPixmap, QIcon, QColor, QCursor, QBrush, QLinearGradient
 
 from .styles import ModernColors
+from design_tokens import Metrics
 
-ICON_SIZE = 40
+ICON_SIZE = Metrics.TOOL_ICON
 
 
 def _base_pixmap() -> QPixmap:

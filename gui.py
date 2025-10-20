@@ -51,6 +51,14 @@ from resource_monitor import ResourceMonitor
 
 from editor.series_capture import SeriesCaptureController
 
+from design_tokens import (
+    Palette,
+    Metrics,
+    selection_overlay_label_style,
+    launcher_container_style,
+    overlay_hint_text,
+)
+
 
 if TYPE_CHECKING:
     from editor.editor_window import EditorWindow
@@ -90,21 +98,12 @@ class SelectionOverlayBase(QWidget):
         self.selecting = False
 
         self.help = QLabel(self)
-        self.help.setText("ЛКМ — выделить  •  ⎵ — форма  •  Esc — отмена")
-        shared_style = """
-            QLabel {
-                color: #ffffff;
-                background: rgba(30, 30, 35, 200);
-                padding: 12px 16px;
-                font-size: 13px;
-                font-weight: 500;
-                border-radius: 12px;
-                border: 1px solid rgba(255, 255, 255, 0.1);
-            }
-        """
+        self.help.setText(overlay_hint_text())
+        shared_style = selection_overlay_label_style()
         self.help.setStyleSheet(shared_style)
         self.help.adjustSize()
-        self.help.move(24, 24)
+        offset_x, offset_y = Metrics.OVERLAY_HINT_OFFSET
+        self.help.move(offset_x, offset_y)
 
         self.shape_hint = QLabel(self)
         self.shape_hint.setStyleSheet(shared_style)
@@ -228,10 +227,12 @@ class SelectionOverlayBase(QWidget):
                 p.restore()
                 p.setBrush(Qt.NoBrush)
                 # Более стильная рамка
-                p.setPen(QPen(QColor(70, 130, 240), 3, Qt.SolidLine))
+                primary = Palette.OVERLAY_DRAW_PRIMARY
+                p.setPen(QPen(QColor(*primary), 3, Qt.SolidLine))
                 p.drawPath(path)
                 # Внутренняя светлая рамка
-                p.setPen(QPen(QColor(255, 255, 255, 180), 1, Qt.SolidLine))
+                secondary = Palette.OVERLAY_DRAW_SECONDARY
+                p.setPen(QPen(QColor(*secondary), 1, Qt.SolidLine))
                 inner_rect = QRectF(loc.x() + 1, loc.y() + 1, loc.width() - 2, loc.height() - 2)
                 inner_path = QPainterPath()
                 inner_path.addRoundedRect(inner_rect, 11, 11)
@@ -245,10 +246,12 @@ class SelectionOverlayBase(QWidget):
                 p.restore()
                 p.setBrush(Qt.NoBrush)
                 # Более стильная рамка для эллипса
-                p.setPen(QPen(QColor(70, 130, 240), 3, Qt.SolidLine))
+                primary = Palette.OVERLAY_DRAW_PRIMARY
+                p.setPen(QPen(QColor(*primary), 3, Qt.SolidLine))
                 p.drawEllipse(QRectF(loc))
                 # Внутренняя светлая рамка
-                p.setPen(QPen(QColor(255, 255, 255, 180), 1, Qt.SolidLine))
+                secondary = Palette.OVERLAY_DRAW_SECONDARY
+                p.setPen(QPen(QColor(*secondary), 1, Qt.SolidLine))
                 inner_ellipse = QRectF(loc.x() + 1, loc.y() + 1, loc.width() - 2, loc.height() - 2)
                 p.drawEllipse(inner_ellipse)
         p.end()
@@ -264,7 +267,7 @@ class SelectionOverlayBase(QWidget):
         self.shape_hint.setText(text)
         self.shape_hint.adjustSize()
         help_geo = self.help.geometry()
-        spacing = 12
+        spacing = Metrics.OVERLAY_HINT_SPACING
         self.shape_hint.move(help_geo.x(), help_geo.bottom() + spacing)
         self.shape_hint.show()
 
@@ -455,56 +458,30 @@ class Launcher(QWidget):
         self.setWindowTitle("SlipSnap")
         self.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setFixedSize(260, 85)
+        self.setFixedSize(Metrics.LAUNCHER_WIDTH, Metrics.LAUNCHER_HEIGHT)
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
         container = QWidget()
-        container.setStyleSheet("""
-            QWidget {
-                background: rgba(25, 25, 30, 240);
-                border-radius: 16px;
-                border: 1px solid rgba(255, 255, 255, 0.08);
-            }
-            QToolButton {
-                background: rgba(40, 40, 45, 120);
-                border: none;
-                border-radius: 12px;
-                padding: 8px;
-                color: #e5e7eb;
-                font-weight: 500;
-                font-size: 11px;
-            }
-            QToolButton:hover {
-                background: rgba(70, 130, 240, 200);
-                color: white;
-            }
-            QToolButton:pressed {
-                background: rgba(60, 120, 220, 255);
-            }
-            QLabel {
-                color: #f9fafb;
-                font-size: 14px;
-                font-weight: 600;
-            }
-        """)
+        container.setStyleSheet(launcher_container_style())
 
         layout = QVBoxLayout(container)
-        layout.setContentsMargins(16, 12, 16, 14)
-        layout.setSpacing(10)
+        left, top, right, bottom = Metrics.LAUNCHER_MARGIN
+        layout.setContentsMargins(left, top, right, bottom)
+        layout.setSpacing(Metrics.LAUNCHER_SPACING)
 
         title = QLabel("SlipSnap")
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
 
         btns = QHBoxLayout()
-        btns.setSpacing(8)
+        btns.setSpacing(Metrics.LAUNCHER_BUTTON_SPACING)
 
         self.btn_capture = QToolButton()
         self.btn_capture.setIcon(make_icon_capture())
-        self.btn_capture.setIconSize(QSize(20, 20))
+        self.btn_capture.setIconSize(QSize(Metrics.LAUNCHER_ICON, Metrics.LAUNCHER_ICON))
         self.btn_capture.setText("Снимок")
         self.btn_capture.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
         self.btn_capture.clicked.connect(self.start_capture.emit)
@@ -512,7 +489,7 @@ class Launcher(QWidget):
 
         self.btn_shape = QToolButton()
         self.btn_shape.setIcon(make_icon_shape(self.cfg.get("shape", "rect")))
-        self.btn_shape.setIconSize(QSize(20, 20))
+        self.btn_shape.setIconSize(QSize(Metrics.LAUNCHER_ICON, Metrics.LAUNCHER_ICON))
         self.btn_shape.setText("Круг" if self.cfg.get("shape", "rect") == "ellipse" else "Квадрат")
         self.btn_shape.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
         self.btn_shape.clicked.connect(self._on_shape)
@@ -526,7 +503,7 @@ class Launcher(QWidget):
 
         self.btn_close = QToolButton()
         self.btn_close.setIcon(make_icon_close())
-        self.btn_close.setIconSize(QSize(20, 20))
+        self.btn_close.setIconSize(QSize(Metrics.LAUNCHER_ICON, Metrics.LAUNCHER_ICON))
         self.btn_close.setText("Закрыть")
         self.btn_close.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
         self.btn_close.clicked.connect(self._on_close_clicked)
@@ -537,7 +514,10 @@ class Launcher(QWidget):
 
         self._drag_pos = None
         scr = QGuiApplication.primaryScreen().geometry()
-        self.move(scr.center().x() - self.width() // 2, scr.top() + 100)
+        self.move(
+            scr.center().x() - self.width() // 2,
+            scr.top() + Metrics.LAUNCHER_SCREEN_TOP_OFFSET,
+        )
 
         # Добавляем тень
         self.setGraphicsEffect(self._create_shadow_effect())
@@ -551,9 +531,11 @@ class Launcher(QWidget):
     def _create_shadow_effect(self):
         from PySide6.QtWidgets import QGraphicsDropShadowEffect
         shadow = QGraphicsDropShadowEffect()
-        shadow.setBlurRadius(20)
-        shadow.setColor(QColor(0, 0, 0, 80))
-        shadow.setOffset(0, 6)
+        shadow.setBlurRadius(Metrics.OVERLAY_SHADOW_BLUR)
+        shadow_color = Palette.SHADOW_COLOR
+        shadow.setColor(QColor(*shadow_color))
+        offset_x, offset_y = Metrics.OVERLAY_SHADOW_OFFSET
+        shadow.setOffset(offset_x, offset_y)
         return shadow
 
     def mousePressEvent(self, e):

@@ -15,15 +15,17 @@ from .base_tool import BaseTool
 from editor.undo_commands import AddCommand, RemoveCommand
 from editor.ui.styles import ModernColors
 
+from design_tokens import Palette, Metrics
+
 
 class EraserTool(BaseTool):
 
     def __init__(self, canvas):
         super().__init__(canvas)
-        self.eraser_size = 20
-        self.min_size = 5
-        self.max_size = 100
-        self.size_step = 5
+        self.eraser_size = Metrics.ERASER_DEFAULT_SIZE
+        self.min_size = Metrics.ERASER_MIN_SIZE
+        self.max_size = Metrics.ERASER_MAX_SIZE
+        self.size_step = Metrics.ERASER_STEP
         self._last_pos = None
         self._last_item = None
         self._create_cursor()
@@ -73,7 +75,8 @@ class EraserTool(BaseTool):
             blur_radius = radius + (i * 2)  # Увеличивающийся радиус
 
             # Красноватый цвет для ластика
-            color = QColor(255, 80, 80, alpha)
+            color = QColor(*Palette.TEXT_TOOL_COLOR)
+            color.setAlpha(alpha)
             painter.setPen(Qt.NoPen)
             painter.setBrush(QBrush(color))
 
@@ -85,12 +88,12 @@ class EraserTool(BaseTool):
             )
 
         # Основной круг
-        main_color = QColor(255, 100, 100, 120)
+        main_color = QColor(*Palette.ERASER_MAIN_COLOR)
         painter.setBrush(QBrush(main_color))
         painter.drawEllipse(center - radius, center - radius, radius * 2, radius * 2)
 
         # Центральная точка для точности
-        painter.setPen(QPen(QColor(255, 50, 50, 180), 2))
+        painter.setPen(QPen(QColor(*Palette.ERASER_CENTER_COLOR), 2))
         painter.drawPoint(center, center)
 
         painter.end()
