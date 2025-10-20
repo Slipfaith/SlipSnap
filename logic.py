@@ -10,7 +10,7 @@ from PIL import Image
 
 from design_tokens import Typography
 APP_NAME = "SlipSnap"
-APP_VERSION = "1.0.0"
+APP_VERSION = "2.0"
 CONFIG_PATH = Path.home() / ".slipsnap_config.json"
 HISTORY_DIR = Path(tempfile.gettempdir()) / "slipsnap_history"
 HISTORY_DIR.mkdir(parents=True, exist_ok=True)
