@@ -32,7 +32,7 @@ class RectangleTool(_BaseShapeTool):
             self._tmp.setFlag(QGraphicsItem.ItemIsSelectable, True)
             self._tmp.setFlag(QGraphicsItem.ItemIsMovable, True)
             self.canvas.undo_stack.push(AddCommand(self.canvas.scene, self._tmp))
-            self.canvas.bring_to_front(self._tmp)
+            self.canvas.bring_to_front(self._tmp, record=False)
         else:
             self._tmp.setPath(path)
 
@@ -46,6 +46,6 @@ class EllipseTool(_BaseShapeTool):
             self._tmp.setFlag(QGraphicsItem.ItemIsSelectable, True)
             self._tmp.setFlag(QGraphicsItem.ItemIsMovable, True)
             self.canvas.undo_stack.push(AddCommand(self.canvas.scene, self._tmp))
-            self.canvas.bring_to_front(self._tmp)
+            self.canvas.bring_to_front(self._tmp, record=False)
         else:
             self._tmp.setRect(QRectF(self._start, pos).normalized())
