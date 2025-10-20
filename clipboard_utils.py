@@ -93,19 +93,17 @@ def set_clipboard_from_qimage(qimg: QImage, png_data: bytes, dib_bytes: bytes) -
     mime = QMimeData()
     mime.setImageData(qimg)
 
-    payloads = []
+    png_qbytes = QByteArray(png_data)
+    mime.setData("image/png", png_qbytes)
 
-    png_bytes = QByteArray(png_data)
-    payloads.append(("image/png", png_bytes))
+    if sys.platform.startswith("win"):
+        for alias in WINDOWS_IMAGE_MIME_ALIASES.get("image/png", ()):  # pragma: no cover - platform specific
+            mime.setData(alias, png_qbytes)
 
-    if dib_bytes:
-        payloads.append(("image/bmp", QByteArray(dib_bytes)))
-
-    for mime_name, data in payloads:
-        mime.setData(mime_name, data)
-        if sys.platform.startswith("win"):
-            for alias in WINDOWS_IMAGE_MIME_ALIASES.get(mime_name, ()):  # pragma: no cover - platform specific
-                mime.setData(alias, data)
+        if dib_bytes:
+            dib_qbytes = QByteArray(dib_bytes)
+            for alias in WINDOWS_IMAGE_MIME_ALIASES.get("image/bmp", ()):  # pragma: no cover - platform specific
+                mime.setData(alias, dib_qbytes)
 
     QGuiApplication.clipboard().setMimeData(mime)
 
