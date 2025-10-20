@@ -1,15 +1,33 @@
 from pathlib import Path
 import sys
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtGui import QIcon
+from PySide6.QtCore import QLockFile, QDir
 
 from gui import App
+
+_LOCK_FILE = None
+
 
 def main():
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     app.setApplicationName("SlipSnap")
+
+    lock_file_path = Path(QDir.tempPath()) / "SlipSnap.lock"
+    lock_file = QLockFile(str(lock_file_path))
+    lock_file.setStaleLockTime(0)
+    if not lock_file.tryLock():
+        QMessageBox.information(
+            None,
+            "SlipSnap уже запущен",
+            "Нельзя запустить вторую копию приложения, так как SlipSnap уже работает.",
+        )
+        return
+
+    global _LOCK_FILE
+    _LOCK_FILE = lock_file
 
     icon_path = Path(__file__).resolve().with_name("SlipSnap.ico")
     if icon_path.exists():
