@@ -15,8 +15,10 @@ from PySide6.QtWidgets import (
 )
 from .undo_commands import RemoveCommand
 
+from design_tokens import Typography, Palette, Metrics
 
-RESIZE_HANDLE_SIZE = 16
+
+RESIZE_HANDLE_SIZE = Metrics.TEXT_RESIZE_HANDLE
 
 
 class EditableTextItem(QGraphicsTextItem):
@@ -24,8 +26,8 @@ class EditableTextItem(QGraphicsTextItem):
 
     def __init__(self, text="", parent=None):
         super().__init__(text, parent)
-        self._text_color = QColor(255, 80, 80)
-        self._font = QFont("Montserrat", 18)
+        self._text_color = QColor(*Palette.TEXT_TOOL_COLOR)
+        self._font = QFont(Typography.UI_FAMILY, Typography.TEXT_TOOL_DEFAULT_POINT)
         self._is_editing = False
         self._placeholder_text = "Введите текст..."
         self._ignore_content_changes = False  # Флаг для предотвращения рекурсии
@@ -224,7 +226,7 @@ class EditableTextItem(QGraphicsTextItem):
 
             # Рисуем рамку выделения
             rect = super().boundingRect()
-            pen = QPen(QColor(70, 130, 240), 1, Qt.DashLine)
+            pen = QPen(QColor(*Palette.TEXT_TOOL_SELECTION), 1, Qt.DashLine)
             painter.setPen(pen)
             painter.setBrush(Qt.NoBrush)
             painter.drawRoundedRect(rect, 8, 8)
@@ -233,8 +235,8 @@ class EditableTextItem(QGraphicsTextItem):
             handle_size = RESIZE_HANDLE_SIZE
             handle_pos = rect.bottomRight()
 
-            painter.setBrush(QColor(70, 130, 240))
-            painter.setPen(QPen(QColor(255, 255, 255), 1))
+            painter.setBrush(QColor(*Palette.TEXT_TOOL_SELECTION))
+            painter.setPen(QPen(QColor(*Palette.TEXT_TOOL_SELECTION_FILL), 1))
 
             handle_rect = QRectF(
                 handle_pos.x() - handle_size / 2,
@@ -356,8 +358,8 @@ class TextManager:
 
     def __init__(self, canvas):
         self.canvas = canvas
-        self._font = QFont("Montserrat", 18)
-        self._text_color = QColor(255, 80, 80)
+        self._font = QFont(Typography.UI_FAMILY, Typography.TEXT_TOOL_DEFAULT_POINT)
+        self._text_color = QColor(*Palette.TEXT_TOOL_COLOR)
         self._current_text_item = None
 
     def set_text_color(self, color: QColor):

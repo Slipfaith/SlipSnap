@@ -3,6 +3,7 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QToolButton, QDialog, QGridLayout
 
 from .styles import ModernColors
+from design_tokens import Metrics, COLOR_SWATCHES
 
 
 class ColorButton(QToolButton):
@@ -11,7 +12,7 @@ class ColorButton(QToolButton):
     def __init__(self, color: QColor):
         super().__init__()
         self.color = color
-        self.setFixedSize(24, 20)
+        self.setFixedSize(Metrics.COLOR_BUTTON_WIDTH, Metrics.COLOR_BUTTON_HEIGHT)
         self.update_color()
 
     def update_color(self):
@@ -19,9 +20,9 @@ class ColorButton(QToolButton):
             QToolButton {{
                 background-color: {self.color.name()};
                 border: 1px solid {ModernColors.BORDER};
-                border-radius: 6px;
-                min-width: 20px;
-                min-height: 16px;
+                border-radius: {Metrics.COLOR_BUTTON_RADIUS}px;
+                min-width: {Metrics.COLOR_BUTTON_MIN_WIDTH}px;
+                min-height: {Metrics.COLOR_BUTTON_MIN_HEIGHT}px;
             }}
             QToolButton:hover {{
                 border: 2px solid {ModernColors.PRIMARY};
@@ -48,16 +49,12 @@ class HexColorDialog(QDialog):
             QDialog {{
                 background: {ModernColors.SURFACE};
                 border: 1px solid {ModernColors.BORDER};
-                border-radius: 12px;
-                padding: 8px;
+                border-radius: {Metrics.COLOR_SWATCH_RADIUS}px;
+                padding: {Metrics.COLOR_DIALOG_PADDING}px;
             }}
         """)
 
-        colors = [
-            "#1e293b", "#64748b", "#dc2626",
-            "#ea580c", "#eab308", "#16a34a", "#0891b2",
-            "#2563eb", "#7c3aed", "#ffffff"
-        ]
+        colors = COLOR_SWATCHES
         positions = [
             (0, 1), (0, 2), (0, 3),
             (1, 0), (1, 1), (1, 2), (1, 3),
@@ -65,17 +62,18 @@ class HexColorDialog(QDialog):
         ]
 
         layout = QGridLayout(self)
-        layout.setSpacing(4)
-        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(Metrics.COLOR_DIALOG_SPACING)
+        margin = Metrics.COLOR_DIALOG_PADDING
+        layout.setContentsMargins(margin, margin, margin, margin)
 
         for pos, col in zip(positions, colors):
             btn = QToolButton()
-            btn.setFixedSize(24, 24)
+            btn.setFixedSize(Metrics.COLOR_SWATCH, Metrics.COLOR_SWATCH)
             btn.setStyleSheet(f"""
                 QToolButton{{
                     background: {col};
                     border: 2px solid {ModernColors.BORDER};
-                    border-radius: 12px;
+                    border-radius: {Metrics.COLOR_SWATCH_RADIUS}px;
                 }}
                 QToolButton:hover{{
                     border: 2px solid {ModernColors.PRIMARY};

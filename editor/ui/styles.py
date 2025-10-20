@@ -1,104 +1,38 @@
+from design_tokens import Palette, editor_main_stylesheet
+
+
 class ModernColors:
-    """Color palette used throughout the editor."""
+    """Compatibility wrapper mapping to the global design palette."""
+
     # Primary colors
-    PRIMARY = "#2563eb"  # Modern blue
-    PRIMARY_HOVER = "#1d4ed8"
-    PRIMARY_LIGHT = "#dbeafe"
+    PRIMARY = Palette.PRIMARY
+    PRIMARY_HOVER = Palette.PRIMARY_HOVER
+    PRIMARY_LIGHT = Palette.PRIMARY_LIGHT
 
     # Surface colors
-    SURFACE = "#ffffff"
-    SURFACE_VARIANT = "#f8fafc"
-    SURFACE_HOVER = "#f1f5f9"
+    SURFACE = Palette.SURFACE
+    SURFACE_VARIANT = Palette.SURFACE_VARIANT
+    SURFACE_HOVER = Palette.SURFACE_HOVER
 
     # Border colors
-    BORDER = "#e2e8f0"
-    BORDER_FOCUS = "#3b82f6"
+    BORDER = Palette.BORDER
+    BORDER_FOCUS = Palette.BORDER_FOCUS
 
     # Text colors
-    TEXT_PRIMARY = "#0f172a"
-    TEXT_SECONDARY = "#64748b"
-    TEXT_MUTED = "#94a3b8"
+    TEXT_PRIMARY = Palette.TEXT_PRIMARY
+    TEXT_SECONDARY = Palette.TEXT_SECONDARY
+    TEXT_MUTED = Palette.TEXT_MUTED
 
     # Status colors
-    SUCCESS = "#10b981"
-    WARNING = "#f59e0b"
-    ERROR = "#ef4444"
+    SUCCESS = Palette.SUCCESS
+    WARNING = Palette.WARNING
+    ERROR = Palette.ERROR
 
 
 def main_window_style() -> str:
     """Return the global stylesheet for the editor window."""
-    return f"""
-    QMainWindow {{
-        background: {ModernColors.SURFACE};
-        color: {ModernColors.TEXT_PRIMARY};
-    }}
 
-    QToolBar {{
-        background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-            stop:0 {ModernColors.SURFACE},
-            stop:1 {ModernColors.SURFACE_VARIANT});
-        border: none;
-        border-bottom: 1px solid {ModernColors.BORDER};
-        spacing: 6px;
-        padding: 12px 16px;
-        font-weight: 500;
-        font-size: 13px;
-    }}
-
-    QToolButton {{
-        background: transparent;
-        border: none;
-        padding: 10px 14px;
-        border-radius: 10px;
-        font-weight: 500;
-        color: {ModernColors.TEXT_SECONDARY};
-        min-width: 32px;
-        min-height: 32px;
-        font-size: 16px;
-    }}
-
-    QToolButton:hover {{
-        background: {ModernColors.SURFACE_HOVER};
-        color: {ModernColors.TEXT_PRIMARY};
-        transform: translateY(-1px);
-    }}
-
-    QToolButton:pressed {{
-        background: {ModernColors.PRIMARY_LIGHT};
-        transform: translateY(0px);
-    }}
-
-    QToolButton:checked {{
-        background: {ModernColors.PRIMARY_LIGHT};
-        color: {ModernColors.TEXT_PRIMARY};
-        border: 1px solid {ModernColors.PRIMARY_HOVER};
-    }}
-
-    QToolButton:checked:hover {{
-        background: {ModernColors.PRIMARY_LIGHT};
-    }}
-
-    QLabel {{
-        color: {ModernColors.TEXT_MUTED};
-        font-size: 12px;
-        font-weight: 500;
-        margin: 0 6px;
-    }}
-
-    QToolBar::separator {{
-        background: {ModernColors.BORDER};
-        width: 1px;
-        margin: 6px 12px;
-    }}
-
-    QStatusBar {{
-        background: {ModernColors.SURFACE_VARIANT};
-        border-top: 1px solid {ModernColors.BORDER};
-        color: {ModernColors.TEXT_SECONDARY};
-        font-size: 12px;
-        padding: 6px 16px;
-    }}
-    """
+    return editor_main_stylesheet()
 
 
 def tools_toolbar_style() -> str:
