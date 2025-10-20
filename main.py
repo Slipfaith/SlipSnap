@@ -18,7 +18,7 @@ def main():
     lock_file_path = Path(QDir.tempPath()) / "SlipSnap.lock"
     lock_file = QLockFile(str(lock_file_path))
     lock_file.setStaleLockTime(0)
-    if not lock_file.tryLock():
+    if not lock_file.tryLock(1000):  # ждёт 1 секунду
         QMessageBox.information(
             None,
             "SlipSnap уже запущен",
