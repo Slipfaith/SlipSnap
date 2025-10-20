@@ -403,7 +403,7 @@ class Canvas(QGraphicsView):
                 return
         super().mouseReleaseEvent(event)
 
-    def bring_to_front(self, item: QGraphicsItem):
+    def bring_to_front(self, item: QGraphicsItem, *, record: bool = True):
         items = self.scene.items()
         changes = {}
         if item.data(0) != "blur":
@@ -414,7 +414,7 @@ class Canvas(QGraphicsView):
             item.setZValue(new)
             changes[item] = (old, new)
         self._ensure_blur_top(items, changes)
-        if changes:
+        if record and changes:
             self.undo_stack.push(ZValueCommand(changes))
 
     def send_to_back(self, item: QGraphicsItem):
