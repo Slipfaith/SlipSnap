@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import struct
 from io import BytesIO
+import struct
 import sys
 from typing import Tuple
 
@@ -10,75 +10,66 @@ from PySide6.QtCore import QByteArray, QMimeData
 from PySide6.QtGui import QGuiApplication, QImage
 
 
-def qimage_to_dib_bytes(qimg: QImage) -> bytes:
-    """Convert a QImage to a top-down DIB byte stream preserving alpha."""
+WINDOWS_IMAGE_MIME_ALIASES = {
+    "image/png": (
+        "PNG",
+        'application/x-qt-windows-mime;value="PNG"',
+    ),
+    "image/bmp": (
+        'application/x-qt-windows-mime;value="CF_DIB"',
+        'application/x-qt-windows-mime;value="CF_DIBV5"',
+    ),
+}
 
-    if qimg.isNull():
-        raise ValueError("QImage is null")
 
-    if qimg.format() != QImage.Format_ARGB32:
-        qimg = qimg.convertToFormat(QImage.Format_ARGB32)
+def _argb_dib_bytes(img: Image.Image) -> bytes:
+    """Return CF_DIB bytes for an RGBA image preserving the alpha channel."""
 
-    width = qimg.width()
-    height = qimg.height()
-    if width == 0 or height == 0:
+    if img.mode != "RGBA":
+        img = img.convert("RGBA")
+
+    width, height = img.size
+    if not width or not height:
         return b""
 
-    bytes_per_line = qimg.bytesPerLine()
-    img_size = bytes_per_line * height
+    stride = width * 4
+    size_image = stride * height
 
-    ptr = qimg.constBits()
-    if hasattr(ptr, "setsize"):
-        ptr.setsize(img_size)
-        buffer = bytes(ptr)
-    else:
-        buffer = ptr.tobytes()
-        if len(buffer) > img_size:
-            buffer = buffer[:img_size]
-
-    header = b"".join(
-        (
-            struct.pack(
-                "<IiiHHIIiiII",
-                124,  # bV5Size
-                width,
-                -height,  # top-down DIB
-                1,  # planes
-                32,  # bit count
-                3,  # BI_BITFIELDS
-                img_size,
-                3780,  # ~96 DPI
-                3780,  # ~96 DPI
-                0,  # clr used
-                0,  # clr important
-            ),
-            struct.pack(
-                "<IIII",
-                0x00FF0000,  # red mask
-                0x0000FF00,  # green mask
-                0x000000FF,  # blue mask
-                0xFF000000,  # alpha mask
-            ),
-            struct.pack("<I", 0x57696E20),  # LCS_WINDOWS_COLOR_SPACE
-            struct.pack("<9i", *([0] * 9)),  # CIEXYZ endpoints
-            struct.pack(
-                "<IIIIIII",
-                0,  # gamma red
-                0,  # gamma green
-                0,  # gamma blue
-                4,  # LCS_GM_IMAGES
-                0,  # profile data
-                0,  # profile size
-                0,  # reserved
-            ),
+    header = BytesIO()
+    # BITMAPV5HEADER structure (124 bytes) with sRGB color space and alpha mask.
+    header.write(
+        struct.pack(
+            "<IiiHHIIiiII",  # BITMAPV5HEADER basic fields
+            124,  # bV5Size
+            width,  # bV5Width
+            -height,  # bV5Height (negative for top-down DIB)
+            1,  # bV5Planes
+            32,  # bV5BitCount
+            3,  # bV5Compression = BI_BITFIELDS
+            size_image,  # bV5SizeImage
+            2835,  # bV5XPelsPerMeter (~72 DPI)
+            2835,  # bV5YPelsPerMeter
+            0,  # bV5ClrUsed
+            0,  # bV5ClrImportant
         )
     )
+    header.write(struct.pack("<IIII", 0x00FF0000, 0x0000FF00, 0x000000FF, 0xFF000000))
+    header.write(struct.pack("<I", 0x73524742))  # bV5CSType = 'sRGB'
+    header.write(struct.pack("<9I", *([0] * 9)))  # bV5Endpoints
+    header.write(struct.pack("<III", 0, 0, 0))  # bV5GammaRed/Green/Blue
+    header.write(struct.pack("<I", 4))  # bV5Intent = LCS_GM_GRAPHICS
+    header.write(struct.pack("<III", 0, 0, 0))  # bV5ProfileData/ProfileSize/Reserved
 
-    return header + buffer
+    header_bytes = header.getvalue()
+    if len(header_bytes) != 124:
+        return b""
+
+    pixel_bytes = img.tobytes("raw", "BGRA")
+    return header_bytes + pixel_bytes
 
 
-def pil_to_qimage_with_png(img: Image.Image) -> Tuple[QImage, bytes]:
-    """Return a QImage and PNG byte representation for a PIL image."""
+def pil_to_qimage_with_png(img: Image.Image) -> Tuple[QImage, bytes, bytes]:
+    """Return a QImage, PNG bytes and CF_DIB compatible bytes for a PIL image."""
 
     if img.mode != "RGBA":
         img = img.convert("RGBA")
@@ -91,36 +82,30 @@ def pil_to_qimage_with_png(img: Image.Image) -> Tuple[QImage, bytes]:
     if qimg.format() != QImage.Format_ARGB32:
         qimg = qimg.convertToFormat(QImage.Format_ARGB32)
 
-    return qimg, png_data
+    dib_bytes = _argb_dib_bytes(img)
+
+    return qimg, png_data, dib_bytes
 
 
-def set_clipboard_from_qimage(qimg: QImage, png_data: bytes) -> None:
-    """Populate the clipboard with QImage, PNG and DIB representations."""
-
-    bmp_bytes = qimage_to_dib_bytes(qimg)
+def set_clipboard_from_qimage(qimg: QImage, png_data: bytes, dib_bytes: bytes) -> None:
+    """Populate the clipboard with standard image formats for broad compatibility."""
 
     mime = QMimeData()
-    png_bytes = QByteArray(png_data)
     mime.setImageData(qimg)
-    mime.setData("image/png", png_bytes)
-    if sys.platform.startswith("win"):
-        mime.setData("PNG", png_bytes)
-        mime.setData(
-            "application/x-qt-windows-mime;value=\"PNG\"",
-            png_bytes,
-        )
-    if bmp_bytes:
-        bmp_qbytes = QByteArray(bmp_bytes)
-        mime.setData("image/bmp", bmp_qbytes)
+
+    payloads = []
+
+    png_bytes = QByteArray(png_data)
+    payloads.append(("image/png", png_bytes))
+
+    if dib_bytes:
+        payloads.append(("image/bmp", QByteArray(dib_bytes)))
+
+    for mime_name, data in payloads:
+        mime.setData(mime_name, data)
         if sys.platform.startswith("win"):
-            mime.setData(
-                "application/x-qt-windows-mime;value=\"CF_DIB\"",
-                bmp_qbytes,
-            )
-            mime.setData(
-                "application/x-qt-windows-mime;value=\"CF_DIBV5\"",
-                bmp_qbytes,
-            )
+            for alias in WINDOWS_IMAGE_MIME_ALIASES.get(mime_name, ()):  # pragma: no cover - platform specific
+                mime.setData(alias, data)
 
     QGuiApplication.clipboard().setMimeData(mime)
 
@@ -128,6 +113,6 @@ def set_clipboard_from_qimage(qimg: QImage, png_data: bytes) -> None:
 def copy_pil_image_to_clipboard(img: Image.Image) -> QImage:
     """Copy a PIL image to the clipboard preserving transparency."""
 
-    qimg, png_data = pil_to_qimage_with_png(img)
-    set_clipboard_from_qimage(qimg, png_data)
+    qimg, png_data, dib_bytes = pil_to_qimage_with_png(img)
+    set_clipboard_from_qimage(qimg, png_data, dib_bytes)
     return qimg
