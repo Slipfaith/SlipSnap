@@ -32,39 +32,39 @@ def _argb_dib_bytes(img: Image.Image) -> bytes:
     if not width or not height:
         return b""
 
-    stride = width * 4
+    # Align the stride to a 4 byte boundary (requirement for DIBs).
+    stride = ((width * 32 + 31) // 32) * 4
     size_image = stride * height
 
     header = BytesIO()
-    # BITMAPV5HEADER structure (124 bytes) with sRGB color space and alpha mask.
+    # BITMAPINFOHEADER (40 bytes) followed by explicit channel masks for BI_BITFIELDS.
     header.write(
         struct.pack(
-            "<IiiHHIIiiII",  # BITMAPV5HEADER basic fields
-            124,  # bV5Size
-            width,  # bV5Width
-            -height,  # bV5Height (negative for top-down DIB)
-            1,  # bV5Planes
-            32,  # bV5BitCount
-            3,  # bV5Compression = BI_BITFIELDS
-            size_image,  # bV5SizeImage
-            2835,  # bV5XPelsPerMeter (~72 DPI)
-            2835,  # bV5YPelsPerMeter
-            0,  # bV5ClrUsed
-            0,  # bV5ClrImportant
+            "<IiiHHIIiiII",
+            40,  # biSize
+            width,  # biWidth
+            height,  # biHeight (positive -> bottom-up DIB)
+            1,  # biPlanes
+            32,  # biBitCount
+            3,  # biCompression = BI_BITFIELDS
+            size_image,  # biSizeImage
+            2835,  # biXPelsPerMeter (~72 DPI)
+            2835,  # biYPelsPerMeter
+            0,  # biClrUsed
+            0,  # biClrImportant
         )
     )
+    # RGB and alpha masks to keep the channel order explicit.
     header.write(struct.pack("<IIII", 0x00FF0000, 0x0000FF00, 0x000000FF, 0xFF000000))
-    header.write(struct.pack("<I", 0x73524742))  # bV5CSType = 'sRGB'
-    header.write(struct.pack("<9I", *([0] * 9)))  # bV5Endpoints
-    header.write(struct.pack("<III", 0, 0, 0))  # bV5GammaRed/Green/Blue
-    header.write(struct.pack("<I", 4))  # bV5Intent = LCS_GM_GRAPHICS
-    header.write(struct.pack("<III", 0, 0, 0))  # bV5ProfileData/ProfileSize/Reserved
 
     header_bytes = header.getvalue()
-    if len(header_bytes) != 124:
+    if len(header_bytes) != 56:
         return b""
 
-    pixel_bytes = img.tobytes("raw", "BGRA")
+    # DIBs with positive height expect rows in bottom-up order.
+    flipped = img.transpose(Image.FLIP_TOP_BOTTOM)
+    pixel_bytes = flipped.tobytes("raw", "BGRA")
+
     return header_bytes + pixel_bytes
 
 
