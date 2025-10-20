@@ -99,7 +99,7 @@ def _bgr_dib_bytes(img: Image.Image) -> bytes:
         "<IiiHHIIiiII",
         40,  # biSize = BITMAPINFOHEADER
         width,  # biWidth
-        height,  # biHeight (positive -> bottom-up DIB)
+        -height,  # biHeight (negative -> top-down DIB)
         1,  # biPlanes
         24,  # biBitCount
         0,  # biCompression = BI_RGB
@@ -110,16 +110,20 @@ def _bgr_dib_bytes(img: Image.Image) -> bytes:
         0,  # biClrImportant
     )
 
-    rgb_bytes = img.convert("RGB").tobytes("raw", "RGB")
+    # CF_DIB expects pixel data in BGR byte order. Word/Outlook reject
+    # buffers that are supplied as RGB, so convert explicitly. They also
+    # expect the rows to be stored top-down, so provide a negative height and
+    # leave the rows in their natural order.
+    bgr_bytes = img.convert("RGB").tobytes("raw", "BGR")
     row_bytes = width * 3
     padding = stride - row_bytes
     pad = b"\x00" * padding
 
     rows = []
-    for row in range(height - 1, -1, -1):
+    for row in range(height):
         start = row * row_bytes
         end = start + row_bytes
-        rows.append(rgb_bytes[start:end])
+        rows.append(bgr_bytes[start:end])
         if padding:
             rows.append(pad)
 
