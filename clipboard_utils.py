@@ -43,7 +43,7 @@ def _argb_dib_bytes(img: Image.Image) -> bytes:
             "<IiiHHIIiiII",
             40,  # biSize
             width,  # biWidth
-            height,  # biHeight (positive -> bottom-up DIB)
+            -height,  # biHeight (negative -> top-down DIB)
             1,  # biPlanes
             32,  # biBitCount
             3,  # biCompression = BI_BITFIELDS
@@ -61,9 +61,7 @@ def _argb_dib_bytes(img: Image.Image) -> bytes:
     if len(header_bytes) != 56:
         return b""
 
-    # DIBs with positive height expect rows in bottom-up order.
-    flipped = img.transpose(Image.FLIP_TOP_BOTTOM)
-    pixel_bytes = flipped.tobytes("raw", "BGRA")
+    pixel_bytes = img.tobytes("raw", "BGRA")
 
     return header_bytes + pixel_bytes
 
