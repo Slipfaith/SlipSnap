@@ -22,6 +22,8 @@ from editor.image_utils import images_from_mime
 
 from editor.undo_commands import AddCommand, RemoveCommand, ScaleCommand
 
+from ocr import OCRResult, PosterOCR, configure_local_tesseract
+
 from .ui.canvas import Canvas
 from .ui.color_widgets import HexColorDialog
 from .ui.toolbar_factory import create_tools_toolbar, create_actions_toolbar
@@ -46,6 +48,10 @@ class EditorWindow(QMainWindow):
         self.text_manager = TextManager(self.canvas)
         self.canvas.set_text_manager(self.text_manager)
         self.logic = EditorLogic(self.canvas)
+
+        # Настраиваем локальный Tesseract, если он доступен, и инициализируем OCR
+        configure_local_tesseract()
+        self._poster_ocr = PosterOCR(("rus", "eng"))
 
         self.setCentralWidget(self.canvas)
         self._apply_modern_stylesheet()
@@ -194,6 +200,50 @@ class EditorWindow(QMainWindow):
         else:
             message = "✓ Скриншот скопирован"
         self.statusBar().showMessage(message, 2000)
+
+    def recognize_movie_title(self):
+        try:
+            pil_image = self.canvas.export_selection()
+        except Exception as exc:
+            QMessageBox.warning(
+                self,
+                "SlipSnap — OCR",
+                f"Не удалось подготовить изображение для распознавания: {exc}",
+            )
+            return
+
+        try:
+            result = self._poster_ocr.extract_title(pil_image)
+        except RuntimeError as exc:
+            QMessageBox.warning(self, "SlipSnap — OCR", str(exc))
+            return
+        except Exception as exc:
+            QMessageBox.critical(
+                self,
+                "SlipSnap — OCR",
+                f"Непредвиденная ошибка OCR: {exc}",
+            )
+            return
+
+        if not isinstance(result, OCRResult) or not result.text:
+            QMessageBox.information(
+                self,
+                "SlipSnap — OCR",
+                "Не удалось распознать название фильма на изображении.",
+            )
+            self.statusBar().showMessage("⚠️ Название фильма не найдено", 3000)
+            return
+
+        QApplication.clipboard().setText(result.text)
+        info_lines = [
+            f"Название: {result.text}",
+            f"Доверие: {max(0.0, min(100.0, result.confidence)):.1f}%",
+            f"Доля постера: {max(0.0, min(100.0, result.area_ratio * 100)):.1f}%",
+            "",
+            "Текст скопирован в буфер обмена.",
+        ]
+        QMessageBox.information(self, "SlipSnap — OCR", "\n".join(info_lines))
+        self.statusBar().showMessage("✓ Название фильма распознано и скопировано", 4000)
 
     def save_image(self):
         name = self.logic.save_image(self)
