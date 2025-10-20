@@ -29,7 +29,7 @@ from .ui.window_utils import size_to_image
 from .ui.meme_library_dialog import MemesDialog
 from icons import make_icon_series
 
-from design_tokens import Metrics, editor_main_stylesheet, Palette, Typography
+from design_tokens import Metrics, editor_main_stylesheet
 
 
 class EditorWindow(QMainWindow):
@@ -140,40 +140,38 @@ class EditorWindow(QMainWindow):
         self.setStyleSheet(editor_main_stylesheet())
 
     def show_shortcuts(self):
-        text = (
-            "⌘ <b>Горячие клавиши:</b><br><br>"
-            "▸ <b>Ctrl+N</b> — новый снимок<br>"
-            "▸ <b>Ctrl+Shift+N</b> — коллаж<br>"
-            "▸ <b>Ctrl+K</b> — история<br>"
-            "▸ <b>Ctrl+C</b> — копировать<br>"
-            "▸ <b>Ctrl+S</b> — сохранить<br>"
-            "▸ <b>Ctrl+Z</b> — отмена<br>"
-            "▸ <b>Ctrl+Y</b> — повтор<br>"
-            "▸ <b>Delete</b> — удалить<br>"
-            "▸ <b>Ctrl+Plus/Minus</b> — масштаб"
+        shortcuts = (
+            "SlipSnap — горячие клавиши\n\n"
+            "Ctrl+N — новый снимок\n"
+            "Ctrl+Shift+N — коллаж\n"
+            "Ctrl+K — история\n"
+            "Ctrl+C — копировать\n"
+            "Ctrl+S — сохранить\n"
+            "Ctrl+Z — отмена\n"
+            "Ctrl+Y — вернуть отменённое\n"
+            "Delete — удалить\n"
+            "Ctrl+Plus/Minus — масштаб"
         )
         msg = QMessageBox(self)
-        msg.setWindowTitle("⌘ Горячие клавиши")
-        msg.setTextFormat(Qt.RichText)
-        msg.setText(text)
-        msg.setIcon(QMessageBox.Information)
+        msg.setWindowTitle("SlipSnap · Горячие клавиши")
+        msg.setTextFormat(Qt.PlainText)
+        msg.setIcon(QMessageBox.NoIcon)
+        msg.setText(shortcuts)
+        msg.setStandardButtons(QMessageBox.Ok)
         msg.exec()
 
     def show_about(self):
-        primary = Palette.PRIMARY
-        footnote_color = Palette.TEXT_FOOTNOTE
-        footnote_size = Typography.ABOUT_FOOTNOTE_SIZE
         text = (
-            f"<h2 style='color: {primary};'>{APP_NAME}</h2>"
-            f"<p><b>Версия:</b> {APP_VERSION}</p>"
-            f"<p><b>Автор:</b> slipfaith</p>"
-            f"<p style='color: {footnote_color}; font-size: {footnote_size}px;'>Современный редактор скриншотов</p>"
+            f"{APP_NAME} {APP_VERSION}\n"
+            "Современный редактор скриншотов\n"
+            "Автор: slipfaith"
         )
         msg = QMessageBox(self)
-        msg.setWindowTitle("ⓘ О программе")
-        msg.setTextFormat(Qt.RichText)
+        msg.setWindowTitle("SlipSnap · О программе")
+        msg.setTextFormat(Qt.PlainText)
+        msg.setIcon(QMessageBox.NoIcon)
         msg.setText(text)
-        msg.setIcon(QMessageBox.Information)
+        msg.setStandardButtons(QMessageBox.Ok)
         msg.exec()
 
     # ---- actions ----
