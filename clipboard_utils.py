@@ -110,7 +110,9 @@ def _bgr_dib_bytes(img: Image.Image) -> bytes:
         0,  # biClrImportant
     )
 
-    rgb_bytes = img.convert("RGB").tobytes("raw", "RGB")
+    # CF_DIB expects pixel data in BGR byte order. Word/Outlook reject
+    # buffers that are supplied as RGB, so convert explicitly.
+    bgr_bytes = img.convert("RGB").tobytes("raw", "BGR")
     row_bytes = width * 3
     padding = stride - row_bytes
     pad = b"\x00" * padding
@@ -119,7 +121,7 @@ def _bgr_dib_bytes(img: Image.Image) -> bytes:
     for row in range(height - 1, -1, -1):
         start = row * row_bytes
         end = start + row_bytes
-        rows.append(rgb_bytes[start:end])
+        rows.append(bgr_bytes[start:end])
         if padding:
             rows.append(pad)
 
