@@ -320,6 +320,18 @@ class Canvas(QGraphicsView):
         super().wheelEvent(event)
 
     def keyPressEvent(self, event):
+        if event.modifiers() & Qt.ControlModifier:
+            key = event.key()
+            if key == Qt.Key_Z:
+                if self.undo_stack.canUndo():
+                    self.undo_stack.undo()
+                event.accept()
+                return
+            if key == Qt.Key_X:
+                if self.undo_stack.canRedo():
+                    self.undo_stack.redo()
+                event.accept()
+                return
         if self._tool == "erase" and hasattr(self.active_tool, 'key_press'):
             self.active_tool.key_press(event.key())
             event.accept()

@@ -453,7 +453,7 @@ def create_actions_toolbar(window, canvas):
     undo_act.setShortcut(QKeySequence("Ctrl+Z"))
     undo_act.setShortcutContext(Qt.ApplicationShortcut)
     redo_act = canvas.undo_stack.createRedoAction(window, "Повтор")
-    redo_act.setShortcut(QKeySequence("Ctrl+Y"))
+    redo_act.setShortcut(QKeySequence("Ctrl+X"))
     redo_act.setShortcutContext(Qt.ApplicationShortcut)
     window.addAction(undo_act)
     window.addAction(redo_act)

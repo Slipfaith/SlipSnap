@@ -148,7 +148,7 @@ class EditorWindow(QMainWindow):
             "Ctrl+C — копировать\n"
             "Ctrl+S — сохранить\n"
             "Ctrl+Z — отмена\n"
-            "Ctrl+Y — вернуть отменённое\n"
+            "Ctrl+X — вернуть отменённое\n"
             "Delete — удалить\n"
             "Ctrl+Plus/Minus — масштаб"
         )
