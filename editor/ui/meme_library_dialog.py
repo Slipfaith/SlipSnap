@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 from PySide6.QtCore import Qt, QSize, Signal
-from PySide6.QtGui import QIcon, QPixmap
+from PIL import Image
+from PySide6.QtGui import QIcon, QPixmap, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -16,6 +17,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from clipboard_utils import copy_pil_image_to_clipboard
 from meme_library import add_memes_from_paths, delete_memes, list_memes
 
 from design_tokens import Metrics, meme_dialog_stylesheet
@@ -32,6 +34,7 @@ class MemesDialog(QWidget):
         self.setMinimumSize(Metrics.MEME_DIALOG_MIN_WIDTH, Metrics.MEME_DIALOG_MIN_HEIGHT)
         self._build_ui()
         self.refresh()
+        self._setup_shortcuts()
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -90,6 +93,11 @@ class MemesDialog(QWidget):
 
         self.setStyleSheet(meme_dialog_stylesheet())
 
+    def _setup_shortcuts(self) -> None:
+        copy_shortcut = QShortcut(QKeySequence("Ctrl+C"), self)
+        copy_shortcut.activated.connect(self._copy_selected_to_clipboard)
+        self._copy_shortcut = copy_shortcut
+
     def refresh(self) -> None:
         self._list.clear()
         paths = list_memes()
@@ -147,6 +155,21 @@ class MemesDialog(QWidget):
         paths = [item.data(Qt.UserRole) for item in items]
         delete_memes([p for p in paths if isinstance(p, Path)])
         self.refresh()
+
+    def _copy_selected_to_clipboard(self) -> None:
+        items = self._list.selectedItems()
+        if not items:
+            return
+
+        path = items[0].data(Qt.UserRole)
+        if not isinstance(path, Path):
+            return
+
+        try:
+            with Image.open(path) as img:
+                copy_pil_image_to_clipboard(img)
+        except Exception as exc:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось скопировать мем: {exc}")
 
     def _on_item_double_clicked(self, item: QListWidgetItem) -> None:
         path = item.data(Qt.UserRole)
