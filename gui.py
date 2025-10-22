@@ -1,6 +1,7 @@
 from typing import List, Tuple, Optional, TYPE_CHECKING, Type
 from pathlib import Path
 from time import perf_counter
+import logging
 from PIL import Image, ImageFilter, ImageDraw, ImageQt
 
 try:
@@ -58,6 +59,9 @@ from design_tokens import (
     launcher_container_style,
     overlay_hint_text,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
@@ -548,7 +552,7 @@ class Launcher(QWidget):
 
     def _on_shape(self):
         self.cfg["shape"] = "ellipse" if self.cfg.get("shape", "rect") == "rect" else "rect"
-        save_config(self.cfg)
+        save_config(self.cfg, parent=self)
         self.btn_shape.setIcon(make_icon_shape(self.cfg["shape"]))
         self.btn_shape.setText("Круг" if self.cfg["shape"] == "ellipse" else "Квадрат")
         self.toggle_shape.emit()
@@ -566,7 +570,7 @@ class Launcher(QWidget):
         if dlg.exec() and not edit.keySequence().isEmpty():
             seq = edit.keySequence().toString()
             self.cfg["capture_hotkey"] = seq
-            save_config(self.cfg)
+            save_config(self.cfg, parent=self)
             self.btn_hotkey.setText(seq)
             self.hotkey_changed.emit(seq)
 
@@ -576,7 +580,10 @@ class App(QObject):
         super().__init__()
         init_started = perf_counter()
         self.cfg = load_config()
-        self._resource_monitor = ResourceMonitor(self)
+        self._resource_monitor = ResourceMonitor(
+            self,
+            prompt_on_exit=self.cfg.get("ask_save_report", True),
+        )
         self._resource_monitor.increment_counter("app_sessions")
         self._resource_monitor.stats_updated.connect(self._update_tray_stats)
         self._resource_monitor.start()
@@ -616,7 +623,7 @@ class App(QObject):
         if app is not None:
             app.aboutToQuit.connect(self._cleanup_on_exit)
         elapsed = perf_counter() - init_started
-        print(f"[SlipSnap] App initialized in {elapsed:.3f}s")
+        logger.info("SlipSnap app initialized in %.3fs", elapsed)
         self._resource_monitor.record_event_duration("app_initialization", elapsed)
 
     def _toggle_shape(self):
@@ -659,7 +666,7 @@ class App(QObject):
         if parent is None:
             parent = self.launcher
         if self._series_controller.begin_session(parent):
-            save_config(self.cfg)
+            save_config(self.cfg, parent=parent)
             self._series_parent = parent
             self._update_editor_series_buttons()
             return True
@@ -988,6 +995,14 @@ class App(QObject):
             else:
                 self._enter_background()
 
+    def _on_report_prompt_disabled(self, disabled: bool) -> None:
+        if not disabled:
+            return
+        if not self.cfg.get("ask_save_report", True):
+            return
+        self.cfg["ask_save_report"] = False
+        save_config(self.cfg, parent=self.launcher)
+
     def _exit_from_tray(self):
         if not self._cleanup_on_exit():
             return
@@ -1000,7 +1015,10 @@ class App(QObject):
             return True
 
         parent = self.launcher if self.launcher is not None else None
-        if not self._resource_monitor.prepare_shutdown(parent):
+        if not self._resource_monitor.prepare_shutdown(
+            parent,
+            on_disable=self._on_report_prompt_disabled,
+        ):
             return False
 
         self._cleaned_up = True

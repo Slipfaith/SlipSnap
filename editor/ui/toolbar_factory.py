@@ -477,7 +477,7 @@ def create_actions_toolbar(window, canvas):
             window.cfg["shape"] = "rect"
         elif chosen == circle_act:
             window.cfg["shape"] = "ellipse"
-        save_config(window.cfg)
+        save_config(window.cfg, parent=window)
 
     new_btn = buttons.get("new")
     if new_btn is not None:

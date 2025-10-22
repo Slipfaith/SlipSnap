@@ -119,7 +119,12 @@ class ResourceMonitor(QObject):
 
     stats_updated = Signal(str)
 
-    def __init__(self, parent: Optional[QObject] = None, sample_interval_ms: int = 1000) -> None:
+    def __init__(
+        self,
+        parent: Optional[QObject] = None,
+        sample_interval_ms: int = 1000,
+        prompt_on_exit: bool = True,
+    ) -> None:
         super().__init__(parent)
         self._process = psutil.Process()
         self._pid = self._process.pid
@@ -133,6 +138,7 @@ class ResourceMonitor(QObject):
         self._latest_summary: str = ""
         self._start_time = datetime.now()
         self._report_saved = False
+        self._prompt_on_exit = prompt_on_exit
         self._gpu_helper = _GPUHelper(self._pid)
         # Prime CPU measurement to avoid the first 0.0 reading.
         try:
@@ -149,15 +155,56 @@ class ResourceMonitor(QObject):
             self._timer.stop()
         self._gpu_helper.shutdown()
 
-    def prepare_shutdown(self, parent: Optional[QObject] = None) -> bool:
-        """Ask the user where to store the report and persist it."""
+    def prepare_shutdown(
+        self,
+        parent: Optional[QObject] = None,
+        *,
+        on_disable: Optional[Callable[[bool], None]] = None,
+    ) -> bool:
+        """Ask the user about saving the report before shutdown."""
 
         if self._report_saved:
+            return True
+
+        if not self._prompt_on_exit:
+            self.shutdown()
+            self._report_saved = True
             return True
 
         default_name = f"SlipSnap-usage-{datetime.now():%Y%m%d-%H%M%S}.txt"
         default_path = Path.home() / default_name
         widget_parent = parent if isinstance(parent, QWidget) else None
+
+        message_box = QMessageBox(widget_parent)
+        message_box.setWindowTitle("SlipSnap")
+        message_box.setIcon(QMessageBox.Question)
+        message_box.setText("Сохранить отчёт о работе SlipSnap?")
+        _save_button = message_box.addButton("Сохранить…", QMessageBox.AcceptRole)
+        skip_button = message_box.addButton("Пропустить", QMessageBox.DestructiveRole)
+        disable_button = message_box.addButton(
+            "Больше не спрашивать",
+            QMessageBox.RejectRole,
+        )
+        cancel_button = message_box.addButton(QMessageBox.Cancel)
+        message_box.exec()
+
+        clicked = message_box.clickedButton()
+        if clicked == cancel_button:
+            return False
+
+        if clicked == disable_button:
+            self._prompt_on_exit = False
+            self._report_saved = True
+            self.shutdown()
+            if on_disable is not None:
+                on_disable(True)
+            return True
+
+        if clicked == skip_button:
+            self.shutdown()
+            self._report_saved = True
+            return True
+
         path, _ = QFileDialog.getSaveFileName(
             widget_parent,
             "Сохранить отчёт о работе SlipSnap",
