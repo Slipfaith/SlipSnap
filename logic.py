@@ -5,6 +5,10 @@ import tempfile
 from pathlib import Path
 from typing import Tuple, Optional
 
+from contextlib import suppress
+
+from PySide6.QtWidgets import QApplication, QMessageBox, QWidget
+
 import mss
 from PIL import Image
 
@@ -24,6 +28,7 @@ DEFAULT_CONFIG = {
     "capture_hotkey": "Ctrl+Alt+S",
     "series_prefix": "Series",
     "series_folder": str(Path.home()),
+    "ask_save_report": True,
 }
 
 def load_config() -> dict:
@@ -37,10 +42,26 @@ def load_config() -> dict:
             pass
     return cfg
 
-def save_config(cfg: dict) -> None:
+def save_config(cfg: dict, *, parent: Optional[QWidget] = None) -> bool:
     data = DEFAULT_CONFIG.copy()
     data.update({k: v for k, v in cfg.items() if k in DEFAULT_CONFIG})
-    CONFIG_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    tmp_path = CONFIG_PATH.with_name(CONFIG_PATH.name + ".tmp")
+
+    try:
+        CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp_path.replace(CONFIG_PATH)
+    except OSError as exc:
+        with suppress(FileNotFoundError):
+            tmp_path.unlink()
+        app = QApplication.instance()
+        if app is not None:
+            widget_parent: Optional[QWidget] = parent if isinstance(parent, QWidget) else None
+            QMessageBox.warning(widget_parent, "SlipSnap", f"Не удалось сохранить настройки:\n{exc}")
+        return False
+
+    return True
 
 def pil_to_qpixmap(img: Image.Image):
     """Convert PIL image to QPixmap with RGBA support."""
