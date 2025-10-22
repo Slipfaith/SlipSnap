@@ -21,7 +21,6 @@ from PySide6.QtCore import (
 from PySide6.QtGui import (
     QGuiApplication,
     QPainter,
-    QPen,
     QColor,
     QPixmap,
     QImage,
@@ -226,17 +225,6 @@ class SelectionOverlayBase(QWidget):
                 p.drawPixmap(loc, self._bg_original_scaled, loc)
                 p.restore()
                 p.setBrush(Qt.NoBrush)
-                # Более стильная рамка
-                primary = Palette.OVERLAY_DRAW_PRIMARY
-                p.setPen(QPen(QColor(*primary), 3, Qt.SolidLine))
-                p.drawPath(path)
-                # Внутренняя светлая рамка
-                secondary = Palette.OVERLAY_DRAW_SECONDARY
-                p.setPen(QPen(QColor(*secondary), 1, Qt.SolidLine))
-                inner_rect = QRectF(loc.x() + 1, loc.y() + 1, loc.width() - 2, loc.height() - 2)
-                inner_path = QPainterPath()
-                inner_path.addRoundedRect(inner_rect, 11, 11)
-                p.drawPath(inner_path)
             else:
                 path = QPainterPath()
                 path.addEllipse(QRectF(loc))
@@ -245,15 +233,6 @@ class SelectionOverlayBase(QWidget):
                 p.drawPixmap(loc, self._bg_original_scaled, loc)
                 p.restore()
                 p.setBrush(Qt.NoBrush)
-                # Более стильная рамка для эллипса
-                primary = Palette.OVERLAY_DRAW_PRIMARY
-                p.setPen(QPen(QColor(*primary), 3, Qt.SolidLine))
-                p.drawEllipse(QRectF(loc))
-                # Внутренняя светлая рамка
-                secondary = Palette.OVERLAY_DRAW_SECONDARY
-                p.setPen(QPen(QColor(*secondary), 1, Qt.SolidLine))
-                inner_ellipse = QRectF(loc.x() + 1, loc.y() + 1, loc.width() - 2, loc.height() - 2)
-                p.drawEllipse(inner_ellipse)
         p.end()
 
     def _map_rect_to_image_coords(self, gr: QRect) -> Tuple[int, int, int, int]:
