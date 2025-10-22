@@ -676,10 +676,10 @@ class App(QObject):
             self._update_editor_series_buttons()
 
     def _on_series_overlay_finished(self):
-        self._restore_hidden_editors()
         parent = self._series_parent or self.launcher
         finished = self._series_controller.handle_overlay_finished(parent)
         if finished or not self._series_controller.is_active():
+            self._restore_hidden_editors()
             self._series_parent = None
         self._update_editor_series_buttons()
         self._show_launcher()
@@ -714,7 +714,22 @@ class App(QObject):
 
     def _hide_editor_windows(self):
         EditorWindow = self._get_editor_window_class()
-        self._hidden_editors = []
+        if self._series_controller.is_active():
+            preserved: List["EditorWindow"] = []
+            seen_ids = set()
+            for win in self._hidden_editors:
+                try:
+                    win.isVisible()
+                except RuntimeError:
+                    continue
+                identifier = id(win)
+                if identifier in seen_ids:
+                    continue
+                preserved.append(win)
+                seen_ids.add(identifier)
+            self._hidden_editors = preserved
+        else:
+            self._hidden_editors = []
         self._capture_target_editor = None
 
         focus_window = QApplication.focusWindow()
@@ -731,14 +746,23 @@ class App(QObject):
                 if isinstance(candidate, EditorWindow):
                     target = candidate
 
+        existing_ids = {id(win) for win in self._hidden_editors}
+
         for win in self._editor_windows():
-            if not win.isVisible():
+            try:
+                visible = win.isVisible()
+            except RuntimeError:
+                continue
+            if not visible:
                 continue
             try:
                 win.begin_capture_hide()
             except Exception:
                 continue
-            self._hidden_editors.append(win)
+            identifier = id(win)
+            if identifier not in existing_ids:
+                self._hidden_editors.append(win)
+                existing_ids.add(identifier)
 
         if target and target in self._hidden_editors:
             self._capture_target_editor = target
