@@ -23,6 +23,7 @@ from editor.image_utils import images_from_mime
 from editor.undo_commands import AddCommand, RemoveCommand, ScaleCommand
 
 from .ui.canvas import Canvas
+from .ui.high_quality_pixmap_item import HighQualityPixmapItem
 from .ui.color_widgets import HexColorDialog
 from .ui.toolbar_factory import create_tools_toolbar, create_actions_toolbar
 from .ui.window_utils import size_to_image
@@ -298,8 +299,7 @@ class EditorWindow(QMainWindow):
 
     def _insert_screenshot_item(self, qimg: QImage, item_tag: str = "screenshot"):
         pixmap = self._rounded_pixmap(qimg)
-        screenshot_item = QGraphicsPixmapItem(pixmap)
-        screenshot_item.setTransformationMode(Qt.SmoothTransformation)
+        screenshot_item = HighQualityPixmapItem(pixmap.toImage())
         screenshot_item.setFlag(QGraphicsItem.ItemIsMovable, True)
         screenshot_item.setFlag(QGraphicsItem.ItemIsSelectable, True)
         screenshot_item.setFlag(QGraphicsItem.ItemIsFocusable, True)

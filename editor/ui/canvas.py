@@ -2,7 +2,7 @@ from typing import Optional, Dict
 import math
 
 from PySide6.QtCore import Qt, QPointF, QRectF, Signal
-from PySide6.QtGui import QPainter, QPen, QColor, QImage, QPixmap, QUndoStack
+from PySide6.QtGui import QPainter, QPen, QColor, QImage, QUndoStack
 from PySide6.QtWidgets import (
     QGraphicsView,
     QGraphicsScene,
@@ -10,9 +10,11 @@ from PySide6.QtWidgets import (
     QGraphicsItem,
     QMenu,
     QMessageBox,
+    QFrame,
 )
 
 from .styles import ModernColors
+from .high_quality_pixmap_item import HighQualityPixmapItem
 from .icon_factory import create_pencil_cursor, create_select_cursor
 from logic import qimage_to_pil
 from editor.text_tools import TextManager, EditableTextItem
@@ -44,8 +46,9 @@ class Canvas(QGraphicsView):
         self.scene = QGraphicsScene(self)
         self.setScene(self.scene)
         self.setAcceptDrops(True)
+        self.setFrameShape(QFrame.NoFrame)
 
-        self.pixmap_item: Optional[QGraphicsPixmapItem] = QGraphicsPixmapItem(QPixmap.fromImage(image))
+        self.pixmap_item: Optional[HighQualityPixmapItem] = HighQualityPixmapItem(image)
         self.pil_image = qimage_to_pil(image)  # store original PIL image
         self.pixmap_item.setFlag(QGraphicsItem.ItemIsMovable, True)
         self.pixmap_item.setFlag(QGraphicsItem.ItemIsSelectable, True)
@@ -65,12 +68,11 @@ class Canvas(QGraphicsView):
         self.setStyleSheet(f"""
             QGraphicsView {{
                 background: {ModernColors.SURFACE_VARIANT};
-                border: 1px solid {ModernColors.BORDER};
-                border-radius: 12px;
-                padding: 2px;
+                border: none;
+                padding: 0;
             }}
             QGraphicsView:focus {{
-                border: 2px solid {ModernColors.BORDER_FOCUS};
+                border: none;
                 outline: none;
             }}
         """)
@@ -145,7 +147,7 @@ class Canvas(QGraphicsView):
     def set_base_image(self, image: QImage):
         """Replace the main screenshot and clear existing items."""
         self.scene.clear()
-        self.pixmap_item = QGraphicsPixmapItem(QPixmap.fromImage(image))
+        self.pixmap_item = HighQualityPixmapItem(image)
         self.pixmap_item.setFlag(QGraphicsItem.ItemIsMovable, True)
         self.pixmap_item.setFlag(QGraphicsItem.ItemIsSelectable, True)
         self.pixmap_item.setFlag(QGraphicsItem.ItemIsFocusable, True)
@@ -170,6 +172,8 @@ class Canvas(QGraphicsView):
             qimg = item.pixmap().toImage()
             if not qimg.isNull():
                 self.pil_image = qimage_to_pil(qimg)
+            if isinstance(item, HighQualityPixmapItem):
+                item.reset_scale_tracking()
 
     def set_tool(self, tool: str):
         if self._text_manager:
