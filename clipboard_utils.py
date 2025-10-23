@@ -6,7 +6,6 @@ from __future__ import annotations
 
 from io import BytesIO
 import sys
-from typing import Optional
 
 from PIL import Image
 from PySide6.QtGui import QImage
@@ -181,7 +180,7 @@ def _copy_png_and_dibv5_win32(img: Image.Image, png_data: bytes) -> None:
         # 2. CF_DIBV5 (для Teams, Word, Outlook)
         wc.SetClipboardData(wc.CF_DIBV5, dibv5_data)
 
-        print(f"\n✓ Copied to clipboard:")
+        print("\n✓ Copied to clipboard:")
         print(f"  PNG: {len(png_data)} bytes (for Telegram)")
         print(f"  CF_DIBV5: {len(dibv5_data)} bytes (for Teams/Word/Outlook)")
 
@@ -236,7 +235,7 @@ def copy_pil_image_to_clipboard_with_fallback(img: Image.Image) -> QImage:
         # Потом CF_DIB для совместимости
         wc.SetClipboardData(wc.CF_DIB, dib_data)
 
-        print(f"\n✓ Copied to clipboard:")
+        print("\n✓ Copied to clipboard:")
         print(f"  PNG: {len(png_data)} bytes (with transparency)")
         print(f"  CF_DIB: {len(dib_data)} bytes (fallback for old apps)")
 

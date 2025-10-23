@@ -26,7 +26,6 @@ from PySide6.QtGui import (
     QPixmap,
     QImage,
     QPainterPath,
-    QKeySequence,
     QIcon,
 )
 from PySide6.QtWidgets import (

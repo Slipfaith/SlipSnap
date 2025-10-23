@@ -6,7 +6,6 @@ from PySide6.QtGui import (
     QTextCursor,
     QTextCharFormat,
     QPen,
-    QPainter,
 )
 from PySide6.QtWidgets import (
     QGraphicsItem,

@@ -1,7 +1,6 @@
 from PySide6.QtCore import QPointF, Qt, QRectF, QLineF
 from PySide6.QtGui import QPen, QBrush, QColor, QCursor, QPixmap, QPainter, QImage
 from PySide6.QtWidgets import (
-    QGraphicsEllipseItem,
     QWidget,
     QSlider,
     QVBoxLayout,

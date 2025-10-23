@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QApplication,
     QGraphicsItem,
-    QGraphicsPixmapItem,
     QWidget,
     QToolButton,
 )

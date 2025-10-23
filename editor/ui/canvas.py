@@ -17,7 +17,7 @@ from .styles import ModernColors
 from .high_quality_pixmap_item import HighQualityPixmapItem
 from .icon_factory import create_pencil_cursor, create_select_cursor
 from logic import qimage_to_pil
-from editor.text_tools import TextManager, EditableTextItem
+from editor.text_tools import TextManager
 from editor.tools.selection_tool import SelectionTool
 from editor.tools.pencil_tool import PencilTool
 from editor.tools.shape_tools import RectangleTool, EllipseTool

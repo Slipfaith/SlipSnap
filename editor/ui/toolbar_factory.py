@@ -8,7 +8,7 @@ from logic import save_config
 
 from design_tokens import Metrics
 
-from .styles import ModernColors, tools_toolbar_style
+from .styles import ModernColors
 from .color_widgets import ColorButton
 from .icon_factory import (
     ICON_SIZE,
