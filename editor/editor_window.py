@@ -262,6 +262,7 @@ class EditorWindow(QMainWindow):
 
     def load_base_screenshot(self, qimg: QImage, message: str = "◉ Новый скриншот", duration: int = 2000):
         self.canvas.set_base_image(qimg)
+        size_to_image(self, qimg, shrink_only=True)
         self.canvas.setFocus(Qt.OtherFocusReason)
         self._update_collage_enabled()
         if message:
@@ -307,6 +308,7 @@ class EditorWindow(QMainWindow):
         screenshot_item.setData(0, item_tag)
         self.canvas.scene.addItem(screenshot_item)
         self.canvas.undo_stack.push(AddCommand(self.canvas.scene, screenshot_item))
+        self.canvas.update_scene_rect()
 
         view_center = self.canvas.mapToScene(self.canvas.viewport().rect().center())
         r = screenshot_item.boundingRect()

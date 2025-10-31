@@ -1,7 +1,7 @@
 from typing import Optional, Dict
 import math
 
-from PySide6.QtCore import Qt, QPointF, QRectF, Signal
+from PySide6.QtCore import Qt, QPointF, QRectF, Signal, QMarginsF, QTimer
 from PySide6.QtGui import QPainter, QPen, QColor, QImage, QPixmap, QUndoStack
 from PySide6.QtWidgets import (
     QGraphicsView,
@@ -45,6 +45,11 @@ class Canvas(QGraphicsView):
         self.setScene(self.scene)
         self.setAcceptDrops(True)
 
+        self._scene_rect_timer = QTimer(self)
+        self._scene_rect_timer.setSingleShot(True)
+        self._scene_rect_timer.timeout.connect(self.update_scene_rect)
+        self.scene.changed.connect(self._schedule_scene_rect_update)
+
         self.pixmap_item: Optional[QGraphicsPixmapItem] = QGraphicsPixmapItem(QPixmap.fromImage(image))
         self.pil_image = qimage_to_pil(image)  # store original PIL image
         self.pixmap_item.setFlag(QGraphicsItem.ItemIsMovable, True)
@@ -54,13 +59,14 @@ class Canvas(QGraphicsView):
         self.pixmap_item.setData(0, "screenshot")
         self.pixmap_item.setData(1, "base")
         self.scene.addItem(self.pixmap_item)
+        self.update_scene_rect()
 
         self.setDragMode(QGraphicsView.NoDrag)
         self.setAlignment(Qt.AlignCenter)
         self.setResizeAnchor(QGraphicsView.AnchorViewCenter)
         self.setTransformationAnchor(QGraphicsView.AnchorViewCenter)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
 
         self.setStyleSheet(f"""
             QGraphicsView {{
@@ -158,11 +164,13 @@ class Canvas(QGraphicsView):
         if self._text_manager:
             self._text_manager.finish_current_editing()
         self._apply_lock_state()
+        self.update_scene_rect()
 
     def handle_item_removed(self, item: QGraphicsItem) -> None:
         if item is self.pixmap_item or item.data(1) == "base":
             self.pixmap_item = None
             self.pil_image = None
+        self.update_scene_rect()
 
     def handle_item_restored(self, item: QGraphicsItem) -> None:
         if isinstance(item, QGraphicsPixmapItem) and item.data(1) == "base":
@@ -170,6 +178,7 @@ class Canvas(QGraphicsView):
             qimg = item.pixmap().toImage()
             if not qimg.isNull():
                 self.pil_image = qimage_to_pil(qimg)
+        self.update_scene_rect()
 
     def set_tool(self, tool: str):
         if self._text_manager:
@@ -337,6 +346,20 @@ class Canvas(QGraphicsView):
             event.accept()
             return
         super().keyPressEvent(event)
+
+    def update_scene_rect(self, margin: float = 64.0) -> None:
+        """Ensure the scene rect matches current content for scrollbars."""
+        rect = self.scene.itemsBoundingRect()
+        if rect.isNull():
+            rect = QRectF(0, 0, 0, 0)
+        if margin > 0:
+            margins = QMarginsF(margin, margin, margin, margin)
+            rect = rect.marginsAdded(margins)
+        self.scene.setSceneRect(rect)
+
+    def _schedule_scene_rect_update(self, _=None) -> None:
+        if not self._scene_rect_timer.isActive():
+            self._scene_rect_timer.start(75)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.RightButton and self._tool == "erase":
