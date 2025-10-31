@@ -110,8 +110,8 @@ class Typography:
 class Metrics:
     """Reusable sizing tokens for widgets."""
 
-    MAIN_WINDOW_MIN_WIDTH: int = 680
-    MAIN_WINDOW_MIN_HEIGHT: int = 540
+    MAIN_WINDOW_MIN_WIDTH: int = 360
+    MAIN_WINDOW_MIN_HEIGHT: int = 320
 
     TOOL_BUTTON: int = 52
     TOOL_ICON: int = 40
