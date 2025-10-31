@@ -266,6 +266,7 @@ class EditorWindow(QMainWindow):
         self._update_collage_enabled()
         if message:
             self.statusBar().showMessage(message, duration)
+        QTimer.singleShot(0, lambda q=qimg: size_to_image(self, q))
 
     def add_screenshot(self, collage: bool = False):
         try:
@@ -314,6 +315,7 @@ class EditorWindow(QMainWindow):
         self.canvas.setFocus(Qt.OtherFocusReason)
         self._update_collage_enabled()
         self.canvas._apply_lock_state()
+        self.canvas.update_scene_rect()
 
     def _paste_from_clipboard(self) -> bool:
         clipboard = QApplication.clipboard()
