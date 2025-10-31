@@ -1,7 +1,7 @@
 from typing import Optional, Dict
 import math
 
-from PySide6.QtCore import Qt, QPointF, QRectF, Signal
+from PySide6.QtCore import Qt, QPointF, QRectF, Signal, QMarginsF
 from PySide6.QtGui import QPainter, QPen, QColor, QImage, QUndoStack
 from PySide6.QtWidgets import (
     QGraphicsView,
@@ -62,8 +62,8 @@ class Canvas(QGraphicsView):
         self.setAlignment(Qt.AlignCenter)
         self.setResizeAnchor(QGraphicsView.AnchorViewCenter)
         self.setTransformationAnchor(QGraphicsView.AnchorViewCenter)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
 
         self.setStyleSheet(f"""
             QGraphicsView {{
@@ -104,6 +104,7 @@ class Canvas(QGraphicsView):
         self._pencil_cursor = create_pencil_cursor()
         self._select_cursor = create_select_cursor()
         self._apply_lock_state()
+        self.update_scene_rect()
 
     # ---- drag & drop ----
     def dragEnterEvent(self, event):
@@ -160,11 +161,13 @@ class Canvas(QGraphicsView):
         if self._text_manager:
             self._text_manager.finish_current_editing()
         self._apply_lock_state()
+        self.update_scene_rect()
 
     def handle_item_removed(self, item: QGraphicsItem) -> None:
         if item is self.pixmap_item or item.data(1) == "base":
             self.pixmap_item = None
             self.pil_image = None
+        self.update_scene_rect()
 
     def handle_item_restored(self, item: QGraphicsItem) -> None:
         if isinstance(item, QGraphicsPixmapItem) and item.data(1) == "base":
@@ -174,6 +177,7 @@ class Canvas(QGraphicsView):
                 self.pil_image = qimage_to_pil(qimg)
             if isinstance(item, HighQualityPixmapItem):
                 item.reset_scale_tracking()
+        self.update_scene_rect()
 
     def set_tool(self, tool: str):
         if self._text_manager:
@@ -198,7 +202,14 @@ class Canvas(QGraphicsView):
         else:
             self.viewport().setCursor(Qt.ArrowCursor)
 
-        self._apply_lock_state()
+    # ---- scene management ----
+    def update_scene_rect(self, padding: float = 48.0) -> None:
+        """Update the scrollable area to fit all items with padding."""
+        rect = self.scene.itemsBoundingRect()
+        if rect.isNull():
+            rect = QRectF(0, 0, 0, 0)
+        margins = QMarginsF(padding, padding, padding, padding)
+        self.scene.setSceneRect(rect.marginsAdded(margins))
 
     def set_text_manager(self, text_manager: TextManager):
         self._text_manager = text_manager
