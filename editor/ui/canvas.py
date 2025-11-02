@@ -211,9 +211,20 @@ class Canvas(QGraphicsView):
         if rect.isNull():
             rect = QRectF(0, 0, 0, 0)
         margins = QMarginsF(padding, padding, padding, padding)
-        expanded = rect.marginsAdded(margins)
+        expanded = rect.marginsAdded(margins).normalized()
+
         if expanded != self.scene.sceneRect():
+            view_center = None
+            if not self.viewport().rect().isNull():
+                view_center = self.mapToScene(self.viewport().rect().center())
             self.scene.setSceneRect(expanded)
+            if view_center is not None and not expanded.isNull():
+                clamped = QPointF(
+                    min(max(expanded.left(), view_center.x()), expanded.right()),
+                    min(max(expanded.top(), view_center.y()), expanded.bottom()),
+                )
+                self.centerOn(clamped)
+
         self._pending_scene_rect_update = False
 
     def _schedule_scene_rect_update(self, *_args) -> None:
