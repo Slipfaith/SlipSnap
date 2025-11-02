@@ -8,8 +8,13 @@ from typing import Dict, Iterable, List, Optional, Tuple
 
 import pytesseract
 from pytesseract import Output
+
+# Укажи путь к exe-файлу явно
+pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QImage
+
 
 from logic import qimage_to_pil
 
