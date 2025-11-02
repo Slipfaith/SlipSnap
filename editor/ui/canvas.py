@@ -40,6 +40,8 @@ class Canvas(QGraphicsView):
 
     imageDropped = Signal(QImage)
 
+    _MAX_EXTRA_CANVAS_MARGIN = 1024.0
+
     def __init__(self, image: QImage):
         super().__init__()
         self.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
@@ -88,6 +90,9 @@ class Canvas(QGraphicsView):
         self._move_snapshot: Dict[QGraphicsItem, QPointF] = {}
         self._text_manager: Optional[TextManager] = None
         self._zoom = 1.0
+        self._movement_bounds = QRectF()
+        self._is_dragging_items = False
+        self._drag_selection_rect: Optional[QRectF] = None
 
         self.tools = {
             "select": SelectionTool(self),
@@ -106,6 +111,7 @@ class Canvas(QGraphicsView):
         self._apply_lock_state()
         self._pending_scene_rect_update = False
         self.scene.changed.connect(self._schedule_scene_rect_update)
+        self._update_movement_bounds()
         self.update_scene_rect()
 
     # ---- drag & drop ----
@@ -163,12 +169,14 @@ class Canvas(QGraphicsView):
         if self._text_manager:
             self._text_manager.finish_current_editing()
         self._apply_lock_state()
+        self._update_movement_bounds()
         self.update_scene_rect()
 
     def handle_item_removed(self, item: QGraphicsItem) -> None:
         if item is self.pixmap_item or item.data(1) == "base":
             self.pixmap_item = None
             self.pil_image = None
+            self._update_movement_bounds()
         self.update_scene_rect()
 
     def handle_item_restored(self, item: QGraphicsItem) -> None:
@@ -179,6 +187,7 @@ class Canvas(QGraphicsView):
                 self.pil_image = qimage_to_pil(qimg)
             if isinstance(item, HighQualityPixmapItem):
                 item.reset_scale_tracking()
+            self._update_movement_bounds()
         self.update_scene_rect()
 
     def set_tool(self, tool: str):
@@ -212,13 +221,22 @@ class Canvas(QGraphicsView):
             rect = QRectF(0, 0, 0, 0)
         margins = QMarginsF(padding, padding, padding, padding)
         expanded = rect.marginsAdded(margins).normalized()
+        if not self._movement_bounds.isNull():
+            allowed = self._movement_bounds.marginsAdded(margins)
+            expanded = expanded.intersected(allowed)
+            if expanded.isNull():
+                expanded = allowed
 
         if expanded != self.scene.sceneRect():
             view_center = None
             if not self.viewport().rect().isNull():
                 view_center = self.mapToScene(self.viewport().rect().center())
             self.scene.setSceneRect(expanded)
-            if view_center is not None and not expanded.isNull():
+            if (
+                view_center is not None
+                and not expanded.isNull()
+                and not self._is_dragging_items
+            ):
                 clamped = QPointF(
                     min(max(expanded.left(), view_center.x()), expanded.right()),
                     min(max(expanded.top(), view_center.y()), expanded.bottom()),
@@ -388,6 +406,19 @@ class Canvas(QGraphicsView):
                 items = self.scene.selectedItems()
                 if items:
                     self._move_snapshot = {it: it.pos() for it in items}
+                    clicked_item = self.itemAt(event.position().toPoint())
+                    movable = (
+                        clicked_item is not None
+                        and clicked_item.flags() & QGraphicsItem.ItemIsMovable
+                    )
+                    self._is_dragging_items = movable
+                    if movable:
+                        self._drag_selection_rect = self._selection_bounding_rect(items)
+                    else:
+                        self._drag_selection_rect = None
+                else:
+                    self._is_dragging_items = False
+                    self._drag_selection_rect = None
             elif self._tool not in ("none", "select"):
                 pos = self.mapToScene(event.position().toPoint())
                 if self._tool == "text" and self._text_manager:
@@ -415,12 +446,18 @@ class Canvas(QGraphicsView):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
-        if (event.buttons() & Qt.LeftButton) and self._tool not in ("none", "select", "text"):
-            pos = self.mapToScene(event.position().toPoint())
-            if self.active_tool:
-                self.active_tool.move(pos)
-            event.accept()
-            return
+        if event.buttons() & Qt.LeftButton:
+            if self._is_dragging_items:
+                super().mouseMoveEvent(event)
+                self._enforce_move_bounds()
+                event.accept()
+                return
+            if self._tool not in ("none", "select", "text"):
+                pos = self.mapToScene(event.position().toPoint())
+                if self.active_tool:
+                    self.active_tool.move(pos)
+                event.accept()
+                return
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
@@ -438,8 +475,71 @@ class Canvas(QGraphicsView):
                 if self.active_tool:
                     self.active_tool.release(pos)
                 event.accept()
+                self._reset_drag_state()
                 return
+            self._reset_drag_state()
         super().mouseReleaseEvent(event)
+
+    def scrollContentsBy(self, dx: int, dy: int) -> None:
+        if self._is_dragging_items:
+            return
+        super().scrollContentsBy(dx, dy)
+
+    def _selection_bounding_rect(self, items) -> Optional[QRectF]:
+        if not items:
+            return None
+        rect = items[0].sceneBoundingRect()
+        for it in items[1:]:
+            rect = rect.united(it.sceneBoundingRect())
+        return rect
+
+    def _reset_drag_state(self) -> None:
+        self._is_dragging_items = False
+        self._drag_selection_rect = None
+
+    def _update_movement_bounds(self) -> None:
+        if self.pixmap_item is not None:
+            base_rect = self.pixmap_item.sceneBoundingRect()
+        else:
+            base_rect = self.scene.itemsBoundingRect()
+            if base_rect.isNull():
+                base_rect = QRectF(0, 0, 0, 0)
+        margins = QMarginsF(
+            self._MAX_EXTRA_CANVAS_MARGIN,
+            self._MAX_EXTRA_CANVAS_MARGIN,
+            self._MAX_EXTRA_CANVAS_MARGIN,
+            self._MAX_EXTRA_CANVAS_MARGIN,
+        )
+        self._movement_bounds = base_rect.marginsAdded(margins)
+
+    def _enforce_move_bounds(self) -> None:
+        if not self._move_snapshot or self._movement_bounds.isNull():
+            return
+        sample_item = next(iter(self._move_snapshot), None)
+        if sample_item is None:
+            return
+        current_delta = sample_item.pos() - self._move_snapshot[sample_item]
+        selection_rect = self._drag_selection_rect
+        if selection_rect is None or selection_rect.isNull():
+            selection_rect = self._selection_bounding_rect(
+                list(self._move_snapshot.keys())
+            )
+            if selection_rect is None:
+                return
+        min_dx = self._movement_bounds.left() - selection_rect.left()
+        max_dx = self._movement_bounds.right() - selection_rect.right()
+        min_dy = self._movement_bounds.top() - selection_rect.top()
+        max_dy = self._movement_bounds.bottom() - selection_rect.bottom()
+        clamped_dx = min(max(current_delta.x(), min_dx), max_dx)
+        clamped_dy = min(max(current_delta.y(), min_dy), max_dy)
+        if (
+            math.isclose(current_delta.x(), clamped_dx, rel_tol=1e-6, abs_tol=1e-6)
+            and math.isclose(current_delta.y(), clamped_dy, rel_tol=1e-6, abs_tol=1e-6)
+        ):
+            return
+        clamped_delta = QPointF(clamped_dx, clamped_dy)
+        for item, start_pos in self._move_snapshot.items():
+            item.setPos(start_pos + clamped_delta)
 
     def bring_to_front(self, item: QGraphicsItem, *, record: bool = True):
         items = self.scene.items()
