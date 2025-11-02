@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Tuple
 
 import pytesseract
 from pytesseract import Output
-
-# Укажи путь к exe-файлу явно
-pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QImage
@@ -43,9 +41,41 @@ def _default_language() -> str:
 class OcrEngine:
     """Lightweight wrapper around pytesseract for editor integration."""
 
-    def __init__(self, language: Optional[str] = None, min_confidence: float = 65.0) -> None:
+    def __init__(
+        self,
+        language: Optional[str] = None,
+        min_confidence: float = 65.0,
+        tesseract_cmd: Optional[str] = None,
+    ) -> None:
         self.language = language or _default_language()
         self.min_confidence = float(min_confidence)
+        self._tesseract_cmd: Optional[str] = None
+        self._configure_tesseract(tesseract_cmd)
+
+    def _configure_tesseract(self, override: Optional[str]) -> None:
+        """Resolve and apply a custom Tesseract executable path if provided."""
+
+        candidate = override or os.environ.get("TESSERACT_CMD")
+        if not candidate:
+            self._tesseract_cmd = None
+            return
+
+        resolved = self._normalise_cmd(candidate)
+        if not resolved.exists():
+            raise OcrUnavailableError(
+                f"Исполняемый файл Tesseract не найден по пути: {resolved}"
+            )
+
+        pytesseract.pytesseract.tesseract_cmd = str(resolved)
+        self._tesseract_cmd = str(resolved)
+
+    @staticmethod
+    def _normalise_cmd(path_str: str) -> Path:
+        path = Path(path_str).expanduser()
+        if path.is_dir():
+            executable = "tesseract.exe" if os.name == "nt" else "tesseract"
+            path = path / executable
+        return path
 
     def recognize(self, image: QImage) -> List[OcrSpan]:
         """Run OCR over the provided ``QImage`` and return grouped spans."""
@@ -54,6 +84,12 @@ class OcrEngine:
             return []
 
         pil_image = qimage_to_pil(image)
+        if self._tesseract_cmd:
+            cmd_path = Path(self._tesseract_cmd)
+            if not cmd_path.exists():
+                raise OcrUnavailableError(
+                    f"Настроенный путь к Tesseract больше не существует: {cmd_path}"
+                )
         try:
             data = pytesseract.image_to_data(
                 pil_image,
@@ -62,7 +98,8 @@ class OcrEngine:
             )
         except pytesseract.TesseractNotFoundError as exc:  # pragma: no cover - environment dependent
             raise OcrUnavailableError(
-                "Tesseract OCR не найден. Установите пакет `tesseract-ocr`."
+                "Tesseract OCR не найден. Установите пакет `tesseract-ocr` или укажите путь к"
+                " исполняемому файлу в настройках."
             ) from exc
         except pytesseract.TesseractError as exc:  # pragma: no cover - passthrough error
             raise OcrError(str(exc)) from exc

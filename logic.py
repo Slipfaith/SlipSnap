@@ -24,6 +24,7 @@ DEFAULT_CONFIG = {
     "capture_hotkey": "Ctrl+Alt+S",
     "series_prefix": "Series",
     "series_folder": str(Path.home()),
+    "tesseract_cmd": "",
 }
 
 def load_config() -> dict:

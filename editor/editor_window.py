@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+import os
 from pathlib import Path
 from typing import Callable, Optional, List, Tuple, Type, TYPE_CHECKING
 
@@ -14,18 +15,27 @@ from PySide6.QtGui import (
     QShortcut,
     QFont,
     QColor,
+    QPen,
 )
 from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QApplication,
     QGraphicsItem,
+    QGraphicsRectItem,
     QGraphicsTextItem,
     QWidget,
     QToolButton,
+    QFileDialog,
+    QDialog,
+    QDialogButtonBox,
+    QPlainTextEdit,
+    QPushButton,
+    QLabel,
+    QVBoxLayout,
 )
 
-from logic import APP_NAME, APP_VERSION, qimage_to_pil, save_history
+from logic import APP_NAME, APP_VERSION, qimage_to_pil, save_history, save_config
 from editor.text_tools import TextManager
 from editor.editor_logic import EditorLogic
 from editor.image_utils import images_from_mime
@@ -110,7 +120,8 @@ class EditorWindow(QMainWindow):
         act_about = help_menu.addAction("ⓘ О программе")
         act_about.triggered.connect(self.show_about)
 
-        self._recognized_items: List[QGraphicsTextItem] = []
+        self._recognized_items: List[QGraphicsItem] = []
+        self._ocr_text_dialog: Optional[QDialog] = None
 
     # ---- OCR -------------------------------------------------------
     def _target_pixmap_items(self) -> List[HighQualityPixmapItem]:
@@ -131,11 +142,26 @@ class EditorWindow(QMainWindow):
                 scene.removeItem(text_item)
         self._recognized_items.clear()
 
-    def _create_text_overlay(self, parent: HighQualityPixmapItem, span: "OcrSpan") -> QGraphicsTextItem:
+    def _create_text_overlay(
+        self, parent: HighQualityPixmapItem, span: "OcrSpan"
+    ) -> List[QGraphicsItem]:
+        highlight = QGraphicsRectItem(span.bbox, parent)
+        highlight.setData(0, "ocr_highlight")
+        highlight.setBrush(QColor(Palette.PRIMARY_LIGHT))
+        highlight.setOpacity(0.35)
+        pen = QPen(QColor(Palette.PRIMARY))
+        pen.setWidthF(max(1.0, span.bbox.height() * 0.06))
+        pen.setCosmetic(True)
+        highlight.setPen(pen)
+        highlight.setFlag(QGraphicsItem.ItemIsSelectable, False)
+        highlight.setFlag(QGraphicsItem.ItemIsMovable, False)
+        highlight.setAcceptedMouseButtons(Qt.NoButton)
+        highlight.setZValue(parent.zValue() + 0.05)
+
         overlay = QGraphicsTextItem(span.text, parent)
         overlay.setData(0, "ocr_text")
         overlay.setDefaultTextColor(QColor(Palette.TEXT_PRIMARY))
-        overlay.setOpacity(0.02)
+        overlay.setOpacity(0.95)
         overlay.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
         overlay.setFlag(QGraphicsItem.ItemIsSelectable, False)
         overlay.setFlag(QGraphicsItem.ItemIsMovable, False)
@@ -143,13 +169,106 @@ class EditorWindow(QMainWindow):
         overlay.setCursor(Qt.IBeamCursor)
         overlay.setPos(span.bbox.left(), span.bbox.top())
         overlay.setTextWidth(span.bbox.width())
-        overlay.setZValue(parent.zValue() + 0.1)
+        overlay.setZValue(highlight.zValue() + 0.05)
         font = QFont(Typography.UI_FAMILY)
         point_size = max(8.0, min(36.0, span.bbox.height() * 0.75))
         font.setPointSizeF(point_size)
         overlay.setFont(font)
         overlay.document().setDocumentMargin(0)
-        return overlay
+        return [highlight, overlay]
+
+    def _show_recognized_text_dialog(self, lines: List[str]) -> None:
+        if self._ocr_text_dialog is not None:
+            self._ocr_text_dialog.close()
+            self._ocr_text_dialog.deleteLater()
+            self._ocr_text_dialog = None
+
+        if not lines:
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("SlipSnap — Распознанный текст")
+        dialog.setModal(False)
+        dialog.setAttribute(Qt.WA_DeleteOnClose)
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(12)
+
+        hint = QLabel(
+            "Текст подсвечен на холсте. Здесь вы можете просмотреть и скопировать все найденные строки."
+        )
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        text_edit = QPlainTextEdit(dialog)
+        text_edit.setPlainText("\n".join(lines))
+        text_edit.setReadOnly(True)
+        text_edit.setMinimumHeight(220)
+        layout.addWidget(text_edit)
+
+        button_box = QDialogButtonBox(QDialogButtonBox.Close, parent=dialog)
+        copy_btn = QPushButton("Копировать всё", dialog)
+        button_box.addButton(copy_btn, QDialogButtonBox.ActionRole)
+
+        def copy_all() -> None:
+            text = text_edit.toPlainText().strip()
+            if text:
+                QApplication.clipboard().setText(text)
+                self.statusBar().showMessage("✓ OCR: текст скопирован в буфер обмена", 2500)
+
+        copy_btn.clicked.connect(copy_all)
+        button_box.rejected.connect(dialog.reject)
+        layout.addWidget(button_box)
+
+        dialog.resize(520, 340)
+        dialog.destroyed.connect(lambda: setattr(self, "_ocr_text_dialog", None))
+        dialog.show()
+        self._ocr_text_dialog = dialog
+
+    def _prompt_for_tesseract_path(self) -> bool:
+        start_dir = self.cfg.get("tesseract_cmd") or str(Path.home())
+        caption = "Укажите путь к исполняемому файлу Tesseract"
+        if os.name == "nt":
+            filter_mask = "Исполняемый файл Tesseract (tesseract.exe);;Все файлы (*)"
+        else:
+            filter_mask = "Исполняемый файл Tesseract (tesseract);;Все файлы (*)"
+        path, _ = QFileDialog.getOpenFileName(self, caption, start_dir, filter_mask)
+        if not path:
+            return False
+
+        target = Path(path)
+        if not target.exists():
+            QMessageBox.warning(
+                self,
+                "SlipSnap",
+                "Выбранный файл не найден. Проверьте путь и попробуйте ещё раз.",
+            )
+            return False
+
+        self.cfg["tesseract_cmd"] = str(target)
+        save_config(self.cfg)
+        self._ocr_engine = None
+        return True
+
+    def _handle_tesseract_unavailable(self, message: str) -> bool:
+        box = QMessageBox(self)
+        box.setWindowTitle("OCR недоступен")
+        box.setIcon(QMessageBox.Warning)
+        box.setText(message or "Tesseract OCR недоступен.")
+        box.setInformativeText(
+            "SlipSnap может использовать установленный Tesseract. Укажите путь к исполняемому файлу"
+            " вручную, если он не добавлен в PATH."
+        )
+        configure_btn = box.addButton("Указать путь…", QMessageBox.ActionRole)
+        box.addButton(QMessageBox.Close)
+        box.exec()
+
+        if box.clickedButton() == configure_btn:
+            if self._prompt_for_tesseract_path():
+                self.statusBar().showMessage("◉ Путь к Tesseract обновлён", 3000)
+                return True
+        return False
 
     def _ensure_ocr_engine(self) -> Tuple["OcrEngine", Type["OcrError"], Type["OcrUnavailableError"]]:
         if self._ocr_import_error is not None:
@@ -168,10 +287,17 @@ class EditorWindow(QMainWindow):
             self._ocr_import_error = exc
             raise
 
-        self._ocr_engine = OcrEngine()
         self._ocr_error_cls = OcrError
         self._ocr_unavailable_cls = OcrUnavailableError
         self._ocr_import_error = None
+
+        tesseract_cmd = self.cfg.get("tesseract_cmd") or None
+        try:
+            self._ocr_engine = OcrEngine(tesseract_cmd=tesseract_cmd)
+        except OcrUnavailableError:
+            self._ocr_engine = None
+            raise
+
         return self._ocr_engine, self._ocr_error_cls, self._ocr_unavailable_cls
 
     def _show_ocr_dependency_error(self, exc: ImportError) -> None:
@@ -195,26 +321,42 @@ class EditorWindow(QMainWindow):
         self._clear_ocr_layer()
 
         total_lines = 0
+        collected_lines: List[str] = []
 
         try:
             engine, ocr_error_cls, ocr_unavailable_cls = self._ensure_ocr_engine()
         except ImportError as exc:
             self._show_ocr_dependency_error(exc)
             return
+        except Exception as exc:
+            unavailable_cls = self._ocr_unavailable_cls
+            if unavailable_cls is not None and isinstance(exc, unavailable_cls):
+                if self._handle_tesseract_unavailable(str(exc)):
+                    return self.recognize_text_layer()
+            else:
+                QMessageBox.warning(self, "OCR недоступен", str(exc))
+            return
 
         try:
             for pixmap_item in pixmap_items:
                 spans = engine.recognize(pixmap_item.pixmap().toImage())
                 for span in spans:
-                    overlay = self._create_text_overlay(pixmap_item, span)
-                    self._recognized_items.append(overlay)
+                    overlays = self._create_text_overlay(pixmap_item, span)
+                    self._recognized_items.extend(overlays)
+                    collected_lines.append(span.text)
                 total_lines += len(spans)
         except ocr_unavailable_cls as exc:
-            QMessageBox.warning(self, "OCR недоступен", str(exc))
+            if self._handle_tesseract_unavailable(str(exc)):
+                return self.recognize_text_layer()
             return
         except ocr_error_cls as exc:
             QMessageBox.warning(self, "Ошибка OCR", f"Не удалось распознать текст:\n{exc}")
             return
+
+        if collected_lines:
+            self._show_recognized_text_dialog(collected_lines)
+        else:
+            self._show_recognized_text_dialog([])
 
         if total_lines:
             self.statusBar().showMessage(f"◉ OCR: найдено строк {total_lines}", 4000)
