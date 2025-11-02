@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 from pathlib import Path
-from typing import Callable, Optional, List
+from typing import Callable, Optional, List, Tuple, Type, TYPE_CHECKING
 
 from PySide6.QtCore import Qt, QTimer, QRectF
 from PySide6.QtGui import (
@@ -41,7 +41,9 @@ from .ui.meme_library_dialog import MemesDialog
 from icons import make_icon_series
 
 from design_tokens import Metrics, Palette, Typography, editor_main_stylesheet
-from ocr import OcrEngine, OcrError, OcrUnavailableError, OcrSpan
+
+if TYPE_CHECKING:  # pragma: no cover - import for type checking only
+    from ocr import OcrEngine, OcrError, OcrUnavailableError, OcrSpan
 
 
 class EditorWindow(QMainWindow):
@@ -58,7 +60,10 @@ class EditorWindow(QMainWindow):
         self.text_manager = TextManager(self.canvas)
         self.canvas.set_text_manager(self.text_manager)
         self.logic = EditorLogic(self.canvas)
-        self._ocr_engine = OcrEngine()
+        self._ocr_engine = None  # type: Optional["OcrEngine"]
+        self._ocr_error_cls = None  # type: Optional[Type["OcrError"]]
+        self._ocr_unavailable_cls = None  # type: Optional[Type["OcrUnavailableError"]]
+        self._ocr_import_error = None  # type: Optional[ImportError]
 
         self.setCentralWidget(self.canvas)
         self._apply_modern_stylesheet()
@@ -126,7 +131,7 @@ class EditorWindow(QMainWindow):
                 scene.removeItem(text_item)
         self._recognized_items.clear()
 
-    def _create_text_overlay(self, parent: HighQualityPixmapItem, span: OcrSpan) -> QGraphicsTextItem:
+    def _create_text_overlay(self, parent: HighQualityPixmapItem, span: "OcrSpan") -> QGraphicsTextItem:
         overlay = QGraphicsTextItem(span.text, parent)
         overlay.setData(0, "ocr_text")
         overlay.setDefaultTextColor(QColor(Palette.TEXT_PRIMARY))
@@ -146,6 +151,41 @@ class EditorWindow(QMainWindow):
         overlay.document().setDocumentMargin(0)
         return overlay
 
+    def _ensure_ocr_engine(self) -> Tuple["OcrEngine", Type["OcrError"], Type["OcrUnavailableError"]]:
+        if self._ocr_import_error is not None:
+            raise self._ocr_import_error
+
+        if (
+            self._ocr_engine is not None
+            and self._ocr_error_cls is not None
+            and self._ocr_unavailable_cls is not None
+        ):
+            return self._ocr_engine, self._ocr_error_cls, self._ocr_unavailable_cls
+
+        try:
+            from ocr import OcrEngine, OcrError, OcrUnavailableError
+        except ImportError as exc:  # pragma: no cover - optional dependency
+            self._ocr_import_error = exc
+            raise
+
+        self._ocr_engine = OcrEngine()
+        self._ocr_error_cls = OcrError
+        self._ocr_unavailable_cls = OcrUnavailableError
+        self._ocr_import_error = None
+        return self._ocr_engine, self._ocr_error_cls, self._ocr_unavailable_cls
+
+    def _show_ocr_dependency_error(self, exc: ImportError) -> None:
+        module_name = getattr(exc, "name", None)
+        if module_name:
+            detail = f"Модуль `{module_name}` не найден."
+        else:
+            detail = "Не удалось загрузить поддержку OCR."
+        message = (
+            f"{detail}\n"
+            "Установите дополнительные зависимости OCR, например `pip install pytesseract`."
+        )
+        QMessageBox.warning(self, "OCR недоступен", message)
+
     def recognize_text_layer(self) -> None:
         pixmap_items = self._target_pixmap_items()
         if not pixmap_items:
@@ -157,16 +197,22 @@ class EditorWindow(QMainWindow):
         total_lines = 0
 
         try:
+            engine, ocr_error_cls, ocr_unavailable_cls = self._ensure_ocr_engine()
+        except ImportError as exc:
+            self._show_ocr_dependency_error(exc)
+            return
+
+        try:
             for pixmap_item in pixmap_items:
-                spans = self._ocr_engine.recognize(pixmap_item.pixmap().toImage())
+                spans = engine.recognize(pixmap_item.pixmap().toImage())
                 for span in spans:
                     overlay = self._create_text_overlay(pixmap_item, span)
                     self._recognized_items.append(overlay)
                 total_lines += len(spans)
-        except OcrUnavailableError as exc:
+        except ocr_unavailable_cls as exc:
             QMessageBox.warning(self, "OCR недоступен", str(exc))
             return
-        except OcrError as exc:
+        except ocr_error_cls as exc:
             QMessageBox.warning(self, "Ошибка OCR", f"Не удалось распознать текст:\n{exc}")
             return
 
