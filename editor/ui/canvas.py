@@ -1,7 +1,7 @@
 from typing import Optional, Dict
 import math
 
-from PySide6.QtCore import Qt, QPointF, QRectF, Signal, QMarginsF
+from PySide6.QtCore import Qt, QPointF, QRectF, Signal, QMarginsF, QTimer
 from PySide6.QtGui import QPainter, QPen, QColor, QImage, QUndoStack
 from PySide6.QtWidgets import (
     QGraphicsView,
@@ -104,6 +104,8 @@ class Canvas(QGraphicsView):
         self._pencil_cursor = create_pencil_cursor()
         self._select_cursor = create_select_cursor()
         self._apply_lock_state()
+        self._pending_scene_rect_update = False
+        self.scene.changed.connect(self._schedule_scene_rect_update)
         self.update_scene_rect()
 
     # ---- drag & drop ----
@@ -209,7 +211,17 @@ class Canvas(QGraphicsView):
         if rect.isNull():
             rect = QRectF(0, 0, 0, 0)
         margins = QMarginsF(padding, padding, padding, padding)
-        self.scene.setSceneRect(rect.marginsAdded(margins))
+        expanded = rect.marginsAdded(margins)
+        if expanded != self.scene.sceneRect():
+            self.scene.setSceneRect(expanded)
+        self._pending_scene_rect_update = False
+
+    def _schedule_scene_rect_update(self, *_args) -> None:
+        """Throttle scene rect updates triggered by item changes."""
+        if self._pending_scene_rect_update:
+            return
+        self._pending_scene_rect_update = True
+        QTimer.singleShot(0, self.update_scene_rect)
 
     def set_text_manager(self, text_manager: TextManager):
         self._text_manager = text_manager
