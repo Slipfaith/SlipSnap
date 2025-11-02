@@ -619,8 +619,13 @@ class App(QObject):
         self._resource_monitor.record_event_duration("app_initialization", elapsed)
 
     def _toggle_shape(self):
-        if hasattr(self, "ovm"):
-            self.ovm.set_shape(self.cfg.get("shape", "rect"))
+        ovm = getattr(self, "ovm", None)
+        if ovm is None:
+            return
+        try:
+            ovm.set_shape(self.cfg.get("shape", "rect"))
+        except AttributeError:
+            pass
 
     def _update_tray_stats(self, summary: str):
         self._tray_summary = summary or ""
