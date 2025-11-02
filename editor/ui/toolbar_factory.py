@@ -24,6 +24,7 @@ from .icon_factory import (
     make_icon_select,
     make_icon_memes,
 )
+from icons import make_icon_ocr
 
 
 def enhanced_tools_toolbar_style() -> str:
@@ -402,7 +403,16 @@ def create_actions_toolbar(window, canvas):
     actions: Dict[str, QAction] = {}
     buttons: Dict[str, QToolButton] = {}
 
-    def add_action(key, text, fn, checkable=False, sc=None, icon_text="", show_text=False):
+    def add_action(
+        key,
+        text,
+        fn,
+        checkable=False,
+        sc=None,
+        icon_text="",
+        show_text=False,
+        icon=None,
+    ):
         a = QAction(text, window)
         a.setCheckable(checkable)
         if sc:
@@ -412,12 +422,21 @@ def create_actions_toolbar(window, canvas):
         a.triggered.connect(fn if checkable else (lambda _checked=False: fn()))
         btn = QToolButton()
         btn.setDefaultAction(a)
+        if icon is not None:
+            a.setIcon(icon)
+            btn.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
+
         if show_text:
             btn.setText(f"{icon_text} {text}" if icon_text and text else (text or icon_text))
         else:
             btn.setText(icon_text)
+
+        if icon is not None and not show_text and not icon_text:
+            btn.setToolButtonStyle(Qt.ToolButtonIconOnly)
+        else:
+            btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
+
         btn.setToolTip(text + (f" ({sc})" if sc else ""))
-        btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
         tb.addWidget(btn)
         actions[key] = a
         buttons[key] = btn
@@ -448,6 +467,14 @@ def create_actions_toolbar(window, canvas):
     add_action("collage", "История", window.open_collage, sc="Ctrl+K", icon_text="🖼", show_text=False)
     add_action("copy", "Копировать", window.copy_to_clipboard, sc="Ctrl+C", icon_text="📋", show_text=False)
     add_action("save", "Сохранить", window.save_image, sc="Ctrl+S", icon_text="💾", show_text=False)
+    add_action(
+        "ocr",
+        "Распознать текст",
+        window.recognize_text_layer,
+        sc="Ctrl+Shift+O",
+        icon=make_icon_ocr(),
+        show_text=False,
+    )
 
     undo_act = canvas.undo_stack.createUndoAction(window, "Отмена")
     undo_act.setShortcut(QKeySequence("Ctrl+Z"))

@@ -1,4 +1,4 @@
-from PySide6.QtGui import QIcon, QPixmap, QPainter, QPen, QColor
+from PySide6.QtGui import QIcon, QPixmap, QPainter, QPen, QColor, QFont
 from PySide6.QtCore import Qt
 
 from design_tokens import Palette, Metrics
@@ -98,4 +98,41 @@ def make_icon_series(size: int = Metrics.ICON_SMALL) -> QIcon:
     p.setPen(QPen(QColor(*Palette.ICON_SERIES_COUNTER), 2))
     p.drawLine(size // 2 - 3, size - m - 2, size // 2 + 4, size - m - 2)
     p.end()
+    return QIcon(pm)
+
+
+def make_icon_ocr(size: int = Metrics.ICON_SMALL) -> QIcon:
+    """Миниатюра «OCR» с рамкой и строками текста."""
+
+    pm = _pm(size)
+    p = QPainter(pm)
+    p.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing)
+
+    margin = Metrics.ICON_MARGIN_SMALL
+    rect_radius = 6
+
+    # Контур сканируемого листа
+    frame_pen = QPen(QColor(*Palette.ICON_NEUTRAL), 2)
+    p.setPen(frame_pen)
+    p.setBrush(Qt.NoBrush)
+    p.drawRoundedRect(margin, margin, size - 2 * margin, size - 2 * margin, rect_radius, rect_radius)
+
+    # Горизонтальные линии текста
+    line_pen = QPen(QColor(*Palette.ICON_BASE), 2)
+    p.setPen(line_pen)
+    gap = (size - 2 * margin) / 4
+    for i in range(1, 4):
+        y = margin + i * gap
+        p.drawLine(margin + 4, y, size - margin - 4, y)
+
+    # Буква Т в центре как символ текста
+    p.setPen(QPen(QColor(*Palette.ICON_POSITIVE), 2))
+    font = QFont()
+    font.setFamily("Montserrat")
+    font.setBold(True)
+    font.setPointSize(int(size * 0.36))
+    p.setFont(font)
+    p.drawText(pm.rect(), Qt.AlignCenter, "T")
+    p.end()
+
     return QIcon(pm)
