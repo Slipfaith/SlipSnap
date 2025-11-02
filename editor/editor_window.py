@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 from pathlib import Path
-from typing import Callable, Optional, List
+from typing import Callable, Optional, List, TYPE_CHECKING
 
 from PySide6.QtCore import Qt, QTimer, QRectF
 from PySide6.QtGui import (
@@ -41,7 +41,8 @@ from .ui.meme_library_dialog import MemesDialog
 from icons import make_icon_series
 
 from design_tokens import Metrics, Palette, Typography, editor_main_stylesheet
-from ocr import OcrEngine, OcrError, OcrUnavailableError, OcrSpan
+if TYPE_CHECKING:  # pragma: no cover - for type checkers only
+    from ocr import OcrSpan
 
 
 class EditorWindow(QMainWindow):
@@ -58,7 +59,7 @@ class EditorWindow(QMainWindow):
         self.text_manager = TextManager(self.canvas)
         self.canvas.set_text_manager(self.text_manager)
         self.logic = EditorLogic(self.canvas)
-        self._ocr_engine = OcrEngine()
+        self._ocr_engine: Optional[object] = None
 
         self.setCentralWidget(self.canvas)
         self._apply_modern_stylesheet()
@@ -126,7 +127,7 @@ class EditorWindow(QMainWindow):
                 scene.removeItem(text_item)
         self._recognized_items.clear()
 
-    def _create_text_overlay(self, parent: HighQualityPixmapItem, span: OcrSpan) -> QGraphicsTextItem:
+    def _create_text_overlay(self, parent: HighQualityPixmapItem, span: "OcrSpan") -> QGraphicsTextItem:
         overlay = QGraphicsTextItem(span.text, parent)
         overlay.setData(0, "ocr_text")
         overlay.setDefaultTextColor(QColor(Palette.TEXT_PRIMARY))
@@ -154,6 +155,40 @@ class EditorWindow(QMainWindow):
 
         self._clear_ocr_layer()
 
+        try:
+            from ocr import OcrEngine, OcrError, OcrUnavailableError
+        except ModuleNotFoundError:
+            QMessageBox.warning(
+                self,
+                "OCR недоступен",
+                "Модуль OCR не установлен. Установите дополнительные зависимости, чтобы использовать распознавание текста.",
+            )
+            return
+        except Exception as exc:  # pragma: no cover - defensive
+            QMessageBox.warning(
+                self,
+                "Ошибка OCR",
+                f"Не удалось подготовить OCR:\n{exc}",
+            )
+            return
+
+        if self._ocr_engine is None:
+            try:
+                self._ocr_engine = OcrEngine()
+            except OcrUnavailableError as exc:
+                QMessageBox.warning(self, "OCR недоступен", str(exc))
+                return
+            except OcrError as exc:
+                QMessageBox.warning(self, "Ошибка OCR", f"Не удалось инициализировать OCR:\n{exc}")
+                return
+            except Exception as exc:  # pragma: no cover - defensive
+                QMessageBox.warning(
+                    self,
+                    "Ошибка OCR",
+                    f"Не удалось инициализировать OCR:\n{exc}",
+                )
+                return
+
         total_lines = 0
 
         try:
@@ -167,6 +202,9 @@ class EditorWindow(QMainWindow):
             QMessageBox.warning(self, "OCR недоступен", str(exc))
             return
         except OcrError as exc:
+            QMessageBox.warning(self, "Ошибка OCR", f"Не удалось распознать текст:\n{exc}")
+            return
+        except Exception as exc:  # pragma: no cover - defensive
             QMessageBox.warning(self, "Ошибка OCR", f"Не удалось распознать текст:\n{exc}")
             return
 
