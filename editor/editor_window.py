@@ -1,15 +1,26 @@
 # -*- coding: utf-8 -*-
 
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Optional, List
 
 from PySide6.QtCore import Qt, QTimer, QRectF
-from PySide6.QtGui import QAction, QImage, QPixmap, QPainter, QPainterPath, QKeySequence, QShortcut
+from PySide6.QtGui import (
+    QAction,
+    QImage,
+    QPixmap,
+    QPainter,
+    QPainterPath,
+    QKeySequence,
+    QShortcut,
+    QFont,
+    QColor,
+)
 from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QApplication,
     QGraphicsItem,
+    QGraphicsTextItem,
     QWidget,
     QToolButton,
 )
@@ -29,7 +40,8 @@ from .ui.window_utils import size_to_image
 from .ui.meme_library_dialog import MemesDialog
 from icons import make_icon_series
 
-from design_tokens import Metrics, editor_main_stylesheet
+from design_tokens import Metrics, Palette, Typography, editor_main_stylesheet
+from ocr import OcrEngine, OcrError, OcrUnavailableError, OcrSpan
 
 
 class EditorWindow(QMainWindow):
@@ -46,6 +58,7 @@ class EditorWindow(QMainWindow):
         self.text_manager = TextManager(self.canvas)
         self.canvas.set_text_manager(self.text_manager)
         self.logic = EditorLogic(self.canvas)
+        self._ocr_engine = OcrEngine()
 
         self.setCentralWidget(self.canvas)
         self._apply_modern_stylesheet()
@@ -91,6 +104,76 @@ class EditorWindow(QMainWindow):
         act_shortcuts.triggered.connect(self.show_shortcuts)
         act_about = help_menu.addAction("ⓘ О программе")
         act_about.triggered.connect(self.show_about)
+
+        self._recognized_items: List[QGraphicsTextItem] = []
+
+    # ---- OCR -------------------------------------------------------
+    def _target_pixmap_items(self) -> List[HighQualityPixmapItem]:
+        items: List[HighQualityPixmapItem] = []
+        base_item = getattr(self.canvas, "pixmap_item", None)
+        if isinstance(base_item, HighQualityPixmapItem) and not base_item.pixmap().isNull():
+            items.append(base_item)
+
+        for item in self.canvas.scene.items():
+            if isinstance(item, HighQualityPixmapItem) and item is not base_item and not item.pixmap().isNull():
+                items.append(item)
+        return items
+
+    def _clear_ocr_layer(self) -> None:
+        for text_item in self._recognized_items:
+            scene = text_item.scene()
+            if scene is not None:
+                scene.removeItem(text_item)
+        self._recognized_items.clear()
+
+    def _create_text_overlay(self, parent: HighQualityPixmapItem, span: OcrSpan) -> QGraphicsTextItem:
+        overlay = QGraphicsTextItem(span.text, parent)
+        overlay.setData(0, "ocr_text")
+        overlay.setDefaultTextColor(QColor(Palette.TEXT_PRIMARY))
+        overlay.setOpacity(0.02)
+        overlay.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
+        overlay.setFlag(QGraphicsItem.ItemIsSelectable, False)
+        overlay.setFlag(QGraphicsItem.ItemIsMovable, False)
+        overlay.setFlag(QGraphicsItem.ItemIsFocusable, True)
+        overlay.setCursor(Qt.IBeamCursor)
+        overlay.setPos(span.bbox.left(), span.bbox.top())
+        overlay.setTextWidth(span.bbox.width())
+        overlay.setZValue(parent.zValue() + 0.1)
+        font = QFont(Typography.UI_FAMILY)
+        point_size = max(8.0, min(36.0, span.bbox.height() * 0.75))
+        font.setPointSizeF(point_size)
+        overlay.setFont(font)
+        overlay.document().setDocumentMargin(0)
+        return overlay
+
+    def recognize_text_layer(self) -> None:
+        pixmap_items = self._target_pixmap_items()
+        if not pixmap_items:
+            QMessageBox.information(self, "SlipSnap", "Нет изображений для распознавания текста.")
+            return
+
+        self._clear_ocr_layer()
+
+        total_lines = 0
+
+        try:
+            for pixmap_item in pixmap_items:
+                spans = self._ocr_engine.recognize(pixmap_item.pixmap().toImage())
+                for span in spans:
+                    overlay = self._create_text_overlay(pixmap_item, span)
+                    self._recognized_items.append(overlay)
+                total_lines += len(spans)
+        except OcrUnavailableError as exc:
+            QMessageBox.warning(self, "OCR недоступен", str(exc))
+            return
+        except OcrError as exc:
+            QMessageBox.warning(self, "Ошибка OCR", f"Не удалось распознать текст:\n{exc}")
+            return
+
+        if total_lines:
+            self.statusBar().showMessage(f"◉ OCR: найдено строк {total_lines}", 4000)
+        else:
+            self.statusBar().showMessage("⚠️ OCR: текст не найден", 4000)
 
     # ---- series controls ------------------------------------------
     def set_series_controls(
@@ -261,6 +344,7 @@ class EditorWindow(QMainWindow):
         QTimer.singleShot(0, lambda: (self.raise_(), self.activateWindow()))
 
     def load_base_screenshot(self, qimg: QImage, message: str = "◉ Новый скриншот", duration: int = 2000):
+        self._clear_ocr_layer()
         self.canvas.set_base_image(qimg)
         self.canvas.setFocus(Qt.OtherFocusReason)
         self._update_collage_enabled()
@@ -298,6 +382,7 @@ class EditorWindow(QMainWindow):
         return pixmap
 
     def _insert_screenshot_item(self, qimg: QImage, item_tag: str = "screenshot"):
+        self._clear_ocr_layer()
         pixmap = self._rounded_pixmap(qimg)
         screenshot_item = HighQualityPixmapItem(pixmap.toImage())
         screenshot_item.setFlag(QGraphicsItem.ItemIsMovable, True)
