@@ -48,6 +48,11 @@ class Canvas(QGraphicsView):
         self.setAcceptDrops(True)
         self.setFrameShape(QFrame.NoFrame)
 
+        # Disable automatic scrolling while dragging items. We only want manual
+        # scrolling via scrollbars/gestures so the view does not jump when
+        # objects are moved around the canvas.
+        self.setAutoScroll(False)
+
         self.pixmap_item: Optional[HighQualityPixmapItem] = HighQualityPixmapItem(image)
         self.pil_image = qimage_to_pil(image)  # store original PIL image
         self.pixmap_item.setFlag(QGraphicsItem.ItemIsMovable, True)
