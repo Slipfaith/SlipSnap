@@ -398,6 +398,18 @@ class Canvas(QGraphicsView):
                 self.active_tool.move(pos)
             event.accept()
             return
+
+        block_autoscroll = (event.buttons() & Qt.LeftButton) and self._tool in ("none", "select", "text")
+        if block_autoscroll:
+            h_value = self.horizontalScrollBar().value()
+            v_value = self.verticalScrollBar().value()
+            super().mouseMoveEvent(event)
+            if self.horizontalScrollBar().value() != h_value:
+                self.horizontalScrollBar().setValue(h_value)
+            if self.verticalScrollBar().value() != v_value:
+                self.verticalScrollBar().setValue(v_value)
+            return
+
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
