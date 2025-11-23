@@ -2,7 +2,7 @@ from typing import Optional, Dict
 import math
 
 from PySide6.QtCore import Qt, QPointF, QRectF, Signal, QMarginsF
-from PySide6.QtGui import QPainter, QPen, QColor, QImage, QUndoStack
+from PySide6.QtGui import QPainter, QPen, QColor, QImage, QUndoStack, QCursor
 from PySide6.QtWidgets import (
     QGraphicsView,
     QGraphicsScene,
@@ -65,6 +65,9 @@ class Canvas(QGraphicsView):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
 
+        # Disable automatic scrolling (dragging items to edge won't scroll)
+        self.setAutoScroll(False)
+
         self.setStyleSheet(f"""
             QGraphicsView {{
                 background: {ModernColors.SURFACE_VARIANT};
@@ -88,6 +91,10 @@ class Canvas(QGraphicsView):
         self._move_snapshot: Dict[QGraphicsItem, QPointF] = {}
         self._text_manager: Optional[TextManager] = None
         self._zoom = 1.0
+
+        # Panning state
+        self._is_panning = False
+        self._pan_start_pos = QPointF()
 
         self.tools = {
             "select": SelectionTool(self),
@@ -354,6 +361,14 @@ class Canvas(QGraphicsView):
         super().keyPressEvent(event)
 
     def mousePressEvent(self, event):
+        # Handle manual panning
+        if event.button() == Qt.MiddleButton:
+            self._is_panning = True
+            self._pan_start_pos = event.pos()
+            self.viewport().setCursor(Qt.ClosedHandCursor)
+            event.accept()
+            return
+
         if event.button() == Qt.RightButton and self._tool == "erase":
             if self.active_tool and hasattr(self.active_tool, "show_size_popup"):
                 global_pos = self.viewport().mapToGlobal(event.position().toPoint())
@@ -392,6 +407,19 @@ class Canvas(QGraphicsView):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
+        # Handle manual panning
+        if self._is_panning:
+            delta = event.pos() - self._pan_start_pos
+            self._pan_start_pos = event.pos()
+
+            h_bar = self.horizontalScrollBar()
+            v_bar = self.verticalScrollBar()
+
+            h_bar.setValue(h_bar.value() - delta.x())
+            v_bar.setValue(v_bar.value() - delta.y())
+            event.accept()
+            return
+
         if (event.buttons() & Qt.LeftButton) and self._tool not in ("none", "select", "text"):
             pos = self.mapToScene(event.position().toPoint())
             if self.active_tool:
@@ -399,20 +427,16 @@ class Canvas(QGraphicsView):
             event.accept()
             return
 
-        block_autoscroll = (event.buttons() & Qt.LeftButton) and self._tool in ("none", "select", "text")
-        if block_autoscroll:
-            h_value = self.horizontalScrollBar().value()
-            v_value = self.verticalScrollBar().value()
-            super().mouseMoveEvent(event)
-            if self.horizontalScrollBar().value() != h_value:
-                self.horizontalScrollBar().setValue(h_value)
-            if self.verticalScrollBar().value() != v_value:
-                self.verticalScrollBar().setValue(v_value)
-            return
-
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MiddleButton:
+            self._is_panning = False
+            # Restore original cursor
+            self.set_tool(self._tool)
+            event.accept()
+            return
+
         if event.button() == Qt.LeftButton:
             if self._tool == "select" and self._move_snapshot:
                 moved = {}
