@@ -15,6 +15,7 @@ def _base_pixmap() -> QPixmap:
     pm.fill(Qt.transparent)
     return pm
 
+# ... existing icons ...
 def make_icon_rect() -> QIcon:
     pm = _base_pixmap()
     p = QPainter(pm)
@@ -308,6 +309,199 @@ def make_icon_memes() -> QIcon:
 
     p.end()
     return QIcon(pm)
+
+# --- New Action Icons ---
+
+def make_icon_camera() -> QIcon:
+    pm = _base_pixmap()
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+
+    color = QColor(ModernColors.TEXT_SECONDARY)
+    p.setPen(QPen(color, 2))
+
+    # Camera body
+    path = QPainterPath()
+    path.addRoundedRect(QRectF(4, 12, 32, 20), 4, 4)
+
+    # Lens
+    p.setBrush(QColor(ModernColors.SURFACE))
+    p.drawPath(path)
+    p.drawEllipse(14, 16, 12, 12)
+
+    # Flash/Viewfinder bump
+    p.setBrush(color)
+    p.drawRoundedRect(14, 8, 12, 6, 2, 2)
+
+    # Shutter button
+    p.setBrush(QColor(ModernColors.PRIMARY))
+    p.setPen(Qt.NoPen)
+    p.drawEllipse(28, 10, 4, 4)
+
+    p.end()
+    return QIcon(pm)
+
+def make_icon_series() -> QIcon:
+    pm = _base_pixmap()
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+
+    color = QColor(ModernColors.TEXT_SECONDARY)
+    p.setPen(QPen(color, 2))
+
+    # Film strip
+    path = QPainterPath()
+    path.addRoundedRect(QRectF(6, 6, 28, 28), 3, 3)
+    p.setBrush(QColor(ModernColors.SURFACE))
+    p.drawPath(path)
+
+    # Perforations
+    p.setBrush(color)
+    p.setPen(Qt.NoPen)
+    for y in range(10, 31, 6):
+        p.drawRect(8, y, 4, 3)
+        p.drawRect(28, y, 4, 3)
+
+    p.end()
+    return QIcon(pm)
+
+def make_icon_gallery() -> QIcon:
+    pm = _base_pixmap()
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+
+    color = QColor(ModernColors.TEXT_SECONDARY)
+    p.setPen(QPen(color, 2))
+    p.setBrush(QColor(ModernColors.SURFACE))
+
+    # Back photo
+    p.drawRect(10, 6, 22, 18)
+
+    # Front photo
+    p.setBrush(QColor(ModernColors.SURFACE))
+    p.drawRect(6, 14, 22, 18)
+
+    # Mountain landscape in front photo
+    p.setBrush(QColor(ModernColors.PRIMARY))
+    p.setPen(Qt.NoPen)
+    path = QPainterPath()
+    path.moveTo(7, 31)
+    path.lineTo(13, 22)
+    path.lineTo(19, 31)
+    path.closeSubpath()
+    p.drawPath(path)
+
+    path2 = QPainterPath()
+    path2.moveTo(15, 31)
+    path2.lineTo(21, 24)
+    path2.lineTo(27, 31)
+    path2.closeSubpath()
+    p.setBrush(QColor(ModernColors.TEXT_SECONDARY))
+    p.drawPath(path2)
+
+    p.end()
+    return QIcon(pm)
+
+def make_icon_copy() -> QIcon:
+    pm = _base_pixmap()
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+
+    color = QColor(ModernColors.TEXT_SECONDARY)
+    p.setPen(QPen(color, 2))
+    p.setBrush(QColor(ModernColors.SURFACE))
+
+    # Back sheet
+    p.drawRoundedRect(12, 6, 20, 24, 2, 2)
+
+    # Front sheet
+    p.setBrush(QColor(ModernColors.SURFACE))
+    p.drawRoundedRect(8, 10, 20, 24, 2, 2)
+
+    # Text lines
+    p.setPen(QPen(QColor(ModernColors.TEXT_MUTED), 2))
+    p.drawLine(12, 16, 24, 16)
+    p.drawLine(12, 22, 24, 22)
+    p.drawLine(12, 28, 20, 28)
+
+    p.end()
+    return QIcon(pm)
+
+def make_icon_save() -> QIcon:
+    pm = _base_pixmap()
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+
+    color = QColor(ModernColors.TEXT_SECONDARY)
+    p.setPen(QPen(color, 2))
+    p.setBrush(QColor(ModernColors.SURFACE))
+
+    # Disk body
+    path = QPainterPath()
+    path.addRoundedRect(QRectF(6, 6, 28, 28), 3, 3)
+    p.drawPath(path)
+
+    # Label area (top)
+    p.setBrush(QColor(ModernColors.PRIMARY))
+    p.setPen(Qt.NoPen)
+    p.drawRect(10, 6, 20, 10)
+
+    # Shutter (bottom)
+    p.setBrush(QColor(ModernColors.TEXT_MUTED))
+    p.drawRect(12, 24, 16, 10)
+
+    p.end()
+    return QIcon(pm)
+
+def make_icon_undo() -> QIcon:
+    pm = _base_pixmap()
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+
+    color = QColor(ModernColors.TEXT_SECONDARY)
+    pen = QPen(color, 3)
+    pen.setCapStyle(Qt.RoundCap)
+    p.setPen(pen)
+
+    path = QPainterPath()
+    path.moveTo(28, 28)
+    path.quadTo(12, 28, 12, 18)
+    path.quadTo(12, 10, 22, 10)
+    p.drawPath(path)
+
+    # Arrowhead
+    p.setBrush(color)
+    p.setPen(Qt.NoPen)
+    p.drawPolygon(QPolygonF([QPointF(22, 6), QPointF(28, 10), QPointF(22, 14)]))
+
+    p.end()
+    return QIcon(pm)
+
+def make_icon_redo() -> QIcon:
+    pm = _base_pixmap()
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+
+    color = QColor(ModernColors.TEXT_SECONDARY)
+    pen = QPen(color, 3)
+    pen.setCapStyle(Qt.RoundCap)
+    p.setPen(pen)
+
+    path = QPainterPath()
+    path.moveTo(12, 28)
+    path.quadTo(28, 28, 28, 18)
+    path.quadTo(28, 10, 18, 10)
+    p.drawPath(path)
+
+    # Arrowhead
+    p.setBrush(color)
+    p.setPen(Qt.NoPen)
+    p.drawPolygon(QPolygonF([QPointF(18, 6), QPointF(12, 10), QPointF(18, 14)]))
+
+    p.end()
+    return QIcon(pm)
+
+# --- Cursors ---
 
 def create_pencil_cursor() -> QCursor:
     pm = QPixmap(24, 24)

@@ -27,7 +27,6 @@ from .ui.color_widgets import HexColorDialog
 from .ui.toolbar_factory import create_tools_toolbar, create_actions_toolbar
 from .ui.window_utils import size_to_image
 from .ui.meme_library_dialog import MemesDialog
-from icons import make_icon_series
 
 from design_tokens import Metrics, editor_main_stylesheet
 
@@ -60,12 +59,6 @@ class EditorWindow(QMainWindow):
         self.color_btn, actions, action_buttons = create_actions_toolbar(self, self.canvas)
         self._series_action = actions.get("series")
         self._series_button = action_buttons.get("series")
-        if self._series_action is not None:
-            self._series_action.setIcon(make_icon_series())
-        if self._series_button is not None:
-            self._series_button.setToolButtonStyle(Qt.ToolButtonTextOnly)
-            self._series_button.setText("🎞")
-            self._series_button.setToolTip("Серия скриншотов")
         self._update_series_button_state()
         self.act_new = actions['new']
         self.act_collage = actions['collage']

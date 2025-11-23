@@ -23,6 +23,13 @@ from .icon_factory import (
     make_icon_eraser,
     make_icon_select,
     make_icon_memes,
+    make_icon_camera,
+    make_icon_series,
+    make_icon_gallery,
+    make_icon_copy,
+    make_icon_save,
+    make_icon_undo,
+    make_icon_redo,
 )
 
 
@@ -146,13 +153,13 @@ def enhanced_actions_toolbar_style() -> str:
     QToolBar QToolButton {{
         background: transparent;
         border: none;
-        padding: 10px 14px;
+        padding: 6px 8px; /* Reduced padding */
         border-radius: 10px;
         font-weight: 500;
         color: {ModernColors.TEXT_SECONDARY};
         min-width: 32px;
         min-height: 32px;
-        font-size: 16px;
+        font-size: 14px; /* Adjusted font size */
     }}
 
     QToolBar QToolButton:hover {{
@@ -394,15 +401,16 @@ def create_actions_toolbar(window, canvas):
     tb.setFloatable(False)
     tb.setContextMenuPolicy(Qt.PreventContextMenu)
 
-    # Улучшенные настройки для отображения стрелок
-    tb.setToolButtonStyle(Qt.ToolButtonTextOnly)
+    # Change style to show icons
+    tb.setToolButtonStyle(Qt.ToolButtonIconOnly)
+    tb.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
 
     window.addToolBar(tb)
 
     actions: Dict[str, QAction] = {}
     buttons: Dict[str, QToolButton] = {}
 
-    def add_action(key, text, fn, checkable=False, sc=None, icon_text="", show_text=False):
+    def add_action(key, text, fn, checkable=False, sc=None, icon=None, show_text=False):
         a = QAction(text, window)
         a.setCheckable(checkable)
         if sc:
@@ -412,12 +420,12 @@ def create_actions_toolbar(window, canvas):
         a.triggered.connect(fn if checkable else (lambda _checked=False: fn()))
         btn = QToolButton()
         btn.setDefaultAction(a)
-        if show_text:
-            btn.setText(f"{icon_text} {text}" if icon_text and text else (text or icon_text))
-        else:
-            btn.setText(icon_text)
+
+        if icon:
+            btn.setIcon(icon)
+
         btn.setToolTip(text + (f" ({sc})" if sc else ""))
-        btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        btn.setToolButtonStyle(Qt.ToolButtonIconOnly)
         tb.addWidget(btn)
         actions[key] = a
         buttons[key] = btn
@@ -442,26 +450,30 @@ def create_actions_toolbar(window, canvas):
     tb.addWidget(zoom_label)
     tb.addSeparator()
 
-    add_action("new", "Новый снимок", window.new_screenshot, sc="Ctrl+N", icon_text="📸", show_text=False)
+    add_action("new", "Новый снимок", window.new_screenshot, sc="Ctrl+N", icon=make_icon_camera())
     if hasattr(window, "request_series_capture"):
-        add_action("series", "Серия скриншотов", window.request_series_capture, icon_text="🎞", show_text=False)
-    add_action("collage", "История", window.open_collage, sc="Ctrl+K", icon_text="🖼", show_text=False)
-    add_action("copy", "Копировать", window.copy_to_clipboard, sc="Ctrl+C", icon_text="📋", show_text=False)
-    add_action("save", "Сохранить", window.save_image, sc="Ctrl+S", icon_text="💾", show_text=False)
+        add_action("series", "Серия скриншотов", window.request_series_capture, icon=make_icon_series())
+    add_action("collage", "История", window.open_collage, sc="Ctrl+K", icon=make_icon_gallery())
+    add_action("copy", "Копировать", window.copy_to_clipboard, sc="Ctrl+C", icon=make_icon_copy())
+    add_action("save", "Сохранить", window.save_image, sc="Ctrl+S", icon=make_icon_save())
 
     undo_act = canvas.undo_stack.createUndoAction(window, "Отмена")
     undo_act.setShortcut(QKeySequence("Ctrl+Z"))
     undo_act.setShortcutContext(Qt.ApplicationShortcut)
+    undo_act.setIcon(make_icon_undo())
+
     redo_act = canvas.undo_stack.createRedoAction(window, "Повтор")
     redo_act.setShortcut(QKeySequence("Ctrl+X"))
     redo_act.setShortcutContext(Qt.ApplicationShortcut)
+    redo_act.setIcon(make_icon_redo())
+
     window.addAction(undo_act)
     window.addAction(redo_act)
-    for act, text in ((undo_act, "↶"), (redo_act, "↷")):
+
+    for act in (undo_act, redo_act):
         btn = QToolButton()
         btn.setDefaultAction(act)
-        btn.setText(text)
-        btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        btn.setToolButtonStyle(Qt.ToolButtonIconOnly)
         tb.addWidget(btn)
 
     # Контекстное меню для выбора формы скриншота
