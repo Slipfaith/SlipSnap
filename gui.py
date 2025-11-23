@@ -183,7 +183,7 @@ class SelectionOverlayBase(QWidget):
         if self.shape == "ellipse":
             draw.ellipse((0, 0, scaled_w, scaled_h), fill=255)
         else:
-            base_radius = max(12.0, min(width, height) * 0.12)
+            base_radius = max(4.0, min(width, height) * 0.04)
             scaled_radius = int(round(base_radius * scale))
             scaled_radius = max(scaled_radius, scale)
             max_radius = min(scaled_w, scaled_h) // 2
