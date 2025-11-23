@@ -39,7 +39,6 @@ class WinKeyBinder(object):
         key_index = kc << 16 | mods
         if not self.__keygrabs[key_index] and\
                 not self.RegisterHotKey(wid.__int__(), key_index, UINT(mods | 0x4000), UINT(kc)):
-            print("Couldn't register hot key!")
             return False
 
         self.__keybinds[key_index].append(callback)
@@ -54,9 +53,6 @@ class WinKeyBinder(object):
         self.__keygrabs.pop(key_index)
 
         if not self.UnregisterHotKey(wid.__int__(), key_index):
-            err = "Couldn't unregister hot key '{0}'. Error code = {1}."\
-                .format(keys, GetLastError())
-            print(err)
             return False
         return True
 

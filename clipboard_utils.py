@@ -16,7 +16,6 @@ try:
     HAS_WIN32 = True
 except ImportError:
     HAS_WIN32 = False
-    print("WARNING: win32clipboard not available")
 
 
 def copy_pil_image_to_clipboard(img: Image.Image) -> QImage:
@@ -32,23 +31,12 @@ def copy_pil_image_to_clipboard(img: Image.Image) -> QImage:
 
     # Проверяем и конвертируем в RGBA
     if img.mode != "RGBA":
-        print(f"Converting from {img.mode} to RGBA")
         img = img.convert("RGBA")
-
-    # Диагностика альфа-канала
-    extrema = img.getextrema()
-    if len(extrema) == 4:
-        alpha_min, alpha_max = extrema[3]
-        print(f"Alpha channel range: {alpha_min} - {alpha_max}")
-        if alpha_min == 255 and alpha_max == 255:
-            print("WARNING: No transparency - alpha is always 255")
 
     # Сохраняем как PNG
     buffer = BytesIO()
     img.save(buffer, format="PNG", compress_level=6)
     png_data = buffer.getvalue()
-
-    print(f"PNG size: {len(png_data)} bytes")
 
     # Создаём QImage для возврата
     qimg = QImage.fromData(png_data, "PNG")
@@ -59,7 +47,6 @@ def copy_pil_image_to_clipboard(img: Image.Image) -> QImage:
     if HAS_WIN32 and sys.platform.startswith("win"):
         _copy_png_and_dibv5_win32(img, png_data)
     else:
-        print("ERROR: Win32 clipboard not available")
         return qimg
 
     return qimg
@@ -78,11 +65,8 @@ def _copy_png_win32(png_data: bytes) -> None:
         # Кладём PNG данные
         wc.SetClipboardData(png_format, png_data)
 
-        print(f"\n✓ Copied PNG to clipboard (format ID: {png_format})")
-        print(f"  Size: {len(png_data)} bytes")
-
-    except Exception as e:
-        print(f"ERROR copying to clipboard: {e}")
+    except Exception:
+        pass
     finally:
         try:
             wc.CloseClipboard()
@@ -180,14 +164,8 @@ def _copy_png_and_dibv5_win32(img: Image.Image, png_data: bytes) -> None:
         # 2. CF_DIBV5 (для Teams, Word, Outlook)
         wc.SetClipboardData(wc.CF_DIBV5, dibv5_data)
 
-        print("\n✓ Copied to clipboard:")
-        print(f"  PNG: {len(png_data)} bytes (for Telegram)")
-        print(f"  CF_DIBV5: {len(dibv5_data)} bytes (for Teams/Word/Outlook)")
-
-    except Exception as e:
-        print(f"ERROR copying to clipboard: {e}")
-        import traceback
-        traceback.print_exc()
+    except Exception:
+        pass
     finally:
         try:
             wc.CloseClipboard()
@@ -235,12 +213,8 @@ def copy_pil_image_to_clipboard_with_fallback(img: Image.Image) -> QImage:
         # Потом CF_DIB для совместимости
         wc.SetClipboardData(wc.CF_DIB, dib_data)
 
-        print("\n✓ Copied to clipboard:")
-        print(f"  PNG: {len(png_data)} bytes (with transparency)")
-        print(f"  CF_DIB: {len(dib_data)} bytes (fallback for old apps)")
-
-    except Exception as e:
-        print(f"ERROR: {e}")
+    except Exception:
+        pass
     finally:
         try:
             wc.CloseClipboard()
@@ -260,28 +234,12 @@ def test_copy():
     draw = ImageDraw.Draw(img)
     draw.ellipse([50, 50, 150, 150], fill=(0, 255, 0, 255))  # Зелёный круг
 
-    print("=== Тестовое изображение ===")
-    print(f"Size: {img.size}, Mode: {img.mode}")
-
-    pixels = img.load()
-    print(f"Corner (0,0): {pixels[0, 0]} - should be transparent")
-    print(f"Center (100,100): {pixels[100, 100]} - should be green")
-
     # Копируем (теперь PNG + CF_DIBV5)
     copy_pil_image_to_clipboard(img)
 
     # Сохраняем для проверки
     img.save("test_transparent.png")
-    print("\n✓ Saved test_transparent.png - check it in browser")
-    print("\nFormats in clipboard:")
-    print("  - PNG → for Telegram, modern apps")
-    print("  - CF_DIBV5 → for Teams, Word, Outlook")
 
 
 if __name__ == "__main__":
     test_copy()
-    print("\nNow try pasting in:")
-    print("  1. Teams (should use CF_DIBV5)")
-    print("  2. Telegram (should use PNG)")
-    print("  3. Word (should use CF_DIBV5)")
-    print("  4. Outlook (should use CF_DIBV5)")

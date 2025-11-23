@@ -100,8 +100,8 @@ class EditableTextItem(QGraphicsTextItem):
             current_cursor.setPosition(min(cursor_position, self.document().characterCount() - 1))
             self.setTextCursor(current_cursor)
 
-        except Exception as e:
-            print(f"Ошибка при применении цвета к тексту: {e}")
+        except Exception:
+            pass
         finally:
             self._ignore_content_changes = False
 
@@ -127,8 +127,8 @@ class EditableTextItem(QGraphicsTextItem):
             char_format = QTextCharFormat()
             char_format.setFont(font)
             cursor.mergeCharFormat(char_format)
-        except Exception as e:
-            print(f"Ошибка при применении шрифта: {e}")
+        except Exception:
+            pass
 
     def _toggle_format(self, mode: str):
         """Переключить форматирование текста"""
@@ -412,8 +412,8 @@ class TextManager:
                         fmt = QTextCharFormat()
                         fmt.setForeground(self._text_color)
                         cursor.mergeCharFormat(fmt)
-                    except Exception as e:
-                        print(f"Ошибка при применении цвета к элементу: {e}")
+                    except Exception:
+                        pass
 
 
     def finish_current_editing(self):
