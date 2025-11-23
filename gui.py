@@ -597,7 +597,6 @@ class App(QObject):
         if app is not None:
             app.aboutToQuit.connect(self._cleanup_on_exit)
         elapsed = perf_counter() - init_started
-        print(f"[SlipSnap] App initialized in {elapsed:.3f}s")
 
     def _toggle_shape(self):
         if hasattr(self, "ovm"):
