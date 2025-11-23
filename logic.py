@@ -1,9 +1,14 @@
+from __future__ import annotations
+
 import json
 import math
 import uuid
 import tempfile
 from pathlib import Path
-from typing import Tuple, Optional
+from typing import Tuple, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from PySide6.QtCore import QRect
 
 import mss
 from PIL import Image
@@ -118,7 +123,7 @@ class ScreenGrabber:
         else:
             self._monitors = []
 
-    def _qt_rect_phys(self, qs) -> "QRect":
+    def _qt_rect_phys(self, qs) -> QRect:
         from PySide6.QtCore import QRect
         g = qs.geometry()
         dpr = getattr(qs, "devicePixelRatio", lambda: 1.0)()
