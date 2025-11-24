@@ -52,6 +52,7 @@ class _LanguagePickerDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Распознать текст")
         self._available = sorted(set(available))
+        self._custom_modified = False
         self._build_ui(default_lang, preferred)
 
     def _build_ui(self, default_lang: str, preferred: list[str]) -> None:
@@ -93,6 +94,7 @@ class _LanguagePickerDialog(QDialog):
 
         self.custom_edit = QLineEdit(block)
         self.custom_edit.setPlaceholderText("Например: eng+rus")
+        self.custom_edit.textEdited.connect(self._on_custom_edited)
         block_layout.addWidget(self.custom_edit)
 
         layout.addWidget(block)
@@ -121,22 +123,32 @@ class _LanguagePickerDialog(QDialog):
             self.list_widget.addItem(item)
 
         self.custom_edit.setText("+".join(selected_codes))
+        self._custom_modified = False
         self._sync_enabled_state(self.auto_checkbox.isChecked())
 
     def _sync_enabled_state(self, auto_enabled: bool) -> None:
         self.list_widget.setEnabled(not auto_enabled)
         self.custom_edit.setEnabled(not auto_enabled)
 
+    def _on_custom_edited(self, _: str) -> None:
+        self._custom_modified = True
+
     def selected_language(self) -> str:
         if self.auto_checkbox.isChecked():
             return "auto"
 
         text_value = self.custom_edit.text().strip()
-        if text_value:
+        if self._custom_modified and text_value:
             return text_value
 
         selected = [self.list_widget.item(i).text() for i in range(self.list_widget.count()) if self.list_widget.item(i).checkState() == Qt.Checked]
-        return "+".join(selected) if selected else "auto"
+        if selected:
+            return "+".join(selected)
+
+        if text_value:
+            return text_value
+
+        return "auto"
 
 
 class EditorWindow(QMainWindow):
