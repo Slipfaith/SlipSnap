@@ -5,6 +5,7 @@ from typing import List, Optional, Sequence, Tuple, Union
 
 from PIL import Image
 from PySide6.QtGui import QImage
+
 import pytesseract
 from pytesseract import TesseractError, TesseractNotFoundError
 
@@ -16,6 +17,13 @@ class OcrError(RuntimeError):
 
 
 @dataclass
+class OcrWord:
+    text: str
+    bbox: Tuple[int, int, int, int]
+    line_id: Tuple[int, int, int]
+
+
+@dataclass
 class OcrResult:
     text: str
     language_tag: str
@@ -23,6 +31,7 @@ class OcrResult:
     fallback_used: bool = False
     warnings: List[str] = field(default_factory=list)
     languages_used: List[str] = field(default_factory=list)
+    words: List[OcrWord] = field(default_factory=list)
 
 
 @dataclass
@@ -118,7 +127,11 @@ def get_available_languages() -> List[str]:
         return []
 
 
-def run_ocr(image: Union[Image.Image, QImage], settings: OcrSettings, language_hint: LangHint = None) -> OcrResult:
+def run_ocr(
+    image: Union[Image.Image, QImage],
+    settings: OcrSettings,
+    language_hint: LangHint = None,
+) -> OcrResult:
     pil_image = _ensure_pil_image(image)
     available = get_available_languages()
     lang_string, missing, usable_langs = _normalize_languages(language_hint, settings, available)
@@ -155,6 +168,33 @@ def run_ocr(image: Union[Image.Image, QImage], settings: OcrSettings, language_h
         else:
             raise OcrError(f"Ошибка OCR: {exc}") from exc
 
+    word_data: List[OcrWord] = []
+    try:
+        data = pytesseract.image_to_data(pil_image, lang=lang_string or None, output_type=pytesseract.Output.DICT)
+    except Exception:
+        data = None
+
+    if data and all(key in data for key in ("text", "left", "top", "width", "height", "block_num", "par_num", "line_num")):
+        for i, raw_text in enumerate(data["text"]):
+            text_value = str(raw_text).strip()
+            if not text_value:
+                continue
+            try:
+                bbox = (
+                    int(data["left"][i]),
+                    int(data["top"][i]),
+                    int(data["width"][i]),
+                    int(data["height"][i]),
+                )
+                line_id = (
+                    int(data.get("block_num", [0])[i]),
+                    int(data.get("par_num", [0])[i]),
+                    int(data.get("line_num", [0])[i]),
+                )
+            except Exception:
+                continue
+            word_data.append(OcrWord(text=text_value, bbox=bbox, line_id=line_id))
+
     return OcrResult(
         text=text.strip(),
         language_tag=language_tag,
@@ -162,4 +202,5 @@ def run_ocr(image: Union[Image.Image, QImage], settings: OcrSettings, language_h
         fallback_used=language_tag == "auto" and bool(missing),
         warnings=warnings,
         languages_used=usable_langs,
+        words=word_data,
     )
