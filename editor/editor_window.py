@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QGraphicsItem,
     QLabel,
+    QHBoxLayout,
     QInputDialog,
     QMainWindow,
     QMessageBox,
@@ -55,6 +56,10 @@ class EditorWindow(QMainWindow):
         self._last_ocr_capture: Optional[OcrCapture] = None
         self._prev_tool_before_ocr = "select"
         self._ocr_text_action: Optional[QAction] = None
+        self._ocr_toast: Optional[QWidget] = None
+        self._ocr_toast_timer = QTimer(self)
+        self._ocr_toast_timer.setSingleShot(True)
+        self._ocr_toast_timer.timeout.connect(self._clear_ocr_toast)
 
         self.setCentralWidget(self.canvas)
         self._apply_modern_stylesheet()
@@ -284,6 +289,73 @@ class EditorWindow(QMainWindow):
 
         return dialog.textValue().strip() or "auto"
 
+    def _activate_ocr_text_mode(self) -> None:
+        if self._ocr_text_action is not None:
+            self._ocr_text_action.blockSignals(True)
+            self._ocr_text_action.setChecked(True)
+            self._ocr_text_action.blockSignals(False)
+        self.toggle_ocr_text_mode(True)
+
+    def _clear_ocr_toast(self) -> None:
+        if self._ocr_toast is None:
+            return
+        try:
+            self.statusBar().removeWidget(self._ocr_toast)
+        except Exception:
+            pass
+        self._ocr_toast.deleteLater()
+        self._ocr_toast = None
+
+    def _show_ocr_toast(self, result: OcrResult) -> None:
+        self._ocr_toast_timer.stop()
+        self._clear_ocr_toast()
+
+        toast = QWidget(self)
+        layout = QHBoxLayout(toast)
+        layout.setContentsMargins(14, 8, 14, 8)
+        layout.setSpacing(10)
+
+        headline = QLabel("Текст распознан. Выделите слова на холсте и нажмите Ctrl+C.", toast)
+        layout.addWidget(headline)
+
+        meta_parts = []
+        if result.language_tag:
+            meta_parts.append(f"языки: {result.language_tag}")
+        if result.fallback_used and result.missing_languages:
+            meta_parts.append("нет пакетов: " + ", ".join(result.missing_languages))
+        if meta_parts:
+            meta = QLabel(" · ".join(meta_parts), toast)
+            meta.setObjectName("metaLabel")
+            layout.addWidget(meta)
+
+        insert_btn = QToolButton(toast)
+        insert_btn.setText("Вставить на холст")
+        insert_btn.clicked.connect(lambda: self._insert_ocr_text(result.text))
+        layout.addWidget(insert_btn)
+
+        close_btn = QToolButton(toast)
+        close_btn.setText("✕")
+        close_btn.clicked.connect(self._clear_ocr_toast)
+        layout.addWidget(close_btn)
+
+        toast.setObjectName("ocrToast")
+        toast.setStyleSheet(
+            "#ocrToast {"
+            "  background: rgba(255, 255, 255, 0.92);"
+            "  border: 1px solid rgba(0, 0, 0, 0.08);"
+            "  border-radius: 10px;"
+            "  padding: 2px;"
+            "}"
+            "#ocrToast QLabel { color: #1f1f1f; }"
+            "#ocrToast #metaLabel { color: #5f6368; font-size: 12px; }"
+            "#ocrToast QToolButton { border: none; padding: 6px 10px; }"
+            "#ocrToast QToolButton:hover { background: rgba(0, 0, 0, 0.04); border-radius: 6px; }"
+        )
+
+        self.statusBar().addPermanentWidget(toast, 1)
+        self._ocr_toast = toast
+        self._ocr_toast_timer.start(7000)
+
     def _handle_ocr_result(self, result: OcrResult) -> None:
         clipboard = QApplication.clipboard()
         clipboard.setText(result.text)
@@ -305,21 +377,8 @@ class EditorWindow(QMainWindow):
             if self._ocr_text_action is not None:
                 self._ocr_text_action.setEnabled(bool(result.words))
 
-        msg = QMessageBox(self)
-        msg.setWindowTitle("SlipSnap · OCR")
-        msg.setIcon(QMessageBox.Information)
-        msg.setText("Текст скопирован в буфер обмена.")
-        details = [f"Языки: {result.language_tag}"]
-        details.extend(result.warnings)
-        if details:
-            msg.setInformativeText("\n".join(details))
-        msg.setDetailedText(result.text)
-        insert_btn = msg.addButton("Вставить на холст", QMessageBox.ActionRole)
-        msg.addButton(QMessageBox.Ok)
-        msg.exec()
-
-        if msg.clickedButton() is insert_btn:
-            self._insert_ocr_text(result.text)
+        self._activate_ocr_text_mode()
+        self._show_ocr_toast(result)
 
     def _insert_ocr_text(self, text: str) -> None:
         if not text.strip():
