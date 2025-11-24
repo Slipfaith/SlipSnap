@@ -8,13 +8,20 @@ from PySide6.QtCore import Qt, QTimer, QRectF
 from PySide6.QtGui import QAction, QImage, QPixmap, QPainter, QPainterPath, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
+    QDialog,
+    QDialogButtonBox,
+    QFrame,
     QGraphicsItem,
-    QLabel,
     QHBoxLayout,
-    QInputDialog,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QMessageBox,
     QToolButton,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -36,6 +43,112 @@ from .ui.meme_library_dialog import MemesDialog
 from icons import make_icon_series
 
 from design_tokens import Metrics, editor_main_stylesheet
+
+
+class _LanguagePickerDialog(QDialog):
+    """Modern dialog for selecting OCR languages."""
+
+    def __init__(self, parent: QWidget, available: list[str], default_lang: str, preferred: list[str]):
+        super().__init__(parent)
+        self.setWindowTitle("Распознать текст")
+        self._available = sorted(set(available))
+        self._custom_modified = False
+        self._build_ui(default_lang, preferred)
+
+    def _build_ui(self, default_lang: str, preferred: list[str]) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(14)
+
+        title = QLabel("Выберите языки для OCR")
+        title.setStyleSheet("font-size: 17px; font-weight: 600;")
+        layout.addWidget(title)
+
+        hint = QLabel(
+            "Можно указать несколько языков. Отметьте нужные или введите коды через «+»."
+            " Оставьте включённым автоопределение, чтобы использовать предпочтения."
+        )
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        self.auto_checkbox = QCheckBox("Определять язык автоматически")
+        self.auto_checkbox.setChecked(not default_lang or default_lang.lower() == "auto")
+        self.auto_checkbox.toggled.connect(self._sync_enabled_state)
+        layout.addWidget(self.auto_checkbox)
+
+        block = QFrame(self)
+        block.setFrameShape(QFrame.StyledPanel)
+        block.setStyleSheet("QFrame { border: 1px solid #d0d7de; border-radius: 10px; }")
+        block_layout = QVBoxLayout(block)
+        block_layout.setContentsMargins(12, 10, 12, 10)
+        block_layout.setSpacing(8)
+
+        list_label = QLabel("Доступные языки:")
+        list_label.setStyleSheet("font-weight: 600;")
+        block_layout.addWidget(list_label)
+
+        self.list_widget = QListWidget(block)
+        self.list_widget.setSelectionMode(QListWidget.NoSelection)
+        self.list_widget.setMinimumHeight(160)
+        block_layout.addWidget(self.list_widget)
+
+        self.custom_edit = QLineEdit(block)
+        self.custom_edit.setPlaceholderText("Например: eng+rus")
+        self.custom_edit.textEdited.connect(self._on_custom_edited)
+        block_layout.addWidget(self.custom_edit)
+
+        layout.addWidget(block)
+
+        available_text = ", ".join(self._available) if self._available else "нет установленных языков"
+        info = QLabel(f"Установлено: {available_text}")
+        info.setWordWrap(True)
+        info.setStyleSheet("color: #6e7781;")
+        layout.addWidget(info)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        selected_codes = []
+        if default_lang and default_lang.lower() != "auto":
+            selected_codes = [code.strip() for code in default_lang.split("+") if code.strip()]
+        if not selected_codes:
+            selected_codes = preferred
+
+        for code in self._available:
+            item = QListWidgetItem(code)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Checked if code in selected_codes else Qt.Unchecked)
+            self.list_widget.addItem(item)
+
+        self.custom_edit.setText("+".join(selected_codes))
+        self._custom_modified = False
+        self._sync_enabled_state(self.auto_checkbox.isChecked())
+
+    def _sync_enabled_state(self, auto_enabled: bool) -> None:
+        self.list_widget.setEnabled(not auto_enabled)
+        self.custom_edit.setEnabled(not auto_enabled)
+
+    def _on_custom_edited(self, _: str) -> None:
+        self._custom_modified = True
+
+    def selected_language(self) -> str:
+        if self.auto_checkbox.isChecked():
+            return "auto"
+
+        text_value = self.custom_edit.text().strip()
+        if self._custom_modified and text_value:
+            return text_value
+
+        selected = [self.list_widget.item(i).text() for i in range(self.list_widget.count()) if self.list_widget.item(i).checkState() == Qt.Checked]
+        if selected:
+            return "+".join(selected)
+
+        if text_value:
+            return text_value
+
+        return "auto"
 
 
 class EditorWindow(QMainWindow):
@@ -259,7 +372,6 @@ class EditorWindow(QMainWindow):
     def _prompt_ocr_language(self) -> Optional[str]:
         try:
             available = get_available_languages()
-            available_text = ", ".join(sorted(set(available))) if available else "недоступно"
         except OcrError as e:
             QMessageBox.warning(self, "SlipSnap · OCR", str(e))
             return None
@@ -268,26 +380,11 @@ class EditorWindow(QMainWindow):
         if not default_lang or default_lang.lower() == "auto":
             default_lang = "+".join(self.ocr_settings.preferred_languages)
 
-        prompt = (
-            "Коды языков Tesseract (например, eng+rus). "
-            "Оставьте пустым для авто или списка предпочтений.\n"
-            f"Доступные: {available_text}"
-        )
-
-        dialog = QInputDialog(self)
-        dialog.setWindowTitle("Распознать текст")
-        dialog.setLabelText(prompt)
-        dialog.setTextValue(default_lang)
-
-        label = dialog.findChild(QLabel)
-        if label is not None:
-            label.setWordWrap(True)
-            label.setMinimumWidth(360)
-
+        dialog = _LanguagePickerDialog(self, available, default_lang, self.ocr_settings.preferred_languages)
         if not dialog.exec():
             return None
 
-        return dialog.textValue().strip() or "auto"
+        return dialog.selected_language()
 
     def _activate_ocr_text_mode(self) -> None:
         if self._ocr_text_action is not None:
