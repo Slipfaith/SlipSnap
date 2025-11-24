@@ -29,12 +29,14 @@ class OcrSelectionOverlay:
         self.words: List[OcrWord] = []
         self._word_items: List[QGraphicsRectItem] = []
         self._handle_items: List[QGraphicsRectItem] = []
+        self._line_outline_item: Optional[QGraphicsRectItem] = None
         self._anchor_item: Optional[QGraphicsItem] = None
         self._active = False
         self._start_index: Optional[int] = None
         self._end_index: Optional[int] = None
         self._scale_x = 1.0
         self._scale_y = 1.0
+        self._single_line = False
 
         selection_color = QColor(*Palette.TEXT_TOOL_SELECTION)
         selection_color.setAlpha(80)
@@ -50,8 +52,12 @@ class OcrSelectionOverlay:
             self.scene.removeItem(item)
         for item in self._handle_items:
             self.scene.removeItem(item)
+        if self._line_outline_item:
+            self.scene.removeItem(self._line_outline_item)
         self._word_items = []
         self._handle_items = []
+        self._line_outline_item = None
+        self._single_line = False
         self.words = []
         self._start_index = None
         self._end_index = None
@@ -89,6 +95,8 @@ class OcrSelectionOverlay:
                 line_extents[word.line_id][0] = min(line_extents[word.line_id][0], top)
                 line_extents[word.line_id][1] = max(line_extents[word.line_id][1], bottom)
 
+        self._single_line = len(line_extents) == 1
+
         padded_extents = {}
         for line_id, (top, bottom) in line_extents.items():
             height = max(1.0, bottom - top)
@@ -97,6 +105,8 @@ class OcrSelectionOverlay:
             padded_bottom = min(float(px_h), bottom + padding)
             padded_extents[line_id] = (padded_top, padded_bottom)
 
+        mapped_rects: List[Tuple[QRectF, int]] = []
+        min_x, max_x = float("inf"), float("-inf")
         for word in self.words:
             x, y, w, h = word.bbox
             line_top, line_bottom = padded_extents.get(word.line_id, (y, y + h))
@@ -106,8 +116,32 @@ class OcrSelectionOverlay:
                 max(1.0, w * self._scale_x),
                 max(1.0, (line_bottom - line_top) * self._scale_y),
             )
+            mapped_rects.append((mapped, word.line_id))
+            min_x = min(min_x, mapped.left())
+            max_x = max(max_x, mapped.right())
+
+        if self._single_line and mapped_rects:
+            _, line_id = mapped_rects[0]
+            padded_top, padded_bottom = padded_extents.get(line_id, (0.0, 0.0))
+            line_rect = QRectF(
+                min_x,
+                round(base_pos.y() + padded_top * self._scale_y, 2),
+                max(1.0, max_x - min_x),
+                max(1.0, (padded_bottom - padded_top) * self._scale_y),
+            )
+            self._line_outline_item = QGraphicsRectItem(line_rect, parent)
+            self._line_outline_item.setPen(self._outline_pen)
+            self._line_outline_item.setBrush(QColor(0, 0, 0, 0))
+            self._line_outline_item.setZValue((self._anchor_item.zValue() + 0.1) if self._anchor_item else 20)
+            self._line_outline_item.setVisible(self._active)
+
+        for idx, (mapped, line_id) in enumerate(mapped_rects):
+            if self._single_line and idx < len(mapped_rects) - 1:
+                next_rect, _ = mapped_rects[idx + 1]
+                extended_width = max(mapped.width(), next_rect.left() - mapped.left())
+                mapped.setWidth(max(1.0, extended_width))
             item = QGraphicsRectItem(mapped, parent)
-            item.setPen(self._outline_pen)
+            item.setPen(QPen(QColor(0, 0, 0, 0)) if self._single_line else self._outline_pen)
             item.setBrush(QColor(0, 0, 0, 0))
             item.setZValue((self._anchor_item.zValue() + 0.1) if self._anchor_item else 20)
             item.setVisible(self._active)
@@ -119,6 +153,8 @@ class OcrSelectionOverlay:
             item.setVisible(active)
         for handle in self._handle_items:
             handle.setVisible(active)
+        if self._line_outline_item:
+            self._line_outline_item.setVisible(active)
         if not active:
             self._start_index = None
             self._end_index = None
