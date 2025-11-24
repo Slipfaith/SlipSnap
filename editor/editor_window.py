@@ -3,6 +3,7 @@
 from pathlib import Path
 from typing import Callable, Optional
 
+from PIL import Image
 from PySide6.QtCore import Qt, QTimer, QRectF
 from PySide6.QtGui import QAction, QImage, QPixmap, QPainter, QPainterPath, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
@@ -12,12 +13,14 @@ from PySide6.QtWidgets import (
     QGraphicsItem,
     QWidget,
     QToolButton,
+    QInputDialog,
 )
 
-from logic import APP_NAME, APP_VERSION, qimage_to_pil, save_history
+from logic import APP_NAME, APP_VERSION, qimage_to_pil, save_history, save_config
 from editor.text_tools import TextManager
 from editor.editor_logic import EditorLogic
 from editor.image_utils import images_from_mime
+from ocr import OcrError, OcrResult, OcrSettings, run_ocr, get_available_languages
 
 from editor.undo_commands import AddCommand, RemoveCommand, ScaleCommand
 
@@ -46,6 +49,7 @@ class EditorWindow(QMainWindow):
         self.text_manager = TextManager(self.canvas)
         self.canvas.set_text_manager(self.text_manager)
         self.logic = EditorLogic(self.canvas)
+        self.ocr_settings = OcrSettings.from_config(self.cfg)
 
         self.setCentralWidget(self.canvas)
         self._apply_modern_stylesheet()
@@ -206,6 +210,104 @@ class EditorWindow(QMainWindow):
                 self.act_collage.setEnabled(self.logic.collage_available())
         except Exception:
             pass
+
+    # ---- OCR ----
+    def _current_ocr_image(self) -> Optional[Image.Image]:
+        try:
+            return self.canvas.export_selection()
+        except Exception:
+            return None
+
+    def _prompt_ocr_language(self) -> Optional[str]:
+        try:
+            available = get_available_languages()
+            available_text = ", ".join(sorted(set(available))) if available else "недоступно"
+        except OcrError as e:
+            QMessageBox.warning(self, "SlipSnap · OCR", str(e))
+            return None
+
+        default_lang = self.ocr_settings.last_language
+        if not default_lang or default_lang.lower() == "auto":
+            default_lang = "+".join(self.ocr_settings.preferred_languages)
+
+        prompt = (
+            "Коды языков Tesseract (например, eng+rus). "
+            "Оставьте пустым для авто или списка предпочтений.\n"
+            f"Доступные: {available_text}"
+        )
+
+        lang_input, ok = QInputDialog.getText(
+            self,
+            "Распознать текст",
+            prompt,
+            text=default_lang,
+        )
+        if not ok:
+            return None
+        return lang_input.strip() or "auto"
+
+    def _handle_ocr_result(self, result: OcrResult) -> None:
+        clipboard = QApplication.clipboard()
+        clipboard.setText(result.text)
+
+        status_parts = ["OCR: текст скопирован"]
+        if result.language_tag:
+            status_parts.append(f"язык: {result.language_tag}")
+        if result.fallback_used and result.missing_languages:
+            status_parts.append("нет пакетов: " + ", ".join(result.missing_languages))
+        status = " | ".join(status_parts)
+        self.statusBar().showMessage(status, 5000)
+
+        if not result.text:
+            QMessageBox.information(self, "SlipSnap · OCR", "Текст не найден на изображении.")
+            return
+
+        msg = QMessageBox(self)
+        msg.setWindowTitle("SlipSnap · OCR")
+        msg.setIcon(QMessageBox.Information)
+        msg.setText("Текст скопирован в буфер обмена.")
+        details = [f"Языки: {result.language_tag}"]
+        details.extend(result.warnings)
+        if details:
+            msg.setInformativeText("\n".join(details))
+        msg.setDetailedText(result.text)
+        insert_btn = msg.addButton("Вставить на холст", QMessageBox.ActionRole)
+        msg.addButton(QMessageBox.Ok)
+        msg.exec()
+
+        if msg.clickedButton() is insert_btn:
+            self._insert_ocr_text(result.text)
+
+    def _insert_ocr_text(self, text: str) -> None:
+        if not text.strip():
+            return
+        pos = self.canvas.mapToScene(self.canvas.viewport().rect().center())
+        item = self.text_manager.create_text_item(pos, text.strip())
+        if item:
+            self.canvas.undo_stack.push(AddCommand(self.canvas.scene, item))
+            self.canvas.update_scene_rect()
+
+    def rerun_ocr_with_language(self):
+        img = self._current_ocr_image()
+        if img is None:
+            QMessageBox.warning(self, "SlipSnap · OCR", "Нет изображения для распознавания.")
+            return
+
+        lang_choice = self._prompt_ocr_language()
+        if lang_choice is None:
+            return
+
+        try:
+            result = run_ocr(img, self.ocr_settings, language_hint=lang_choice)
+        except OcrError as e:
+            QMessageBox.warning(self, "SlipSnap · OCR", str(e))
+            return
+
+        languages_used = result.languages_used or self.ocr_settings.preferred_languages
+        self.ocr_settings.remember_run(lang_choice, languages_used)
+        self.cfg["ocr_settings"] = self.ocr_settings.to_dict()
+        save_config(self.cfg)
+        self._handle_ocr_result(result)
 
     # ---- key events ----
     def keyPressEvent(self, event):
