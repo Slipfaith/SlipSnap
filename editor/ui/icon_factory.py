@@ -309,6 +309,252 @@ def make_icon_memes() -> QIcon:
     p.end()
     return QIcon(pm)
 
+def make_icon_new() -> QIcon:
+    pm = _base_pixmap()
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+
+    # Camera Body
+    p.setPen(QPen(QColor(ModernColors.TEXT_SECONDARY), 2))
+    p.setBrush(QColor(ModernColors.SURFACE))
+
+    # Main body
+    body = QRectF(6, 10, 28, 20)
+    p.drawRoundedRect(body, 3, 3)
+
+    # Top bump
+    p.drawRoundedRect(QRectF(14, 6, 12, 4), 2, 2)
+
+    # Lens
+    p.setBrush(Qt.NoBrush)
+    p.drawEllipse(13, 13, 14, 14)
+    p.setPen(QPen(QColor(ModernColors.PRIMARY), 2))
+    p.drawEllipse(17, 17, 6, 6)
+
+    p.end()
+    return QIcon(pm)
+
+def make_icon_series() -> QIcon:
+    pm = _base_pixmap()
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+
+    # Stack effect
+    p.setPen(QPen(QColor(ModernColors.TEXT_SECONDARY), 2))
+    p.setBrush(QColor(ModernColors.SURFACE))
+
+    # Back card
+    p.save()
+    p.translate(20, 20)
+    p.rotate(10)
+    p.translate(-20, -20)
+    p.drawRoundedRect(QRectF(8, 8, 24, 24), 3, 3)
+    p.restore()
+
+    # Front card
+    p.setBrush(QColor(ModernColors.SURFACE)) # Opaque to hide back
+    p.drawRoundedRect(QRectF(6, 6, 24, 24), 3, 3)
+
+    # Image placeholder
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor(ModernColors.PRIMARY))
+    p.drawRoundedRect(QRectF(10, 10, 16, 16), 1, 1)
+
+    p.end()
+    return QIcon(pm)
+
+def make_icon_collage() -> QIcon:
+    pm = _base_pixmap()
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+
+    p.setPen(QPen(QColor(ModernColors.TEXT_SECONDARY), 2))
+    p.setBrush(Qt.NoBrush)
+
+    # Frame
+    p.drawRoundedRect(QRectF(6, 6, 28, 28), 3, 3)
+
+    # Dividers
+    p.drawLine(20, 6, 20, 34)
+    p.drawLine(6, 20, 34, 20)
+
+    # Highlight one section
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor(ModernColors.PRIMARY))
+    p.drawRect(7, 7, 12, 12)
+
+    p.end()
+    return QIcon(pm)
+
+def make_icon_ocr() -> QIcon:
+    pm = _base_pixmap()
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+
+    # Doc
+    p.setPen(QPen(QColor(ModernColors.TEXT_SECONDARY), 2))
+    p.setBrush(QColor(ModernColors.SURFACE))
+
+    path = QPainterPath()
+    path.moveTo(10, 6)
+    path.lineTo(22, 6)
+    path.lineTo(30, 14)
+    path.lineTo(30, 34)
+    path.lineTo(10, 34)
+    path.closeSubpath()
+    p.drawPath(path)
+
+    # Fold
+    p.drawLine(22, 6, 22, 14)
+    p.drawLine(22, 14, 30, 14)
+
+    # Text lines
+    p.setPen(QPen(QColor(ModernColors.TEXT_SECONDARY), 1.5))
+    p.drawLine(14, 20, 26, 20)
+    p.drawLine(14, 24, 26, 24)
+    p.drawLine(14, 28, 20, 28)
+
+    # Scan line overlay
+    p.setPen(QPen(QColor(ModernColors.PRIMARY), 2))
+    p.drawLine(8, 16, 32, 16)
+
+    p.end()
+    return QIcon(pm)
+
+def make_icon_text_mode_action() -> QIcon:
+    pm = _base_pixmap()
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+
+    # Letter A or T
+    p.setPen(QPen(QColor(ModernColors.TEXT_SECONDARY), 2.5))
+    font = p.font()
+    font.setPixelSize(22)
+    font.setBold(True)
+    p.setFont(font)
+    p.drawText(QRectF(0, 0, 40, 40), Qt.AlignCenter, "T")
+
+    # Frame/Focus brackets
+    p.setPen(QPen(QColor(ModernColors.PRIMARY), 2))
+    m = 6
+    s = 34
+    l = 6
+    # Top Left
+    p.drawPolyline([QPointF(m, m+l), QPointF(m, m), QPointF(m+l, m)])
+    # Bottom Right
+    p.drawPolyline([QPointF(s, s-l), QPointF(s, s), QPointF(s-l, s)])
+
+    p.end()
+    return QIcon(pm)
+
+def make_icon_copy() -> QIcon:
+    pm = _base_pixmap()
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+
+    p.setPen(QPen(QColor(ModernColors.TEXT_SECONDARY), 2))
+    p.setBrush(QColor(ModernColors.SURFACE))
+
+    # Back paper
+    p.drawRoundedRect(QRectF(12, 6, 20, 24), 2, 2)
+
+    # Front paper
+    p.setBrush(QColor(ModernColors.SURFACE)) # Opaque
+    p.drawRoundedRect(QRectF(8, 10, 20, 24), 2, 2)
+
+    # Lines on front
+    p.setPen(QPen(QColor(ModernColors.PRIMARY), 1.5))
+    p.drawLine(12, 16, 24, 16)
+    p.drawLine(12, 20, 24, 20)
+    p.drawLine(12, 24, 20, 24)
+
+    p.end()
+    return QIcon(pm)
+
+def make_icon_save() -> QIcon:
+    pm = _base_pixmap()
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+
+    p.setPen(QPen(QColor(ModernColors.TEXT_SECONDARY), 2))
+    p.setBrush(Qt.NoBrush)
+
+    # Floppy shape
+    path = QPainterPath()
+    path.addRoundedRect(QRectF(6, 6, 28, 28), 3, 3)
+    p.drawPath(path)
+
+    # Top metal part
+    p.setBrush(QColor(ModernColors.PRIMARY))
+    p.setPen(Qt.NoPen)
+    p.drawRect(10, 6, 20, 10)
+
+    # Shutter hole
+    p.setBrush(QColor(ModernColors.SURFACE))
+    p.drawRect(14, 6, 6, 6)
+
+    p.end()
+    return QIcon(pm)
+
+def make_icon_undo() -> QIcon:
+    pm = _base_pixmap()
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+
+    p.setPen(QPen(QColor(ModernColors.TEXT_SECONDARY), 2.5, Qt.SolidLine, Qt.RoundCap))
+
+    path = QPainterPath()
+    # Start Right-Middle
+    path.moveTo(30, 22)
+    # Curve Up and Left
+    path.cubicTo(30, 8, 10, 8, 10, 22)
+
+    p.drawPath(path)
+
+    # Arrow head
+    head = QPainterPath()
+    head.moveTo(10, 22)
+    head.lineTo(6, 16)
+    head.lineTo(14, 16)
+    head.closeSubpath()
+
+    p.setBrush(QColor(ModernColors.TEXT_SECONDARY))
+    p.setPen(Qt.NoPen)
+    p.drawPath(head)
+
+    p.end()
+    return QIcon(pm)
+
+def make_icon_redo() -> QIcon:
+    pm = _base_pixmap()
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+
+    p.setPen(QPen(QColor(ModernColors.TEXT_SECONDARY), 2.5, Qt.SolidLine, Qt.RoundCap))
+
+    path = QPainterPath()
+    # Start Left-Middle
+    path.moveTo(10, 22)
+    # Curve Up and Right
+    path.cubicTo(10, 8, 30, 8, 30, 22)
+
+    p.drawPath(path)
+
+    # Arrow head
+    head = QPainterPath()
+    head.moveTo(30, 22)
+    head.lineTo(26, 16)
+    head.lineTo(34, 16)
+    head.closeSubpath()
+
+    p.setBrush(QColor(ModernColors.TEXT_SECONDARY))
+    p.setPen(Qt.NoPen)
+    p.drawPath(head)
+
+    p.end()
+    return QIcon(pm)
+
+
 def create_pencil_cursor() -> QCursor:
     pm = QPixmap(24, 24)
     pm.fill(Qt.transparent)

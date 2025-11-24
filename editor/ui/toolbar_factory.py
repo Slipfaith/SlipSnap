@@ -8,7 +8,8 @@ from logic import save_config
 
 from design_tokens import Metrics
 
-from icons import make_icon_ocr_scan, make_icon_text_mode, make_icon_series
+# Removed old imports from icons.py as we are using icon_factory now for consistent style
+# from icons import make_icon_ocr_scan, make_icon_text_mode, make_icon_series
 
 from .styles import ModernColors
 from .color_widgets import ColorButton
@@ -25,6 +26,16 @@ from .icon_factory import (
     make_icon_eraser,
     make_icon_select,
     make_icon_memes,
+    # New icons for top toolbar
+    make_icon_new,
+    make_icon_series,
+    make_icon_collage,
+    make_icon_ocr,
+    make_icon_text_mode_action,
+    make_icon_copy,
+    make_icon_save,
+    make_icon_undo,
+    make_icon_redo
 )
 
 
@@ -451,45 +462,52 @@ def create_actions_toolbar(window, canvas):
     tb.addWidget(zoom_label)
     tb.addSeparator()
 
-    add_action("new", "Новый снимок", window.new_screenshot, sc="Ctrl+N", icon_text="📸", show_text=False)
+    add_action("new", "Новый снимок", window.new_screenshot, sc="Ctrl+N", icon=make_icon_new(), show_text=False)
     if hasattr(window, "request_series_capture"):
-        add_action("series", "Серия скриншотов", window.request_series_capture, icon_text="🎞", show_text=False)
-    add_action("collage", "История", window.open_collage, sc="Ctrl+K", icon_text="🖼", show_text=False)
+        add_action("series", "Серия скриншотов", window.request_series_capture, icon=make_icon_series(), show_text=False)
+    add_action("collage", "История", window.open_collage, sc="Ctrl+K", icon=make_icon_collage(), show_text=False)
     add_action(
         "ocr",
         "Распознать текст",
         window.rerun_ocr_with_language,
         sc="Ctrl+Shift+O",
-        icon_text="OCR",
+        icon=make_icon_ocr(),
         show_text=False,
-        icon=make_icon_ocr_scan(),
     )
     add_action(
         "ocr_text",
         "Режим текста",
         window.toggle_ocr_text_mode,
         checkable=True,
-        icon_text="🔡",
+        icon=make_icon_text_mode_action(),
         show_text=False,
-        icon=make_icon_text_mode(),
     )
-    add_action("copy", "Копировать", window.copy_to_clipboard, sc="Ctrl+C", icon_text="📋", show_text=False)
-    add_action("save", "Сохранить", window.save_image, sc="Ctrl+S", icon_text="💾", show_text=False)
+    add_action("copy", "Копировать", window.copy_to_clipboard, sc="Ctrl+C", icon=make_icon_copy(), show_text=False)
+    add_action("save", "Сохранить", window.save_image, sc="Ctrl+S", icon=make_icon_save(), show_text=False)
 
     undo_act = canvas.undo_stack.createUndoAction(window, "Отмена")
     undo_act.setShortcut(QKeySequence("Ctrl+Z"))
     undo_act.setShortcutContext(Qt.ApplicationShortcut)
     redo_act = canvas.undo_stack.createRedoAction(window, "Повтор")
-    redo_act.setShortcut(QKeySequence("Ctrl+X"))
+    redo_act.setShortcut(QKeySequence("Ctrl+Shift+Z"))
     redo_act.setShortcutContext(Qt.ApplicationShortcut)
     window.addAction(undo_act)
     window.addAction(redo_act)
-    for act, text in ((undo_act, "↶"), (redo_act, "↷")):
-        btn = QToolButton()
-        btn.setDefaultAction(act)
-        btn.setText(text)
-        btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
-        tb.addWidget(btn)
+
+    # Updated Undo/Redo buttons using icons
+    btn_undo = QToolButton()
+    btn_undo.setDefaultAction(undo_act)
+    btn_undo.setIcon(make_icon_undo())
+    btn_undo.setToolTip("Отменить (Ctrl+Z)")
+    btn_undo.setToolButtonStyle(Qt.ToolButtonIconOnly)
+    tb.addWidget(btn_undo)
+
+    btn_redo = QToolButton()
+    btn_redo.setDefaultAction(redo_act)
+    btn_redo.setIcon(make_icon_redo())
+    btn_redo.setToolTip("Повторить (Ctrl+Shift+Z)")
+    btn_redo.setToolButtonStyle(Qt.ToolButtonIconOnly)
+    tb.addWidget(btn_redo)
 
     # Контекстное меню для выбора формы скриншота
     def show_shape_menu(pos):
