@@ -1,11 +1,17 @@
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Optional, Set, Tuple
 
-from PySide6.QtCore import QEvent, QObject, QPointF, QRect, QRectF, Qt
-from PySide6.QtGui import QTextCursor, QTextOption
-from PySide6.QtWidgets import QGraphicsItem, QGraphicsScene, QPlainTextEdit
+from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, Qt
+from PySide6.QtGui import QColor, QFont
+from PySide6.QtWidgets import (
+    QGraphicsItem,
+    QGraphicsRectItem,
+    QGraphicsScene,
+    QGraphicsSimpleTextItem,
+)
 from PIL import Image
 
+from editor.ui.styles import ModernColors
 from ocr import OcrResult, OcrWord
 
 
@@ -15,6 +21,12 @@ class OcrCapture:
     scene_rect: QRectF
     pixel_size: Tuple[int, int]
     anchor_item: Optional[QGraphicsItem] = None
+
+
+@dataclass
+class _WordVisual:
+    background: QGraphicsRectItem
+    text_item: QGraphicsSimpleTextItem
 
 
 class OcrSelectionOverlay(QObject):
@@ -29,8 +41,12 @@ class OcrSelectionOverlay(QObject):
         self._anchor_local_rect: Optional[QRectF] = None
         self._capture_scene_rect: Optional[QRectF] = None
         self._active = False
-        self._text_widget: Optional[QPlainTextEdit] = None
-        self._selection_anchor: Optional[int] = None
+        self._word_visuals: List[Optional[_WordVisual]] = []
+        self._normalized_word_rects: List[Optional[QRectF]] = []
+        self._scene_word_rects: List[Optional[QRectF]] = []
+        self._selected_indexes: Set[int] = set()
+        self._selection_anchor: Optional[QPointF] = None
+        self._full_text: str = ""
 
         self.canvas.viewport().installEventFilter(self)
         self.canvas.horizontalScrollBar().valueChanged.connect(self._update_geometry)
@@ -43,10 +59,14 @@ class OcrSelectionOverlay(QObject):
         self._anchor_local_rect = None
         self._capture_scene_rect = None
         self._selection_anchor = None
-        if self._text_widget:
-            self._text_widget.hide()
-            self._text_widget.deleteLater()
-        self._text_widget = None
+        self._selected_indexes = set()
+        self._full_text = ""
+        for visual in self._word_visuals:
+            if visual and visual.background.scene() is self.scene:
+                self.scene.removeItem(visual.background)
+        self._word_visuals = []
+        self._normalized_word_rects = []
+        self._scene_word_rects = []
 
     def apply_result(self, result: OcrResult, capture: OcrCapture) -> None:
         self.clear()
@@ -74,66 +94,68 @@ class OcrSelectionOverlay(QObject):
             ordered_lines = [" ".join(parts) for _, parts in sorted(lines.items())]
             text = "\n".join(ordered_lines)
 
-        widget_rect = self._map_scene_rect_to_view(rect)
-        if widget_rect.width() <= 0 or widget_rect.height() <= 0:
-            return
-
-        self._text_widget = self._create_text_widget()
-        self._text_widget.setPlainText(text)
-        self._text_widget.setGeometry(widget_rect)
-        self._text_widget.setVisible(self._active)
+        self._full_text = text
+        self._normalized_word_rects = self._compute_normalized_rects(capture.pixel_size)
+        self._create_word_items()
+        self._update_geometry()
 
     def set_active(self, active: bool) -> None:
         self._active = active
-        if self._text_widget:
-            self._text_widget.setVisible(active)
+        for visual in self._word_visuals:
+            if visual:
+                visual.background.setVisible(active)
         if not active:
             self._selection_anchor = None
+            self._selected_indexes = set()
+            self._update_selection_visuals()
 
     def has_selection(self) -> bool:
-        if self._text_widget is None:
-            return False
-        cursor = self._text_widget.textCursor()
-        return cursor.hasSelection()
+        return bool(self._selected_indexes)
 
     def has_words(self) -> bool:
         return bool(self.words)
 
     def start_selection(self, scene_pos: QPointF) -> None:
-        if self._text_widget is None:
+        if not self.words:
             return
-        widget_pos = self._text_widget.mapFromParent(self.canvas.mapFromScene(scene_pos))
-        if not self._text_widget.rect().contains(widget_pos):
-            return
-        cursor = self._text_widget.cursorForPosition(widget_pos)
-        self._selection_anchor = cursor.position()
-        cursor.setPosition(self._selection_anchor)
-        self._text_widget.setTextCursor(cursor)
-        self._text_widget.setFocus(Qt.MouseFocusReason)
+        self._selection_anchor = scene_pos
+        self._selected_indexes = set()
+        self._update_selection_for_rect(QRectF(scene_pos, scene_pos))
 
     def update_drag(self, scene_pos: QPointF) -> None:
-        if self._selection_anchor is None or self._text_widget is None:
+        if self._selection_anchor is None:
             return
-        widget_pos = self._text_widget.mapFromParent(self.canvas.mapFromScene(scene_pos))
-        if not self._text_widget.rect().contains(widget_pos):
-            return
-        cursor = self._text_widget.cursorForPosition(widget_pos)
-        selection = QTextCursor(self._text_widget.document())
-        selection.setPosition(self._selection_anchor)
-        selection.setPosition(cursor.position(), QTextCursor.KeepAnchor)
-        self._text_widget.setTextCursor(selection)
+        selection_rect = QRectF(self._selection_anchor, scene_pos).normalized()
+        self._update_selection_for_rect(selection_rect)
 
     def selected_text(self) -> str:
-        if self._text_widget is None:
+        if not self._selected_indexes:
             return ""
-        cursor = self._text_widget.textCursor()
-        if not cursor.hasSelection():
-            return ""
-        return cursor.selectedText().replace("\u2029", "\n")
+        entries = []
+        for idx, word in enumerate(self.words):
+            if idx not in self._selected_indexes:
+                continue
+            rect = self._scene_word_rects[idx] if idx < len(self._scene_word_rects) else None
+            entries.append((word.line_id, rect.top() if rect else 0.0, rect.left() if rect else 0.0, word.text))
+
+        entries.sort(key=lambda item: (item[0], item[1], item[2]))
+
+        lines: List[List[str]] = []
+        current_line = None
+        for line_id, _, _, text in entries:
+            if current_line is None:
+                current_line = line_id
+                lines.append([text])
+            elif line_id == current_line:
+                lines[-1].append(text)
+            else:
+                current_line = line_id
+                lines.append([text])
+        return "\n".join(" ".join(parts) for parts in lines)
 
     def full_text(self) -> str:
-        if self._text_widget is not None:
-            return self._text_widget.toPlainText()
+        if self._full_text:
+            return self._full_text
         return " ".join(word.text for word in self.words)
 
     def eventFilter(self, obj, event):  # noqa: D401
@@ -146,38 +168,6 @@ class OcrSelectionOverlay(QObject):
             self._update_geometry()
         return super().eventFilter(obj, event)
 
-    def _create_text_widget(self) -> QPlainTextEdit:
-        if self._text_widget:
-            self._text_widget.deleteLater()
-        widget = QPlainTextEdit(self.canvas.viewport())
-        widget.setReadOnly(True)
-        widget.setFrameStyle(0)
-        widget.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        widget.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        widget.setWordWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
-        widget.viewport().setAutoFillBackground(False)
-        widget.setStyleSheet(
-            "background: rgba(255, 255, 255, 0.85);"
-            "border: 1px solid rgba(0, 0, 0, 0.08);"
-            "border-radius: 8px;"
-            "padding: 8px;"
-        )
-        widget.setFocusPolicy(Qt.ClickFocus)
-        widget.setAttribute(Qt.WA_TransparentForMouseEvents, False)
-        self._text_widget = widget
-        return widget
-
-    def _map_scene_rect_to_view(self, rect: QRectF) -> QRect:
-        top_left = self.canvas.mapFromScene(rect.topLeft())
-        bottom_right = self.canvas.mapFromScene(rect.bottomRight())
-        left = int(min(top_left.x(), bottom_right.x()))
-        right = int(max(top_left.x(), bottom_right.x()))
-        top = int(min(top_left.y(), bottom_right.y()))
-        bottom = int(max(top_left.y(), bottom_right.y()))
-        width = max(1, right - left)
-        height = max(1, bottom - top)
-        return QRect(left, top, width, height)
-
     def _current_scene_rect(self) -> Optional[QRectF]:
         if self._capture_scene_rect is None:
             return None
@@ -186,14 +176,123 @@ class OcrSelectionOverlay(QObject):
         return self._capture_scene_rect
 
     def _update_geometry(self) -> None:
-        if self._text_widget is None:
-            return
         rect = self._current_scene_rect()
         if rect is None:
             return
-        widget_rect = self._map_scene_rect_to_view(rect)
-        if widget_rect.width() <= 0 or widget_rect.height() <= 0:
-            self._text_widget.hide()
+        self._scene_word_rects = self._map_normalized_to_scene(rect)
+        self._update_word_visual_geometry()
+        self._update_selection_visuals()
+
+    def _compute_normalized_rects(self, pixel_size: Tuple[int, int]) -> List[Optional[QRectF]]:
+        px_w, px_h = pixel_size
+        if px_w <= 0 or px_h <= 0:
+            return [None for _ in self.words]
+        rects: List[Optional[QRectF]] = []
+        for word in self.words:
+            try:
+                x, y, w, h = word.bbox
+                rect = QRectF(x / px_w, y / px_h, w / px_w, h / px_h)
+                rects.append(rect)
+            except Exception:
+                rects.append(None)
+        return rects
+
+    def _map_normalized_to_scene(self, scene_rect: QRectF) -> List[Optional[QRectF]]:
+        mapped: List[Optional[QRectF]] = []
+        for rect in self._normalized_word_rects:
+            if rect is None:
+                mapped.append(None)
+                continue
+            mapped.append(
+                QRectF(
+                    scene_rect.left() + rect.left() * scene_rect.width(),
+                    scene_rect.top() + rect.top() * scene_rect.height(),
+                    rect.width() * scene_rect.width(),
+                    rect.height() * scene_rect.height(),
+                )
+            )
+        return mapped
+
+    def _create_word_items(self) -> None:
+        self._word_visuals = []
+        for word in self.words:
+            background = QGraphicsRectItem()
+            background.setZValue(9999)
+            background.setAcceptedMouseButtons(Qt.NoButton)
+            background.setBrush(QColor(255, 255, 255, 230))
+            background.setPen(Qt.NoPen)
+
+            text_item = QGraphicsSimpleTextItem(word.text, background)
+            text_item.setBrush(QColor(ModernColors.TEXT_PRIMARY))
+            text_item.setPen(Qt.NoPen)
+            text_item.setAcceptedMouseButtons(Qt.NoButton)
+
+            self.scene.addItem(background)
+            self._word_visuals.append(_WordVisual(background=background, text_item=text_item))
+
+    def _update_word_visual_geometry(self) -> None:
+        if not self._word_visuals:
             return
-        self._text_widget.setGeometry(widget_rect)
-        self._text_widget.setVisible(self._active)
+        for idx, visual in enumerate(self._word_visuals):
+            rect = self._scene_word_rects[idx] if idx < len(self._scene_word_rects) else None
+            if rect is None:
+                if visual:
+                    visual.background.setVisible(False)
+                continue
+
+            padding = max(1.0, rect.height() * 0.18)
+            target_height = max(6.0, rect.height() * 0.68)
+            if visual is None:
+                continue
+            font = QFont()
+            font.setPointSizeF(target_height)
+            visual.text_item.setFont(font)
+            text_rect = visual.text_item.boundingRect()
+
+            available_width = max(1.0, rect.width() - 2 * padding)
+            if text_rect.width() > available_width and text_rect.width() > 0:
+                scale = available_width / text_rect.width()
+                font.setPointSizeF(max(6.0, font.pointSizeF() * scale))
+                visual.text_item.setFont(font)
+                text_rect = visual.text_item.boundingRect()
+
+            bg_width = max(rect.width(), text_rect.width() + 2 * padding)
+            bg_height = max(rect.height(), text_rect.height() + 2 * padding)
+            visual.background.setRect(0, 0, bg_width, bg_height)
+            visual.background.setPos(rect.left(), rect.top())
+            visual.background.setVisible(self._active)
+
+            text_y = max(padding, (bg_height - text_rect.height()) / 2)
+            visual.text_item.setPos(padding, text_y)
+
+    def _update_selection_for_rect(self, selection_rect: QRectF) -> None:
+        if not self._scene_word_rects:
+            return
+        selected = set()
+        for idx, rect in enumerate(self._scene_word_rects):
+            if rect is None:
+                continue
+            if selection_rect.isNull():
+                if rect.contains(selection_rect.topLeft()):
+                    selected.add(idx)
+                continue
+            if selection_rect.intersects(rect):
+                selected.add(idx)
+        self._selected_indexes = selected
+        self._update_selection_visuals()
+
+    def _update_selection_visuals(self) -> None:
+        if not self._word_visuals:
+            return
+        selected_bg = QColor(ModernColors.PRIMARY_LIGHT)
+        selected_fg = QColor(ModernColors.PRIMARY)
+        base_bg = QColor(255, 255, 255, 230)
+        base_fg = QColor(ModernColors.TEXT_PRIMARY)
+
+        for idx, visual in enumerate(self._word_visuals):
+            if visual is None:
+                continue
+            is_selected = idx in self._selected_indexes
+            visual.background.setBrush(selected_bg if is_selected else base_bg)
+            visual.text_item.setBrush(selected_fg if is_selected else base_fg)
+            visual.background.setVisible(self._active)
