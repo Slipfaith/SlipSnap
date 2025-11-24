@@ -175,11 +175,19 @@ class OcrSelectionOverlay(QObject):
             return self._anchor_item.mapRectToScene(self._anchor_local_rect)
         return self._capture_scene_rect
 
+    def _mapping_basis(self) -> Optional[Tuple[QRectF, bool]]:
+        if self._anchor_item and self._anchor_item.scene() == self.scene and self._anchor_local_rect is not None:
+            return self._anchor_local_rect, True
+        if self._capture_scene_rect is not None:
+            return self._capture_scene_rect, False
+        return None
+
     def _update_geometry(self) -> None:
-        rect = self._current_scene_rect()
-        if rect is None:
+        mapping = self._mapping_basis()
+        if mapping is None:
             return
-        self._scene_word_rects = self._map_normalized_to_scene(rect)
+        rect, is_local = mapping
+        self._scene_word_rects = self._map_normalized_to_scene(rect, local=is_local)
         self._update_word_visual_geometry()
         self._update_selection_visuals()
 
@@ -197,20 +205,22 @@ class OcrSelectionOverlay(QObject):
                 rects.append(None)
         return rects
 
-    def _map_normalized_to_scene(self, scene_rect: QRectF) -> List[Optional[QRectF]]:
+    def _map_normalized_to_scene(self, scene_rect: QRectF, *, local: bool = False) -> List[Optional[QRectF]]:
         mapped: List[Optional[QRectF]] = []
         for rect in self._normalized_word_rects:
             if rect is None:
                 mapped.append(None)
                 continue
-            mapped.append(
-                QRectF(
-                    scene_rect.left() + rect.left() * scene_rect.width(),
-                    scene_rect.top() + rect.top() * scene_rect.height(),
-                    rect.width() * scene_rect.width(),
-                    rect.height() * scene_rect.height(),
-                )
+            local_rect = QRectF(
+                scene_rect.left() + rect.left() * scene_rect.width(),
+                scene_rect.top() + rect.top() * scene_rect.height(),
+                rect.width() * scene_rect.width(),
+                rect.height() * scene_rect.height(),
             )
+            if local and self._anchor_item is not None:
+                mapped.append(self._anchor_item.mapRectToScene(local_rect))
+            else:
+                mapped.append(local_rect)
         return mapped
 
     def _create_word_items(self) -> None:

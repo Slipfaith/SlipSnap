@@ -421,32 +421,6 @@ def make_icon_ocr() -> QIcon:
     p.end()
     return QIcon(pm)
 
-def make_icon_text_mode_action() -> QIcon:
-    pm = _base_pixmap()
-    p = QPainter(pm)
-    p.setRenderHint(QPainter.Antialiasing)
-
-    # Letter A or T
-    p.setPen(QPen(QColor(ModernColors.TEXT_SECONDARY), 2.5))
-    font = p.font()
-    font.setPixelSize(22)
-    font.setBold(True)
-    p.setFont(font)
-    p.drawText(QRectF(0, 0, 40, 40), Qt.AlignCenter, "T")
-
-    # Frame/Focus brackets
-    p.setPen(QPen(QColor(ModernColors.PRIMARY), 2))
-    m = 6
-    s = 34
-    l = 6
-    # Top Left
-    p.drawPolyline([QPointF(m, m+l), QPointF(m, m), QPointF(m+l, m)])
-    # Bottom Right
-    p.drawPolyline([QPointF(s, s-l), QPointF(s, s), QPointF(s-l, s)])
-
-    p.end()
-    return QIcon(pm)
-
 def make_icon_copy() -> QIcon:
     pm = _base_pixmap()
     p = QPainter(pm)
