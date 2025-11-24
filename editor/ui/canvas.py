@@ -204,6 +204,8 @@ class Canvas(QGraphicsView):
             self.viewport().setCursor(self._pencil_cursor)
         elif tool == "text":
             self.viewport().setCursor(Qt.IBeamCursor)
+        elif tool == "ocr":
+            self.viewport().setCursor(Qt.IBeamCursor)
         else:
             self.viewport().setCursor(Qt.ArrowCursor)
 

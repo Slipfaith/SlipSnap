@@ -29,7 +29,6 @@ class OcrSelectionOverlay:
         self.words: List[OcrWord] = []
         self._word_items: List[QGraphicsRectItem] = []
         self._handle_items: List[QGraphicsRectItem] = []
-        self._line_outline_item: Optional[QGraphicsRectItem] = None
         self._anchor_item: Optional[QGraphicsItem] = None
         self._active = False
         self._start_index: Optional[int] = None
@@ -42,9 +41,8 @@ class OcrSelectionOverlay:
         selection_color.setAlpha(80)
         self._selection_brush = selection_color
 
-        outline_color = QColor(*Palette.TEXT_TOOL_SELECTION)
-        outline_color.setAlpha(140)
-        self._outline_pen = QPen(outline_color, 0.8)
+        outline_color = QColor(0, 0, 0, 0)
+        self._outline_pen = QPen(outline_color, 0.0)
         self._outline_pen.setCosmetic(True)
 
     def clear(self) -> None:
@@ -52,11 +50,8 @@ class OcrSelectionOverlay:
             self.scene.removeItem(item)
         for item in self._handle_items:
             self.scene.removeItem(item)
-        if self._line_outline_item:
-            self.scene.removeItem(self._line_outline_item)
         self._word_items = []
         self._handle_items = []
-        self._line_outline_item = None
         self._single_line = False
         self.words = []
         self._start_index = None
@@ -120,28 +115,13 @@ class OcrSelectionOverlay:
             min_x = min(min_x, mapped.left())
             max_x = max(max_x, mapped.right())
 
-        if self._single_line and mapped_rects:
-            _, line_id = mapped_rects[0]
-            padded_top, padded_bottom = padded_extents.get(line_id, (0.0, 0.0))
-            line_rect = QRectF(
-                min_x,
-                round(base_pos.y() + padded_top * self._scale_y, 2),
-                max(1.0, max_x - min_x),
-                max(1.0, (padded_bottom - padded_top) * self._scale_y),
-            )
-            self._line_outline_item = QGraphicsRectItem(line_rect, parent)
-            self._line_outline_item.setPen(self._outline_pen)
-            self._line_outline_item.setBrush(QColor(0, 0, 0, 0))
-            self._line_outline_item.setZValue((self._anchor_item.zValue() + 0.1) if self._anchor_item else 20)
-            self._line_outline_item.setVisible(self._active)
-
         for idx, (mapped, line_id) in enumerate(mapped_rects):
             if self._single_line and idx < len(mapped_rects) - 1:
                 next_rect, _ = mapped_rects[idx + 1]
                 extended_width = max(mapped.width(), next_rect.left() - mapped.left())
                 mapped.setWidth(max(1.0, extended_width))
             item = QGraphicsRectItem(mapped, parent)
-            item.setPen(QPen(QColor(0, 0, 0, 0)) if self._single_line else self._outline_pen)
+            item.setPen(QPen(QColor(0, 0, 0, 0)))
             item.setBrush(QColor(0, 0, 0, 0))
             item.setZValue((self._anchor_item.zValue() + 0.1) if self._anchor_item else 20)
             item.setVisible(self._active)
@@ -153,8 +133,6 @@ class OcrSelectionOverlay:
             item.setVisible(active)
         for handle in self._handle_items:
             handle.setVisible(active)
-        if self._line_outline_item:
-            self._line_outline_item.setVisible(active)
         if not active:
             self._start_index = None
             self._end_index = None
