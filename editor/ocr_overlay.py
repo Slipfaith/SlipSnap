@@ -2,12 +2,13 @@ from dataclasses import dataclass
 from typing import List, Optional, Set, Tuple
 
 from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFont
+from PySide6.QtGui import QColor, QFont, QPen, QPainterPath
 from PySide6.QtWidgets import (
     QGraphicsItem,
     QGraphicsRectItem,
     QGraphicsScene,
     QGraphicsSimpleTextItem,
+    QGraphicsPathItem,
 )
 from PIL import Image
 
@@ -25,7 +26,7 @@ class OcrCapture:
 
 @dataclass
 class _WordVisual:
-    background: QGraphicsRectItem
+    background: QGraphicsPathItem  # Изменено на PathItem для скругленных углов
     text_item: QGraphicsSimpleTextItem
 
 
@@ -87,7 +88,6 @@ class OcrSelectionOverlay(QObject):
             return
 
         if not text and self.words:
-            # Fall back to text reconstruction from words
             lines = {}
             for word in self.words:
                 lines.setdefault(word.line_id, []).append(word.text)
@@ -117,7 +117,6 @@ class OcrSelectionOverlay(QObject):
 
     def select_all(self) -> None:
         """Select every recognized word to mirror Snipping Tool behavior."""
-
         if not self.words:
             self._selected_indexes = set()
             return
@@ -170,12 +169,12 @@ class OcrSelectionOverlay(QObject):
             return self._full_text
         return " ".join(word.text for word in self.words)
 
-    def eventFilter(self, obj, event):  # noqa: D401
+    def eventFilter(self, obj, event):
         """Keep the OCR overlay aligned with the viewport and scene changes."""
         if obj is self.canvas.viewport() and event.type() in (
-            QEvent.Resize,
-            QEvent.Paint,
-            QEvent.Wheel,
+                QEvent.Resize,
+                QEvent.Paint,
+                QEvent.Wheel,
         ):
             self._update_geometry()
         return super().eventFilter(obj, event)
@@ -238,11 +237,18 @@ class OcrSelectionOverlay(QObject):
     def _create_word_items(self) -> None:
         self._word_visuals = []
         for word in self.words:
-            background = QGraphicsRectItem()
+            # Используем QGraphicsPathItem для скругленных углов
+            background = QGraphicsPathItem()
             background.setZValue(9999)
             background.setAcceptedMouseButtons(Qt.NoButton)
-            background.setBrush(QColor(255, 255, 255, 230))
-            background.setPen(Qt.NoPen)
+
+            # Полупрозрачный белый фон с тенью
+            background.setBrush(QColor(255, 255, 255, 240))
+
+            # Тонкая рамка для четкости
+            pen = QPen(QColor(200, 200, 200, 100))
+            pen.setWidthF(0.5)
+            background.setPen(pen)
 
             text_item = QGraphicsSimpleTextItem(word.text, background)
             text_item.setBrush(QColor(ModernColors.TEXT_PRIMARY))
@@ -251,6 +257,12 @@ class OcrSelectionOverlay(QObject):
 
             self.scene.addItem(background)
             self._word_visuals.append(_WordVisual(background=background, text_item=text_item))
+
+    def _create_rounded_rect_path(self, rect: QRectF, radius: float) -> QPainterPath:
+        """Создает путь для прямоугольника со скругленными углами."""
+        path = QPainterPath()
+        path.addRoundedRect(rect, radius, radius)
+        return path
 
     def _update_word_visual_geometry(self) -> None:
         if not self._word_visuals:
@@ -262,30 +274,45 @@ class OcrSelectionOverlay(QObject):
                     visual.background.setVisible(False)
                 continue
 
-            padding = max(1.0, rect.height() * 0.18)
-            target_height = max(6.0, rect.height() * 0.68)
+            # Увеличенный padding для лучшего вида
+            padding = max(2.0, rect.height() * 0.22)
+            target_height = max(8.0, rect.height() * 0.65)
+
             if visual is None:
                 continue
+
+            # Более четкий шрифт
             font = QFont()
             font.setPointSizeF(target_height)
+            font.setWeight(QFont.Medium)  # Немного жирнее для читаемости
+            font.setHintingPreference(QFont.PreferFullHinting)
             visual.text_item.setFont(font)
             text_rect = visual.text_item.boundingRect()
 
             available_width = max(1.0, rect.width() - 2 * padding)
             if text_rect.width() > available_width and text_rect.width() > 0:
                 scale = available_width / text_rect.width()
-                font.setPointSizeF(max(6.0, font.pointSizeF() * scale))
+                font.setPointSizeF(max(7.0, font.pointSizeF() * scale))
                 visual.text_item.setFont(font)
                 text_rect = visual.text_item.boundingRect()
 
             bg_width = max(rect.width(), text_rect.width() + 2 * padding)
             bg_height = max(rect.height(), text_rect.height() + 2 * padding)
-            visual.background.setRect(0, 0, bg_width, bg_height)
+
+            # Скругленные углы (радиус = 15% от высоты)
+            radius = min(bg_height * 0.15, bg_width * 0.15, 4.0)
+            rounded_path = self._create_rounded_rect_path(
+                QRectF(0, 0, bg_width, bg_height),
+                radius
+            )
+            visual.background.setPath(rounded_path)
             visual.background.setPos(rect.left(), rect.top())
             visual.background.setVisible(self._active)
 
+            # Центрируем текст
+            text_x = max(padding, (bg_width - text_rect.width()) / 2)
             text_y = max(padding, (bg_height - text_rect.height()) / 2)
-            visual.text_item.setPos(padding, text_y)
+            visual.text_item.setPos(text_x, text_y)
 
     def _update_selection_for_rect(self, selection_rect: QRectF) -> None:
         if not self._scene_word_rects:
@@ -306,15 +333,32 @@ class OcrSelectionOverlay(QObject):
     def _update_selection_visuals(self) -> None:
         if not self._word_visuals:
             return
+
+        # Более яркие и современные цвета для выделения
         selected_bg = QColor(ModernColors.PRIMARY_LIGHT)
+        selected_bg.setAlpha(220)
         selected_fg = QColor(ModernColors.PRIMARY)
-        base_bg = QColor(255, 255, 255, 230)
+
+        # Улучшенные базовые цвета
+        base_bg = QColor(255, 255, 255, 240)
         base_fg = QColor(ModernColors.TEXT_PRIMARY)
 
         for idx, visual in enumerate(self._word_visuals):
             if visual is None:
                 continue
             is_selected = idx in self._selected_indexes
+
             visual.background.setBrush(selected_bg if is_selected else base_bg)
             visual.text_item.setBrush(selected_fg if is_selected else base_fg)
+
+            # Изменяем границу для выделенных элементов
+            if is_selected:
+                pen = QPen(QColor(ModernColors.PRIMARY))
+                pen.setWidthF(1.0)
+                visual.background.setPen(pen)
+            else:
+                pen = QPen(QColor(200, 200, 200, 100))
+                pen.setWidthF(0.5)
+                visual.background.setPen(pen)
+
             visual.background.setVisible(self._active)
