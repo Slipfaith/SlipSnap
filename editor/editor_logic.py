@@ -1,3 +1,4 @@
+from datetime import datetime
 from pathlib import Path
 
 from PIL import Image
@@ -26,10 +27,12 @@ class EditorLogic:
 
     def save_image(self, parent):
         img = self.export_image()
+        timestamp = datetime.now().strftime("%M:%S")
+        default_name = Path.home() / f"snap_{timestamp}.png"
         path, _ = QFileDialog.getSaveFileName(
             parent,
             "Сохранить изображение",
-            "",
+            str(default_name),
             "PNG (*.png);;JPEG (*.jpg);;Все файлы (*.*)",
         )
         if not path:
