@@ -78,13 +78,33 @@ class OcrSelectionOverlay:
         if self._anchor_item:
             base_pos = self._anchor_item.mapFromScene(base_pos)
 
+        line_extents = {}
+        for word in self.words:
+            _, y, _, h = word.bbox
+            top = float(y)
+            bottom = float(y + h)
+            if word.line_id not in line_extents:
+                line_extents[word.line_id] = [top, bottom]
+            else:
+                line_extents[word.line_id][0] = min(line_extents[word.line_id][0], top)
+                line_extents[word.line_id][1] = max(line_extents[word.line_id][1], bottom)
+
+        padded_extents = {}
+        for line_id, (top, bottom) in line_extents.items():
+            height = max(1.0, bottom - top)
+            padding = max(1.0, height * 0.08)
+            padded_top = max(0.0, top - padding)
+            padded_bottom = min(float(px_h), bottom + padding)
+            padded_extents[line_id] = (padded_top, padded_bottom)
+
         for word in self.words:
             x, y, w, h = word.bbox
+            line_top, line_bottom = padded_extents.get(word.line_id, (y, y + h))
             mapped = QRectF(
-                base_pos.x() + x * self._scale_x,
-                base_pos.y() + y * self._scale_y,
+                round(base_pos.x() + x * self._scale_x, 2),
+                round(base_pos.y() + line_top * self._scale_y, 2),
                 max(1.0, w * self._scale_x),
-                max(1.0, h * self._scale_y),
+                max(1.0, (line_bottom - line_top) * self._scale_y),
             )
             item = QGraphicsRectItem(mapped, parent)
             item.setPen(self._outline_pen)
