@@ -115,6 +115,18 @@ class OcrSelectionOverlay(QObject):
     def has_words(self) -> bool:
         return bool(self.words)
 
+    def select_all(self) -> None:
+        """Select every recognized word to mirror Snipping Tool behavior."""
+
+        if not self.words:
+            self._selected_indexes = set()
+            return
+
+        self._selected_indexes = {
+            idx for idx, rect in enumerate(self._scene_word_rects) if rect is not None
+        }
+        self._update_selection_visuals()
+
     def start_selection(self, scene_pos: QPointF) -> None:
         if not self.words:
             return

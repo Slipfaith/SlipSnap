@@ -590,7 +590,10 @@ class EditorWindow(QMainWindow):
         layout.setContentsMargins(14, 8, 14, 8)
         layout.setSpacing(10)
 
-        headline = QLabel("Текст распознан. Выделите нужный фрагмент текста на холсте и нажмите Ctrl+C.", toast)
+        headline = QLabel(
+            "Текст распознан и выделен. Используйте Ctrl+C, чтобы сразу скопировать, или перетащите курсором для другой выборки.",
+            toast,
+        )
         layout.addWidget(headline)
 
         meta_parts = []
@@ -651,6 +654,9 @@ class EditorWindow(QMainWindow):
             self.canvas.ocr_overlay.apply_result(result, self._last_ocr_capture)
 
         self._activate_ocr_text_mode()
+        if self.canvas.ocr_overlay and self.canvas.ocr_overlay.has_words():
+            self.canvas.ocr_overlay.select_all()
+        self.canvas.setFocus(Qt.OtherFocusReason)
         self._show_ocr_toast(result)
 
     def _insert_ocr_text(self, text: str) -> None:
