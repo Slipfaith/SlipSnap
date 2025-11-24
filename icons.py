@@ -62,6 +62,37 @@ def make_icon_add(size: int = Metrics.ICON_SMALL) -> QIcon:
     p.end()
     return QIcon(pm)
 
+def make_icon_ocr_scan(size: int = Metrics.ICON_SMALL) -> QIcon:
+    """Сканер текста — «Распознать текст»"""
+    pm = _pm(size)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+    stroke = QPen(QColor(*Palette.ICON_NEUTRAL), 2)
+    p.setPen(stroke)
+    m = Metrics.ICON_MARGIN_SMALL
+    rect_size = size - 2 * m
+    p.drawRoundedRect(m, m, rect_size, rect_size, 4, 4)
+    p.drawLine(m + 3, m + 5, m + 3, m + rect_size - 5)
+    p.drawLine(size - m - 3, m + 5, size - m - 3, m + rect_size - 5)
+    p.setPen(QPen(QColor(*Palette.ICON_POSITIVE), 2))
+    p.drawText(pm.rect(), Qt.AlignCenter, "OCR")
+    p.end()
+    return QIcon(pm)
+
+def make_icon_text_mode(size: int = Metrics.ICON_SMALL) -> QIcon:
+    """Буква «T» — «Режим текста»"""
+    pm = _pm(size)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+    p.setPen(QPen(QColor(*Palette.ICON_NEUTRAL), 2))
+    margin = Metrics.ICON_MARGIN_SMALL
+    p.drawLine(margin, margin + 2, size - margin, margin + 2)
+    p.drawLine(size // 2, margin + 2, size // 2, size - margin - 3)
+    p.setPen(QPen(QColor(*Palette.ICON_POSITIVE), 2))
+    p.drawLine(margin + 3, size - margin - 3, size - margin - 3, size - margin - 3)
+    p.end()
+    return QIcon(pm)
+
 def make_icon_collage(size: int = Metrics.ICON_SMALL) -> QIcon:
     """Сетка 2×2 — «Коллаж»"""
     pm = _pm(size)

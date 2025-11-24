@@ -8,6 +8,8 @@ from logic import save_config
 
 from design_tokens import Metrics
 
+from icons import make_icon_ocr_scan, make_icon_text_mode, make_icon_series
+
 from .styles import ModernColors
 from .color_widgets import ColorButton
 from .icon_factory import (
@@ -402,9 +404,11 @@ def create_actions_toolbar(window, canvas):
     actions: Dict[str, QAction] = {}
     buttons: Dict[str, QToolButton] = {}
 
-    def add_action(key, text, fn, checkable=False, sc=None, icon_text="", show_text=False):
+    def add_action(key, text, fn, checkable=False, sc=None, icon_text="", show_text=False, icon=None):
         a = QAction(text, window)
         a.setCheckable(checkable)
+        if icon is not None:
+            a.setIcon(icon)
         if sc:
             a.setShortcut(QKeySequence(sc))
         window.addAction(a)
@@ -412,12 +416,17 @@ def create_actions_toolbar(window, canvas):
         a.triggered.connect(fn if checkable else (lambda _checked=False: fn()))
         btn = QToolButton()
         btn.setDefaultAction(a)
-        if show_text:
+        style = Qt.ToolButtonTextOnly
+        if icon is not None and not show_text:
+            style = Qt.ToolButtonIconOnly
+            if icon_text:
+                btn.setText(icon_text)
+        elif show_text:
             btn.setText(f"{icon_text} {text}" if icon_text and text else (text or icon_text))
         else:
             btn.setText(icon_text)
         btn.setToolTip(text + (f" ({sc})" if sc else ""))
-        btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        btn.setToolButtonStyle(style)
         tb.addWidget(btn)
         actions[key] = a
         buttons[key] = btn
@@ -446,8 +455,24 @@ def create_actions_toolbar(window, canvas):
     if hasattr(window, "request_series_capture"):
         add_action("series", "Серия скриншотов", window.request_series_capture, icon_text="🎞", show_text=False)
     add_action("collage", "История", window.open_collage, sc="Ctrl+K", icon_text="🖼", show_text=False)
-    add_action("ocr", "Распознать текст", window.rerun_ocr_with_language, sc="Ctrl+Shift+O", icon_text="OCR", show_text=False)
-    add_action("ocr_text", "Режим текста", window.toggle_ocr_text_mode, checkable=True, icon_text="🔡", show_text=False)
+    add_action(
+        "ocr",
+        "Распознать текст",
+        window.rerun_ocr_with_language,
+        sc="Ctrl+Shift+O",
+        icon_text="OCR",
+        show_text=False,
+        icon=make_icon_ocr_scan(),
+    )
+    add_action(
+        "ocr_text",
+        "Режим текста",
+        window.toggle_ocr_text_mode,
+        checkable=True,
+        icon_text="🔡",
+        show_text=False,
+        icon=make_icon_text_mode(),
+    )
     add_action("copy", "Копировать", window.copy_to_clipboard, sc="Ctrl+C", icon_text="📋", show_text=False)
     add_action("save", "Сохранить", window.save_image, sc="Ctrl+S", icon_text="💾", show_text=False)
 
