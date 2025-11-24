@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 
 from logic import APP_NAME, APP_VERSION, qimage_to_pil, save_history, save_config
 from editor.text_tools import TextManager
+from editor.ocr_overlay import OcrCapture
 from editor.editor_logic import EditorLogic
 from editor.image_utils import images_from_mime
 from ocr import OcrError, OcrResult, OcrSettings, run_ocr, get_available_languages
@@ -50,10 +51,13 @@ class EditorWindow(QMainWindow):
         self.canvas.set_text_manager(self.text_manager)
         self.logic = EditorLogic(self.canvas)
         self.ocr_settings = OcrSettings.from_config(self.cfg)
+        self._last_ocr_capture: Optional[OcrCapture] = None
+        self._prev_tool_before_ocr = "select"
 
         self.setCentralWidget(self.canvas)
         self._apply_modern_stylesheet()
         self.canvas.imageDropped.connect(self._insert_screenshot_item)
+        self.canvas.toolChanged.connect(self._sync_ocr_mode_toggle)
 
         self._start_series_handler: Optional[Callable[[Optional[QWidget]], bool]] = None
         self._series_state_getter: Optional[Callable[[], bool]] = None
@@ -64,6 +68,9 @@ class EditorWindow(QMainWindow):
         self.color_btn, actions, action_buttons = create_actions_toolbar(self, self.canvas)
         self._series_action = actions.get("series")
         self._series_button = action_buttons.get("series")
+        self._ocr_text_action = actions.get("ocr_text")
+        if self._ocr_text_action is not None:
+            self._ocr_text_action.setEnabled(False)
         if self._series_action is not None:
             self._series_action.setIcon(make_icon_series())
         if self._series_button is not None:
@@ -178,6 +185,20 @@ class EditorWindow(QMainWindow):
         msg.setStandardButtons(QMessageBox.Ok)
         msg.exec()
 
+    def toggle_ocr_text_mode(self, active: bool):
+        if active:
+            self._prev_tool_before_ocr = getattr(self.canvas, "_tool", "select")
+            self.canvas.set_tool("ocr")
+        else:
+            self.canvas.set_tool(getattr(self, "_prev_tool_before_ocr", "select"))
+
+    def _sync_ocr_mode_toggle(self, tool: str) -> None:
+        if self._ocr_text_action is None:
+            return
+        self._ocr_text_action.blockSignals(True)
+        self._ocr_text_action.setChecked(tool == "ocr")
+        self._ocr_text_action.blockSignals(False)
+
     # ---- actions ----
     def choose_color(self):
         selected_items = list(self.canvas.scene.selectedItems())
@@ -192,6 +213,14 @@ class EditorWindow(QMainWindow):
                 self.text_manager.apply_color_to_selected(selected_items, focus_item)
 
     def copy_to_clipboard(self):
+        ocr_text = ""
+        if self._ocr_text_action and self._ocr_text_action.isChecked():
+            ocr_text = self.canvas.selected_ocr_text().strip()
+        if ocr_text:
+            QApplication.clipboard().setText(ocr_text)
+            self.statusBar().showMessage("✓ Текст OCR скопирован", 2000)
+            return
+
         result = self.logic.copy_to_clipboard()
         if result == "selection":
             message = "✓ Фрагмент скриншота скопирован"
@@ -212,11 +241,13 @@ class EditorWindow(QMainWindow):
             pass
 
     # ---- OCR ----
-    def _current_ocr_image(self) -> Optional[Image.Image]:
+    def _current_ocr_capture(self) -> Optional[OcrCapture]:
         try:
-            return self.canvas.export_selection()
+            capture = self.canvas.current_ocr_capture()
         except Exception:
             return None
+        self._last_ocr_capture = capture
+        return capture
 
     def _prompt_ocr_language(self) -> Optional[str]:
         try:
@@ -262,6 +293,11 @@ class EditorWindow(QMainWindow):
             QMessageBox.information(self, "SlipSnap · OCR", "Текст не найден на изображении.")
             return
 
+        if self._last_ocr_capture and self.canvas.ocr_overlay:
+            self.canvas.ocr_overlay.apply_result(result, self._last_ocr_capture)
+            if self._ocr_text_action is not None:
+                self._ocr_text_action.setEnabled(bool(result.words))
+
         msg = QMessageBox(self)
         msg.setWindowTitle("SlipSnap · OCR")
         msg.setIcon(QMessageBox.Information)
@@ -288,8 +324,8 @@ class EditorWindow(QMainWindow):
             self.canvas.update_scene_rect()
 
     def rerun_ocr_with_language(self):
-        img = self._current_ocr_image()
-        if img is None:
+        capture = self._current_ocr_capture()
+        if capture is None:
             QMessageBox.warning(self, "SlipSnap · OCR", "Нет изображения для распознавания.")
             return
 
@@ -298,7 +334,7 @@ class EditorWindow(QMainWindow):
             return
 
         try:
-            result = run_ocr(img, self.ocr_settings, language_hint=lang_choice)
+            result = run_ocr(capture.image, self.ocr_settings, language_hint=lang_choice)
         except OcrError as e:
             QMessageBox.warning(self, "SlipSnap · OCR", str(e))
             return

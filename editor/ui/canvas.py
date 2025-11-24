@@ -1,4 +1,4 @@
-from typing import Optional, Dict
+from typing import Optional, Dict, Tuple
 import math
 
 from PySide6.QtCore import Qt, QPointF, QRectF, Signal, QMarginsF
@@ -12,12 +12,14 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QFrame,
 )
+from PIL import Image
 
 from .styles import ModernColors
 from .high_quality_pixmap_item import HighQualityPixmapItem
 from .icon_factory import create_pencil_cursor, create_select_cursor
 from logic import qimage_to_pil
 from editor.text_tools import TextManager
+from editor.ocr_overlay import OcrSelectionOverlay, OcrCapture
 from editor.tools.selection_tool import SelectionTool
 from editor.tools.pencil_tool import PencilTool
 from editor.tools.shape_tools import RectangleTool, EllipseTool
@@ -39,6 +41,7 @@ class Canvas(QGraphicsView):
     """Drawing canvas holding the image and drawn items."""
 
     imageDropped = Signal(QImage)
+    toolChanged = Signal(str)
 
     def __init__(self, image: QImage):
         super().__init__()
@@ -88,6 +91,7 @@ class Canvas(QGraphicsView):
         self._move_snapshot: Dict[QGraphicsItem, QPointF] = {}
         self._text_manager: Optional[TextManager] = None
         self._zoom = 1.0
+        self.ocr_overlay = OcrSelectionOverlay(self)
 
         self.tools = {
             "select": SelectionTool(self),
@@ -148,6 +152,7 @@ class Canvas(QGraphicsView):
     def set_base_image(self, image: QImage):
         """Replace the main screenshot and clear existing items."""
         self.scene.clear()
+        self.ocr_overlay.clear()
         self.pixmap_item = HighQualityPixmapItem(image)
         self.pixmap_item.setFlag(QGraphicsItem.ItemIsMovable, True)
         self.pixmap_item.setFlag(QGraphicsItem.ItemIsSelectable, True)
@@ -202,6 +207,10 @@ class Canvas(QGraphicsView):
         else:
             self.viewport().setCursor(Qt.ArrowCursor)
 
+        if hasattr(self, "ocr_overlay"):
+            self.ocr_overlay.set_active(tool == "ocr")
+        self.toolChanged.emit(tool)
+
     # ---- scene management ----
     def update_scene_rect(self, padding: float = 48.0) -> None:
         """Update the scrollable area to fit all items with padding."""
@@ -245,13 +254,7 @@ class Canvas(QGraphicsView):
         self.resetTransform()
         self.scale(factor, factor)
 
-    def export_image(self) -> QImage:
-        selected = [it for it in self.scene.selectedItems()]
-        focus_item = self.scene.focusItem()
-        for it in selected:
-            it.setSelected(False)
-
-        rect = self.scene.itemsBoundingRect()
+    def _render_rect_to_qimage(self, rect: QRectF, only_items=None):
         dpr = getattr(self.window().windowHandle(), "devicePixelRatio", lambda: 1.0)()
         try:
             dpr = float(dpr)
@@ -262,11 +265,29 @@ class Canvas(QGraphicsView):
         img = QImage(w, h, QImage.Format_RGBA8888)
         img.setDevicePixelRatio(dpr)
         img.fill(Qt.transparent)
+        hidden = []
+        if only_items is not None:
+            for it in self.scene.items():
+                if it not in only_items:
+                    hidden.append((it, it.isVisible()))
+                    it.setVisible(False)
         p = QPainter(img)
         p.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
         p.scale(dpr, dpr)
         self.scene.render(p, QRectF(0, 0, rect.width(), rect.height()), rect)
         p.end()
+        for it, vis in hidden:
+            it.setVisible(vis)
+        return img, rect, dpr
+
+    def export_image(self) -> QImage:
+        selected = [it for it in self.scene.selectedItems()]
+        focus_item = self.scene.focusItem()
+        for it in selected:
+            it.setSelected(False)
+
+        rect = self.scene.itemsBoundingRect()
+        img, _, _ = self._render_rect_to_qimage(rect)
 
         for it in selected:
             it.setSelected(True)
@@ -281,29 +302,32 @@ class Canvas(QGraphicsView):
         rect = selected[0].sceneBoundingRect()
         for it in selected[1:]:
             rect = rect.united(it.sceneBoundingRect())
-        dpr = getattr(self.window().windowHandle(), "devicePixelRatio", lambda: 1.0)()
-        try:
-            dpr = float(dpr)
-        except Exception:
-            dpr = 1.0
-        w = max(1, int(math.ceil(rect.width() * dpr)))
-        h = max(1, int(math.ceil(rect.height() * dpr)))
-        img = QImage(w, h, QImage.Format_RGBA8888)
-        img.setDevicePixelRatio(dpr)
-        img.fill(Qt.transparent)
-        hidden = []
-        for it in self.scene.items():
-            if it not in selected:
-                hidden.append((it, it.isVisible()))
-                it.setVisible(False)
-        p = QPainter(img)
-        p.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
-        p.scale(dpr, dpr)
-        self.scene.render(p, QRectF(0, 0, rect.width(), rect.height()), rect)
-        p.end()
-        for it, vis in hidden:
-            it.setVisible(vis)
+        img, _, _ = self._render_rect_to_qimage(rect, selected)
         return qimage_to_pil(img)
+
+    def export_selection_with_geometry(self) -> Tuple[Image.Image, QRectF, Tuple[int, int], float]:
+        selected = [it for it in self.scene.selectedItems()]
+        if not selected:
+            rect = self.scene.itemsBoundingRect()
+            img, rect, dpr = self._render_rect_to_qimage(rect)
+        else:
+            rect = selected[0].sceneBoundingRect()
+            for it in selected[1:]:
+                rect = rect.united(it.sceneBoundingRect())
+            img, rect, dpr = self._render_rect_to_qimage(rect, selected)
+        return qimage_to_pil(img), rect, (img.width(), img.height()), dpr
+
+    def current_ocr_capture(self) -> OcrCapture:
+        image, rect, pixel_size, _ = self.export_selection_with_geometry()
+        anchor = self.pixmap_item if self.pixmap_item and self.pixmap_item.scene() == self.scene else None
+        return OcrCapture(image=image, scene_rect=rect, pixel_size=pixel_size, anchor_item=anchor)
+
+    def selected_ocr_text(self) -> str:
+        if self.ocr_overlay and self.ocr_overlay.has_selection():
+            return self.ocr_overlay.selected_text()
+        if self.ocr_overlay and self.ocr_overlay.has_words():
+            return self.ocr_overlay.full_text()
+        return ""
 
     def undo(self):
         self.undo_stack.undo()
@@ -354,6 +378,12 @@ class Canvas(QGraphicsView):
         super().keyPressEvent(event)
 
     def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and self._tool == "ocr":
+            pos = self.mapToScene(event.position().toPoint())
+            if self.ocr_overlay:
+                self.ocr_overlay.start_selection(pos)
+            event.accept()
+            return
         if event.button() == Qt.RightButton and self._tool == "erase":
             if self.active_tool and hasattr(self.active_tool, "show_size_popup"):
                 global_pos = self.viewport().mapToGlobal(event.position().toPoint())
@@ -392,6 +422,12 @@ class Canvas(QGraphicsView):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
+        if (event.buttons() & Qt.LeftButton) and self._tool == "ocr":
+            pos = self.mapToScene(event.position().toPoint())
+            if self.ocr_overlay:
+                self.ocr_overlay.update_drag(pos)
+            event.accept()
+            return
         if (event.buttons() & Qt.LeftButton) and self._tool not in ("none", "select", "text"):
             pos = self.mapToScene(event.position().toPoint())
             if self.active_tool:
@@ -414,6 +450,9 @@ class Canvas(QGraphicsView):
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton:
+            if self._tool == "ocr":
+                event.accept()
+                return
             if self._tool == "select" and self._move_snapshot:
                 moved = {}
                 for it, old in self._move_snapshot.items():
