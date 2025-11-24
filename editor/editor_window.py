@@ -7,13 +7,14 @@ from PIL import Image
 from PySide6.QtCore import Qt, QTimer, QRectF
 from PySide6.QtGui import QAction, QImage, QPixmap, QPainter, QPainterPath, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QMainWindow,
-    QMessageBox,
     QApplication,
     QGraphicsItem,
-    QWidget,
-    QToolButton,
+    QLabel,
     QInputDialog,
+    QMainWindow,
+    QMessageBox,
+    QToolButton,
+    QWidget,
 )
 
 from logic import APP_NAME, APP_VERSION, qimage_to_pil, save_history, save_config
@@ -53,6 +54,7 @@ class EditorWindow(QMainWindow):
         self.ocr_settings = OcrSettings.from_config(self.cfg)
         self._last_ocr_capture: Optional[OcrCapture] = None
         self._prev_tool_before_ocr = "select"
+        self._ocr_text_action: Optional[QAction] = None
 
         self.setCentralWidget(self.canvas)
         self._apply_modern_stylesheet()
@@ -267,15 +269,20 @@ class EditorWindow(QMainWindow):
             f"Доступные: {available_text}"
         )
 
-        lang_input, ok = QInputDialog.getText(
-            self,
-            "Распознать текст",
-            prompt,
-            text=default_lang,
-        )
-        if not ok:
+        dialog = QInputDialog(self)
+        dialog.setWindowTitle("Распознать текст")
+        dialog.setLabelText(prompt)
+        dialog.setTextValue(default_lang)
+
+        label = dialog.findChild(QLabel)
+        if label is not None:
+            label.setWordWrap(True)
+            label.setMinimumWidth(360)
+
+        if not dialog.exec():
             return None
-        return lang_input.strip() or "auto"
+
+        return dialog.textValue().strip() or "auto"
 
     def _handle_ocr_result(self, result: OcrResult) -> None:
         clipboard = QApplication.clipboard()
