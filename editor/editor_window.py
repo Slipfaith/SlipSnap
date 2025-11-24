@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QToolButton,
     QVBoxLayout,
     QWidget,
+    QWidgetAction,
 )
 
 from logic import APP_NAME, APP_VERSION, qimage_to_pil, save_history, save_config
@@ -238,8 +239,6 @@ class EditorWindow(QMainWindow):
         self.logic = EditorLogic(self.canvas)
         self.ocr_settings = OcrSettings.from_config(self.cfg)
         self._last_ocr_capture: Optional[OcrCapture] = None
-        self._prev_tool_before_ocr = "select"
-        self._ocr_text_action: Optional[QAction] = None
         self._ocr_toast: Optional[QWidget] = None
         self._ocr_toast_timer = QTimer(self)
         self._ocr_toast_timer.setSingleShot(True)
@@ -250,7 +249,6 @@ class EditorWindow(QMainWindow):
         self.setCentralWidget(self.canvas)
         self._apply_modern_stylesheet()
         self.canvas.imageDropped.connect(self._insert_screenshot_item)
-        self.canvas.toolChanged.connect(self._sync_ocr_mode_toggle)
 
         self._start_series_handler: Optional[Callable[[Optional[QWidget]], bool]] = None
         self._series_state_getter: Optional[Callable[[], bool]] = None
@@ -261,10 +259,7 @@ class EditorWindow(QMainWindow):
         self.color_btn, actions, action_buttons = create_actions_toolbar(self, self.canvas)
         self._series_action = actions.get("series")
         self._series_button = action_buttons.get("series")
-        self._ocr_text_action = actions.get("ocr_text")
         self._ocr_button = action_buttons.get("ocr")
-        if self._ocr_text_action is not None:
-            self._ocr_text_action.setEnabled(False)
         if self._ocr_button is not None:
             self._setup_ocr_button(self._ocr_button)
         if self._series_action is not None:
@@ -381,20 +376,6 @@ class EditorWindow(QMainWindow):
         msg.setStandardButtons(QMessageBox.Ok)
         msg.exec()
 
-    def toggle_ocr_text_mode(self, active: bool):
-        if active:
-            self._prev_tool_before_ocr = getattr(self.canvas, "_tool", "select")
-            self.canvas.set_tool("ocr")
-        else:
-            self.canvas.set_tool(getattr(self, "_prev_tool_before_ocr", "select"))
-
-    def _sync_ocr_mode_toggle(self, tool: str) -> None:
-        if self._ocr_text_action is None:
-            return
-        self._ocr_text_action.blockSignals(True)
-        self._ocr_text_action.setChecked(tool == "ocr")
-        self._ocr_text_action.blockSignals(False)
-
     # ---- actions ----
     def choose_color(self):
         selected_items = list(self.canvas.scene.selectedItems())
@@ -410,7 +391,9 @@ class EditorWindow(QMainWindow):
 
     def copy_to_clipboard(self):
         ocr_text = ""
-        if self._ocr_text_action and self._ocr_text_action.isChecked():
+        if self.canvas.ocr_overlay and (
+            self.canvas.ocr_overlay.has_selection() or self.canvas.ocr_overlay.has_words()
+        ):
             ocr_text = self.canvas.selected_ocr_text().strip()
         if ocr_text:
             QApplication.clipboard().setText(ocr_text)
@@ -460,32 +443,112 @@ class EditorWindow(QMainWindow):
         except OcrError as e:
             QMessageBox.warning(self, "SlipSnap · OCR", str(e))
             available = []
+        preferred = [lang for lang in self.ocr_settings.preferred_languages if lang]
+        selected_set = set(preferred)
 
-        combined = list(dict.fromkeys((available or []) + self.ocr_settings.preferred_languages))
-        if not combined:
-            combined = ["eng"]
+        quick_codes = [
+            ("rus", get_language_display_name("rus") or "Русский"),
+            ("eng", get_language_display_name("eng") or "English"),
+            ("chi_sim", get_language_display_name("chi_sim") or "中文"),
+        ]
 
-        selected = set(self.ocr_settings.preferred_languages)
-        for code in combined:
-            action = self._ocr_menu.addAction(get_language_display_name(code) or code)
-            action.setCheckable(True)
-            action.setChecked(code in selected)
-            action.toggled.connect(lambda checked, lang=code: self._update_ocr_language_selection(lang, checked))
+        container = QWidget(self._ocr_menu)
+        container.setFixedWidth(260)
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(10, 8, 10, 10)
+        layout.setSpacing(6)
 
-    def _update_ocr_language_selection(self, language: str, checked: bool) -> None:
+        quick_row = QHBoxLayout()
+        quick_row.setSpacing(6)
+        quick_row.setContentsMargins(0, 0, 0, 0)
+        quick_checks: dict[str, QCheckBox] = {}
+
+        def _apply_and_refresh(lang: str, checked: bool) -> None:
+            self._update_ocr_language_selection(lang, checked, refresh_ui=False)
+            selected_set.clear()
+            selected_set.update(self.ocr_settings.preferred_languages)
+            for code, check in quick_checks.items():
+                check.blockSignals(True)
+                check.setChecked(code in selected_set)
+                check.blockSignals(False)
+            _populate(search_edit.text())
+
+        for code, label in quick_codes:
+            cb = QCheckBox(label)
+            cb.setChecked(code in selected_set)
+            cb.toggled.connect(lambda checked, lang=code: _apply_and_refresh(lang, checked))
+            quick_checks[code] = cb
+            quick_row.addWidget(cb)
+        quick_row.addStretch(1)
+        layout.addLayout(quick_row)
+
+        search_edit = QLineEdit(container)
+        search_edit.setPlaceholderText("Поиск языка (Enter — добавить)")
+        layout.addWidget(search_edit)
+
+        list_widget = QListWidget(container)
+        list_widget.setSelectionMode(QListWidget.NoSelection)
+        list_widget.setMaximumHeight(180)
+        layout.addWidget(list_widget)
+
+        priority_codes = {code for code, _ in quick_codes}
+        other_languages = sorted(set(lang for lang in available if lang not in priority_codes))
+
+        def _populate(query: str) -> None:
+            list_widget.blockSignals(True)
+            list_widget.clear()
+            normalized = query.strip().lower()
+            for code in other_languages:
+                display = get_language_display_name(code) or code
+                if normalized and normalized not in code.lower() and normalized not in display.lower():
+                    continue
+                item = QListWidgetItem(display)
+                item.setData(Qt.UserRole, code)
+                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                item.setCheckState(Qt.Checked if code in selected_set else Qt.Unchecked)
+                list_widget.addItem(item)
+            if list_widget.count() == 0:
+                placeholder = QListWidgetItem("Нет совпадений")
+                placeholder.setFlags(Qt.NoItemFlags)
+                list_widget.addItem(placeholder)
+            list_widget.blockSignals(False)
+
+        def _handle_list_change(item: QListWidgetItem) -> None:
+            code = item.data(Qt.UserRole)
+            if not code:
+                return
+            _apply_and_refresh(code, item.checkState() == Qt.Checked)
+
+        _populate("")
+
+        list_widget.itemChanged.connect(_handle_list_change)
+        search_edit.textChanged.connect(_populate)
+        search_edit.returnPressed.connect(lambda: _apply_and_refresh(search_edit.text().strip(), True))
+
+        summary = QLabel(container)
+        summary.setStyleSheet("color: #6e7781; font-size: 12px;")
+        summary.setText("Можно выбрать несколько языков")
+        layout.addWidget(summary)
+
+        wrapper = QWidgetAction(self._ocr_menu)
+        wrapper.setDefaultWidget(container)
+        self._ocr_menu.addAction(wrapper)
+
+    def _update_ocr_language_selection(self, language: str, checked: bool, *, refresh_ui: bool = True) -> None:
         languages = [lang for lang in self.ocr_settings.preferred_languages if lang != language]
         if checked:
             languages.append(language)
         if not languages:
             languages = [language]
         self._apply_ocr_languages(languages)
-        self._refresh_ocr_menu()
+        if refresh_ui:
+            self._refresh_ocr_menu()
 
     def _apply_ocr_languages(self, languages: list[str]) -> None:
         normalized = [str(lang).strip() for lang in languages if str(lang).strip()]
         if not normalized:
             normalized = ["eng"]
-        self.ocr_settings.preferred_languages = normalized
+        self.ocr_settings.preferred_languages = list(dict.fromkeys(normalized))
         self.ocr_settings.last_language = "+".join(normalized)
         self.cfg["ocr_settings"] = self.ocr_settings.to_dict()
         save_config(self.cfg)
@@ -506,11 +569,7 @@ class EditorWindow(QMainWindow):
         return "+".join(languages)
 
     def _activate_ocr_text_mode(self) -> None:
-        if self._ocr_text_action is not None:
-            self._ocr_text_action.blockSignals(True)
-            self._ocr_text_action.setChecked(True)
-            self._ocr_text_action.blockSignals(False)
-        self.toggle_ocr_text_mode(True)
+        self.canvas.set_tool("ocr")
 
     def _clear_ocr_toast(self) -> None:
         if self._ocr_toast is None:
@@ -590,8 +649,6 @@ class EditorWindow(QMainWindow):
 
         if self._last_ocr_capture and self.canvas.ocr_overlay:
             self.canvas.ocr_overlay.apply_result(result, self._last_ocr_capture)
-            if self._ocr_text_action is not None:
-                self._ocr_text_action.setEnabled(bool(result.words))
 
         self._activate_ocr_text_mode()
         self._show_ocr_toast(result)

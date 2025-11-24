@@ -9,7 +9,7 @@ from logic import save_config
 from design_tokens import Metrics
 
 # Removed old imports from icons.py as we are using icon_factory now for consistent style
-# from icons import make_icon_ocr_scan, make_icon_text_mode, make_icon_series
+# from icons import make_icon_ocr_scan, make_icon_series
 
 from .styles import ModernColors
 from .color_widgets import ColorButton
@@ -31,7 +31,6 @@ from .icon_factory import (
     make_icon_series,
     make_icon_collage,
     make_icon_ocr,
-    make_icon_text_mode_action,
     make_icon_copy,
     make_icon_save,
     make_icon_undo,
@@ -472,14 +471,6 @@ def create_actions_toolbar(window, canvas):
         window.rerun_ocr_with_language,
         sc="Ctrl+Shift+O",
         icon=make_icon_ocr(),
-        show_text=False,
-    )
-    add_action(
-        "ocr_text",
-        "Режим текста",
-        window.toggle_ocr_text_mode,
-        checkable=True,
-        icon=make_icon_text_mode_action(),
         show_text=False,
     )
     add_action("copy", "Копировать", window.copy_to_clipboard, sc="Ctrl+C", icon=make_icon_copy(), show_text=False)
