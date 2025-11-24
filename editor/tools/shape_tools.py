@@ -26,7 +26,7 @@ class RectangleTool(_BaseShapeTool):
     def move(self, pos: QPointF):
         rect = QRectF(self._start, pos).normalized()
         path = QPainterPath()
-        path.addRoundedRect(rect, 12, 12)
+        path.addRoundedRect(rect, 4, 4)
         if self._tmp is None:
             self._tmp = self.canvas.scene.addPath(path, self.canvas._pen)
             self._tmp.setFlag(QGraphicsItem.ItemIsSelectable, True)
