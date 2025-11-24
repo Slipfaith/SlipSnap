@@ -59,53 +59,65 @@ class _LanguagePickerDialog(QDialog):
     def __init__(self, parent: QWidget, available: list[str], default_lang: str, preferred: list[str]):
         super().__init__(parent)
         self.setWindowTitle("Распознать текст")
+        self.setFixedWidth(360)
+        self._priority_codes = ["rus", "eng", "chi_sim"]
         self._available = sorted(set(available))
-        self._custom_modified = False
+        self._selected_languages: set[str] = set()
         self._build_ui(default_lang, preferred)
 
     def _build_ui(self, default_lang: str, preferred: list[str]) -> None:
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(14)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(10)
 
-        title = QLabel("Выберите языки для OCR")
-        title.setStyleSheet("font-size: 17px; font-weight: 600;")
+        title = QLabel("Языки OCR")
+        title.setStyleSheet("font-size: 16px; font-weight: 600;")
         layout.addWidget(title)
-
-        hint = QLabel(
-            "Можно указать несколько языков. Отметьте нужные или введите коды через «+»."
-            " Оставьте включённым автоопределение, чтобы использовать предпочтения."
-        )
-        hint.setWordWrap(True)
-        layout.addWidget(hint)
 
         self.auto_checkbox = QCheckBox("Определять язык автоматически")
         self.auto_checkbox.setChecked(not default_lang or default_lang.lower() == "auto")
         self.auto_checkbox.toggled.connect(self._sync_enabled_state)
         layout.addWidget(self.auto_checkbox)
 
-        block = QFrame(self)
-        block.setFrameShape(QFrame.StyledPanel)
-        block.setStyleSheet("QFrame { border: 1px solid #d0d7de; border-radius: 10px; }")
-        block_layout = QVBoxLayout(block)
-        block_layout.setContentsMargins(12, 10, 12, 10)
-        block_layout.setSpacing(8)
+        priority_block = QFrame(self)
+        priority_block.setFrameShape(QFrame.StyledPanel)
+        priority_block.setStyleSheet("QFrame { border: 1px solid #d0d7de; border-radius: 10px; }")
+        priority_layout = QVBoxLayout(priority_block)
+        priority_layout.setContentsMargins(10, 8, 10, 8)
+        priority_layout.setSpacing(8)
 
-        list_label = QLabel("Доступные языки:")
-        list_label.setStyleSheet("font-weight: 600;")
-        block_layout.addWidget(list_label)
+        priority_title = QLabel("Быстрый выбор")
+        priority_title.setStyleSheet("font-weight: 600;")
+        priority_layout.addWidget(priority_title)
 
-        self.list_widget = QListWidget(block)
+        self._priority_checks: dict[str, QCheckBox] = {}
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        for code in self._priority_codes:
+            label = get_language_display_name(code) or code
+            cb = QCheckBox(label)
+            cb.toggled.connect(lambda checked, lang=code: self._toggle_language(lang, checked))
+            row.addWidget(cb)
+            self._priority_checks[code] = cb
+        row.addStretch(1)
+        priority_layout.addLayout(row)
+
+        search_label = QLabel("Найти другой язык")
+        search_label.setStyleSheet("font-weight: 600;")
+        priority_layout.addWidget(search_label)
+
+        self.search_edit = QLineEdit(priority_block)
+        self.search_edit.setPlaceholderText("Поиск по названию или коду")
+        self.search_edit.textChanged.connect(self._filter_languages)
+        self.search_edit.returnPressed.connect(self._add_custom_language)
+        priority_layout.addWidget(self.search_edit)
+
+        self.list_widget = QListWidget(priority_block)
         self.list_widget.setSelectionMode(QListWidget.NoSelection)
-        self.list_widget.setMinimumHeight(160)
-        block_layout.addWidget(self.list_widget)
+        self.list_widget.setMinimumHeight(110)
+        priority_layout.addWidget(self.list_widget)
 
-        self.custom_edit = QLineEdit(block)
-        self.custom_edit.setPlaceholderText("Например: eng+rus")
-        self.custom_edit.textEdited.connect(self._on_custom_edited)
-        block_layout.addWidget(self.custom_edit)
-
-        layout.addWidget(block)
+        layout.addWidget(priority_block)
 
         available_text = ", ".join(self._available) if self._available else "нет установленных языков"
         info = QLabel(f"Установлено: {available_text}")
@@ -118,45 +130,96 @@ class _LanguagePickerDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
-        selected_codes = []
+        selected_codes: list[str] = []
         if default_lang and default_lang.lower() != "auto":
             selected_codes = [code.strip() for code in default_lang.split("+") if code.strip()]
         if not selected_codes:
             selected_codes = preferred
+        self._selected_languages = set(selected_codes)
 
-        for code in self._available:
-            item = QListWidgetItem(code)
-            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-            item.setCheckState(Qt.Checked if code in selected_codes else Qt.Unchecked)
-            self.list_widget.addItem(item)
+        for code, checkbox in self._priority_checks.items():
+            checkbox.setChecked(code in self._selected_languages)
 
-        self.custom_edit.setText("+".join(selected_codes))
-        self._custom_modified = False
+        self._filter_languages(self.search_edit.text())
         self._sync_enabled_state(self.auto_checkbox.isChecked())
 
-    def _sync_enabled_state(self, auto_enabled: bool) -> None:
-        self.list_widget.setEnabled(not auto_enabled)
-        self.custom_edit.setEnabled(not auto_enabled)
+    def _filter_languages(self, query: str) -> None:
+        try:
+            self.list_widget.itemChanged.disconnect(self._on_list_item_changed)
+        except TypeError:
+            pass
+        self.list_widget.clear()
+        normalized_query = query.strip().lower()
+        other_languages = [code for code in self._available if code not in self._priority_codes]
+        for code in other_languages:
+            display = get_language_display_name(code)
+            if normalized_query and normalized_query not in code.lower() and (display and normalized_query not in display.lower()):
+                continue
+            item = QListWidgetItem(display or code)
+            item.setData(Qt.UserRole, code)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Checked if code in self._selected_languages else Qt.Unchecked)
+            self.list_widget.addItem(item)
+        if self.list_widget.count() == 0:
+            placeholder = QListWidgetItem("Нет совпадений")
+            placeholder.setFlags(Qt.NoItemFlags)
+            self.list_widget.addItem(placeholder)
 
-    def _on_custom_edited(self, _: str) -> None:
-        self._custom_modified = True
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            if item.flags() & Qt.ItemIsUserCheckable:
+                item.setCheckState(Qt.Checked if item.data(Qt.UserRole) in self._selected_languages else Qt.Unchecked)
+
+        self.list_widget.itemChanged.connect(self._on_list_item_changed)
+
+    def _on_list_item_changed(self, item: QListWidgetItem) -> None:
+        code = item.data(Qt.UserRole)
+        if not code:
+            return
+        self._toggle_language(code, item.checkState() == Qt.Checked, refresh_list=False)
+
+    def _add_custom_language(self) -> None:
+        text = self.search_edit.text().strip()
+        if not text:
+            return
+        code = text
+        if code not in self._available:
+            self._available.append(code)
+            self._available.sort()
+        self._toggle_language(code, True)
+        self.search_edit.selectAll()
+
+    def _toggle_language(self, language: str, checked: bool, refresh_list: bool = True) -> None:
+        if checked:
+            self._selected_languages.add(language)
+        else:
+            self._selected_languages.discard(language)
+        if language in self._priority_checks:
+            checkbox = self._priority_checks.get(language)
+            if checkbox and checkbox.isChecked() != checked:
+                checkbox.blockSignals(True)
+                checkbox.setChecked(checked)
+                checkbox.blockSignals(False)
+        if refresh_list:
+            self._filter_languages(self.search_edit.text())
+
+    def _sync_enabled_state(self, auto_enabled: bool) -> None:
+        enabled = not auto_enabled
+        for checkbox in self._priority_checks.values():
+            checkbox.setEnabled(enabled)
+        self.search_edit.setEnabled(enabled)
+        self.list_widget.setEnabled(enabled)
 
     def selected_language(self) -> str:
         if self.auto_checkbox.isChecked():
             return "auto"
 
-        text_value = self.custom_edit.text().strip()
-        if self._custom_modified and text_value:
-            return text_value
+        if not self._selected_languages:
+            return "eng"
 
-        selected = [self.list_widget.item(i).text() for i in range(self.list_widget.count()) if self.list_widget.item(i).checkState() == Qt.Checked]
-        if selected:
-            return "+".join(selected)
-
-        if text_value:
-            return text_value
-
-        return "auto"
+        ordered = [code for code in self._priority_codes if code in self._selected_languages]
+        ordered.extend(sorted(lang for lang in self._selected_languages if lang not in self._priority_codes))
+        return "+".join(ordered)
 
 
 class EditorWindow(QMainWindow):
