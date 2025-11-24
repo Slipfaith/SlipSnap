@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import math
 import uuid
@@ -29,22 +30,44 @@ DEFAULT_CONFIG = {
     "capture_hotkey": "Ctrl+Alt+S",
     "series_prefix": "Series",
     "series_folder": str(Path.home()),
+    "ocr_settings": {
+        "preferred_languages": ["eng"],
+        "last_language": "auto",
+    },
 }
 
 def load_config() -> dict:
-    cfg = DEFAULT_CONFIG.copy()
+    cfg = copy.deepcopy(DEFAULT_CONFIG)
     if CONFIG_PATH.exists():
         try:
             data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
             if isinstance(data, dict):
-                cfg.update({k: v for k, v in data.items() if k in DEFAULT_CONFIG})
+                for key, default_value in DEFAULT_CONFIG.items():
+                    if key not in data:
+                        continue
+                    user_value = data[key]
+                    if isinstance(default_value, dict) and isinstance(user_value, dict):
+                        merged = default_value.copy()
+                        merged.update({k: v for k, v in user_value.items() if k in default_value})
+                        cfg[key] = merged
+                    elif not isinstance(default_value, dict):
+                        cfg[key] = user_value
         except Exception:
             pass
     return cfg
 
 def save_config(cfg: dict) -> None:
-    data = DEFAULT_CONFIG.copy()
-    data.update({k: v for k, v in cfg.items() if k in DEFAULT_CONFIG})
+    data = copy.deepcopy(DEFAULT_CONFIG)
+    for key, default_value in DEFAULT_CONFIG.items():
+        if key not in cfg:
+            continue
+        value = cfg[key]
+        if isinstance(default_value, dict) and isinstance(value, dict):
+            merged = default_value.copy()
+            merged.update({k: v for k, v in value.items() if k in default_value})
+            data[key] = merged
+        elif not isinstance(default_value, dict):
+            data[key] = value
     CONFIG_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 def pil_to_qpixmap(img: Image.Image):
