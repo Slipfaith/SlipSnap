@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
-from PySide6.QtCore import QPointF, QRect, QRectF, Qt
+from PySide6.QtCore import QEvent, QObject, QPointF, QRect, QRectF, Qt
 from PySide6.QtGui import QTextCursor, QTextOption
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsScene, QPlainTextEdit
 from PIL import Image
@@ -17,21 +17,31 @@ class OcrCapture:
     anchor_item: Optional[QGraphicsItem] = None
 
 
-class OcrSelectionOverlay:
+class OcrSelectionOverlay(QObject):
     """Overlay that maps OCR words to selectable regions on the canvas."""
 
     def __init__(self, canvas):
+        super().__init__(canvas)
         self.canvas = canvas
         self.scene: QGraphicsScene = canvas.scene
         self.words: List[OcrWord] = []
         self._anchor_item: Optional[QGraphicsItem] = None
+        self._anchor_local_rect: Optional[QRectF] = None
+        self._capture_scene_rect: Optional[QRectF] = None
         self._active = False
         self._text_widget: Optional[QPlainTextEdit] = None
         self._selection_anchor: Optional[int] = None
 
+        self.canvas.viewport().installEventFilter(self)
+        self.canvas.horizontalScrollBar().valueChanged.connect(self._update_geometry)
+        self.canvas.verticalScrollBar().valueChanged.connect(self._update_geometry)
+        self.scene.changed.connect(self._update_geometry)
+
     def clear(self) -> None:
         self.words = []
         self._anchor_item = None
+        self._anchor_local_rect = None
+        self._capture_scene_rect = None
         self._selection_anchor = None
         if self._text_widget:
             self._text_widget.hide()
@@ -46,8 +56,15 @@ class OcrSelectionOverlay:
             return
 
         self._anchor_item = capture.anchor_item if capture.anchor_item and capture.anchor_item.scene() == self.scene else None
+        self._capture_scene_rect = capture.scene_rect
+        self._anchor_local_rect = None
+        if self._anchor_item and self._capture_scene_rect is not None:
+            self._anchor_local_rect = self._anchor_item.mapRectFromScene(self._capture_scene_rect)
 
-        rect = capture.scene_rect
+        rect = self._current_scene_rect()
+
+        if rect is None:
+            return
 
         if not text and self.words:
             # Fall back to text reconstruction from words
@@ -119,6 +136,16 @@ class OcrSelectionOverlay:
             return self._text_widget.toPlainText()
         return " ".join(word.text for word in self.words)
 
+    def eventFilter(self, obj, event):  # noqa: D401
+        """Keep the OCR overlay aligned with the viewport and scene changes."""
+        if obj is self.canvas.viewport() and event.type() in (
+            QEvent.Resize,
+            QEvent.Paint,
+            QEvent.Wheel,
+        ):
+            self._update_geometry()
+        return super().eventFilter(obj, event)
+
     def _create_text_widget(self) -> QPlainTextEdit:
         if self._text_widget:
             self._text_widget.deleteLater()
@@ -150,3 +177,23 @@ class OcrSelectionOverlay:
         width = max(1, right - left)
         height = max(1, bottom - top)
         return QRect(left, top, width, height)
+
+    def _current_scene_rect(self) -> Optional[QRectF]:
+        if self._capture_scene_rect is None:
+            return None
+        if self._anchor_item and self._anchor_item.scene() == self.scene and self._anchor_local_rect is not None:
+            return self._anchor_item.mapRectToScene(self._anchor_local_rect)
+        return self._capture_scene_rect
+
+    def _update_geometry(self) -> None:
+        if self._text_widget is None:
+            return
+        rect = self._current_scene_rect()
+        if rect is None:
+            return
+        widget_rect = self._map_scene_rect_to_view(rect)
+        if widget_rect.width() <= 0 or widget_rect.height() <= 0:
+            self._text_widget.hide()
+            return
+        self._text_widget.setGeometry(widget_rect)
+        self._text_widget.setVisible(self._active)
