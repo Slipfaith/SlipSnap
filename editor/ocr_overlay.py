@@ -1,12 +1,11 @@
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
-from PySide6.QtCore import QPointF, QRectF
-from PySide6.QtGui import QColor, QPen
-from PySide6.QtWidgets import QGraphicsItem, QGraphicsRectItem, QGraphicsScene
+from PySide6.QtCore import QPointF, QRect, QRectF, Qt
+from PySide6.QtGui import QTextCursor, QTextOption
+from PySide6.QtWidgets import QGraphicsItem, QGraphicsScene, QPlainTextEdit
 from PIL import Image
 
-from design_tokens import Palette
 from ocr import OcrResult, OcrWord
 
 
@@ -21,214 +20,133 @@ class OcrCapture:
 class OcrSelectionOverlay:
     """Overlay that maps OCR words to selectable regions on the canvas."""
 
-    HANDLE_SIZE = 6
-
     def __init__(self, canvas):
         self.canvas = canvas
         self.scene: QGraphicsScene = canvas.scene
         self.words: List[OcrWord] = []
-        self._word_items: List[QGraphicsRectItem] = []
-        self._handle_items: List[QGraphicsRectItem] = []
         self._anchor_item: Optional[QGraphicsItem] = None
         self._active = False
-        self._start_index: Optional[int] = None
-        self._end_index: Optional[int] = None
-        self._scale_x = 1.0
-        self._scale_y = 1.0
-        self._single_line = False
-
-        selection_color = QColor(*Palette.TEXT_TOOL_SELECTION)
-        selection_color.setAlpha(80)
-        self._selection_brush = selection_color
-
-        outline_color = QColor(0, 0, 0, 0)
-        self._outline_pen = QPen(outline_color, 0.0)
-        self._outline_pen.setCosmetic(True)
+        self._text_widget: Optional[QPlainTextEdit] = None
+        self._selection_anchor: Optional[int] = None
 
     def clear(self) -> None:
-        for item in self._word_items:
-            self.scene.removeItem(item)
-        for item in self._handle_items:
-            self.scene.removeItem(item)
-        self._word_items = []
-        self._handle_items = []
-        self._single_line = False
         self.words = []
-        self._start_index = None
-        self._end_index = None
         self._anchor_item = None
+        self._selection_anchor = None
+        if self._text_widget:
+            self._text_widget.hide()
+            self._text_widget.deleteLater()
+        self._text_widget = None
 
     def apply_result(self, result: OcrResult, capture: OcrCapture) -> None:
         self.clear()
         self.words = list(result.words)
-        if not self.words:
-            return
-
-        px_w, px_h = capture.pixel_size
-        if px_w <= 0 or px_h <= 0:
+        text = (result.text or "").strip()
+        if not self.words and not text:
             return
 
         self._anchor_item = capture.anchor_item if capture.anchor_item and capture.anchor_item.scene() == self.scene else None
 
         rect = capture.scene_rect
-        self._scale_x = rect.width() / float(px_w)
-        self._scale_y = rect.height() / float(px_h)
 
-        parent = self._anchor_item if self._anchor_item else None
-        base_pos = QPointF(rect.left(), rect.top())
-        if self._anchor_item:
-            base_pos = self._anchor_item.mapFromScene(base_pos)
+        if not text and self.words:
+            # Fall back to text reconstruction from words
+            lines = {}
+            for word in self.words:
+                lines.setdefault(word.line_id, []).append(word.text)
+            ordered_lines = [" ".join(parts) for _, parts in sorted(lines.items())]
+            text = "\n".join(ordered_lines)
 
-        line_extents = {}
-        for word in self.words:
-            _, y, _, h = word.bbox
-            top = float(y)
-            bottom = float(y + h)
-            if word.line_id not in line_extents:
-                line_extents[word.line_id] = [top, bottom]
-            else:
-                line_extents[word.line_id][0] = min(line_extents[word.line_id][0], top)
-                line_extents[word.line_id][1] = max(line_extents[word.line_id][1], bottom)
+        widget_rect = self._map_scene_rect_to_view(rect)
+        if widget_rect.width() <= 0 or widget_rect.height() <= 0:
+            return
 
-        self._single_line = len(line_extents) == 1
-
-        padded_extents = {}
-        for line_id, (top, bottom) in line_extents.items():
-            height = max(1.0, bottom - top)
-            padding = max(1.0, height * 0.08)
-            padded_top = max(0.0, top - padding)
-            padded_bottom = min(float(px_h), bottom + padding)
-            padded_extents[line_id] = (padded_top, padded_bottom)
-
-        mapped_rects: List[Tuple[QRectF, int]] = []
-        min_x, max_x = float("inf"), float("-inf")
-        for word in self.words:
-            x, y, w, h = word.bbox
-            line_top, line_bottom = padded_extents.get(word.line_id, (y, y + h))
-            mapped = QRectF(
-                round(base_pos.x() + x * self._scale_x, 2),
-                round(base_pos.y() + line_top * self._scale_y, 2),
-                max(1.0, w * self._scale_x),
-                max(1.0, (line_bottom - line_top) * self._scale_y),
-            )
-            mapped_rects.append((mapped, word.line_id))
-            min_x = min(min_x, mapped.left())
-            max_x = max(max_x, mapped.right())
-
-        for idx, (mapped, line_id) in enumerate(mapped_rects):
-            if self._single_line and idx < len(mapped_rects) - 1:
-                next_rect, _ = mapped_rects[idx + 1]
-                extended_width = max(mapped.width(), next_rect.left() - mapped.left())
-                mapped.setWidth(max(1.0, extended_width))
-            item = QGraphicsRectItem(mapped, parent)
-            item.setPen(QPen(QColor(0, 0, 0, 0)))
-            item.setBrush(QColor(0, 0, 0, 0))
-            item.setZValue((self._anchor_item.zValue() + 0.1) if self._anchor_item else 20)
-            item.setVisible(self._active)
-            self._word_items.append(item)
+        self._text_widget = self._create_text_widget()
+        self._text_widget.setPlainText(text)
+        self._text_widget.setGeometry(widget_rect)
+        self._text_widget.setVisible(self._active)
 
     def set_active(self, active: bool) -> None:
         self._active = active
-        for item in self._word_items:
-            item.setVisible(active)
-        for handle in self._handle_items:
-            handle.setVisible(active)
+        if self._text_widget:
+            self._text_widget.setVisible(active)
         if not active:
-            self._start_index = None
-            self._end_index = None
+            self._selection_anchor = None
 
     def has_selection(self) -> bool:
-        return self._start_index is not None and self._end_index is not None and self.words
+        if self._text_widget is None:
+            return False
+        cursor = self._text_widget.textCursor()
+        return cursor.hasSelection()
 
     def has_words(self) -> bool:
         return bool(self.words)
 
-    def _index_at(self, scene_pos: QPointF) -> Optional[int]:
-        if not self._word_items:
-            return None
-        for idx, item in enumerate(self._word_items):
-            if not item.isVisible():
-                continue
-            local = item.mapFromScene(scene_pos)
-            if item.rect().contains(local):
-                return idx
-        return None
-
     def start_selection(self, scene_pos: QPointF) -> None:
-        idx = self._index_at(scene_pos)
-        if idx is None:
+        if self._text_widget is None:
             return
-        self._start_index = idx
-        self._end_index = idx
-        self._update_highlight()
+        widget_pos = self._text_widget.mapFromParent(self.canvas.mapFromScene(scene_pos))
+        if not self._text_widget.rect().contains(widget_pos):
+            return
+        cursor = self._text_widget.cursorForPosition(widget_pos)
+        self._selection_anchor = cursor.position()
+        cursor.setPosition(self._selection_anchor)
+        self._text_widget.setTextCursor(cursor)
+        self._text_widget.setFocus(Qt.MouseFocusReason)
 
     def update_drag(self, scene_pos: QPointF) -> None:
-        if self._start_index is None:
+        if self._selection_anchor is None or self._text_widget is None:
             return
-        idx = self._index_at(scene_pos)
-        if idx is None:
+        widget_pos = self._text_widget.mapFromParent(self.canvas.mapFromScene(scene_pos))
+        if not self._text_widget.rect().contains(widget_pos):
             return
-        self._end_index = idx
-        self._update_highlight()
-
-    def _selected_indices(self) -> Optional[Tuple[int, int]]:
-        if self._start_index is None or self._end_index is None:
-            return None
-        lo = min(self._start_index, self._end_index)
-        hi = max(self._start_index, self._end_index)
-        return lo, hi
-
-    def _update_highlight(self) -> None:
-        indices = self._selected_indices()
-        for i, item in enumerate(self._word_items):
-            if indices and indices[0] <= i <= indices[1]:
-                item.setBrush(self._selection_brush)
-            else:
-                item.setBrush(QColor(0, 0, 0, 0))
-
-        for handle in self._handle_items:
-            self.scene.removeItem(handle)
-        self._handle_items = []
-
-        if not indices:
-            return
-
-        lo, hi = indices
-        first_item = self._word_items[lo]
-        last_item = self._word_items[hi]
-        self._handle_items = [
-            self._make_handle(first_item.rect().topLeft(), first_item),
-            self._make_handle(last_item.rect().bottomRight(), last_item),
-        ]
-
-    def _make_handle(self, point: QPointF, parent: QGraphicsRectItem) -> QGraphicsRectItem:
-        size = self.HANDLE_SIZE
-        rect = QRectF(point.x() - size / 2, point.y() - size / 2, size, size)
-        handle = QGraphicsRectItem(rect, parent)
-        handle.setBrush(self._selection_brush)
-        handle.setPen(QPen(QColor(0, 0, 0, 0)))
-        handle.setZValue(parent.zValue() + 0.2)
-        handle.setVisible(self._active)
-        return handle
+        cursor = self._text_widget.cursorForPosition(widget_pos)
+        selection = QTextCursor(self._text_widget.document())
+        selection.setPosition(self._selection_anchor)
+        selection.setPosition(cursor.position(), QTextCursor.KeepAnchor)
+        self._text_widget.setTextCursor(selection)
 
     def selected_text(self) -> str:
-        if not self.words:
+        if self._text_widget is None:
             return ""
-        indices = self._selected_indices()
-        if not indices:
+        cursor = self._text_widget.textCursor()
+        if not cursor.hasSelection():
             return ""
-        lo, hi = indices
-        parts: List[str] = []
-        prev_line = None
-        for i in range(lo, hi + 1):
-            word = self.words[i]
-            if prev_line is not None and word.line_id != prev_line:
-                parts.append("\n")
-            elif i != lo:
-                parts.append(" ")
-            parts.append(word.text)
-            prev_line = word.line_id
-        return "".join(parts)
+        return cursor.selectedText().replace("\u2029", "\n")
 
     def full_text(self) -> str:
+        if self._text_widget is not None:
+            return self._text_widget.toPlainText()
         return " ".join(word.text for word in self.words)
+
+    def _create_text_widget(self) -> QPlainTextEdit:
+        if self._text_widget:
+            self._text_widget.deleteLater()
+        widget = QPlainTextEdit(self.canvas.viewport())
+        widget.setReadOnly(True)
+        widget.setFrameStyle(0)
+        widget.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        widget.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        widget.setWordWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
+        widget.viewport().setAutoFillBackground(False)
+        widget.setStyleSheet(
+            "background: rgba(255, 255, 255, 0.85);"
+            "border: 1px solid rgba(0, 0, 0, 0.08);"
+            "border-radius: 8px;"
+            "padding: 8px;"
+        )
+        widget.setFocusPolicy(Qt.ClickFocus)
+        widget.setAttribute(Qt.WA_TransparentForMouseEvents, False)
+        self._text_widget = widget
+        return widget
+
+    def _map_scene_rect_to_view(self, rect: QRectF) -> QRect:
+        top_left = self.canvas.mapFromScene(rect.topLeft())
+        bottom_right = self.canvas.mapFromScene(rect.bottomRight())
+        left = int(min(top_left.x(), bottom_right.x()))
+        right = int(max(top_left.x(), bottom_right.x()))
+        top = int(min(top_left.y(), bottom_right.y()))
+        bottom = int(max(top_left.y(), bottom_right.y()))
+        width = max(1, right - left)
+        height = max(1, bottom - top)
+        return QRect(left, top, width, height)

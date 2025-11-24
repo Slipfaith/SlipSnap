@@ -531,7 +531,7 @@ class EditorWindow(QMainWindow):
         layout.setContentsMargins(14, 8, 14, 8)
         layout.setSpacing(10)
 
-        headline = QLabel("Текст распознан. Выделите слова на холсте и нажмите Ctrl+C.", toast)
+        headline = QLabel("Текст распознан. Выделите нужный фрагмент текста на холсте и нажмите Ctrl+C.", toast)
         layout.addWidget(headline)
 
         meta_parts = []
