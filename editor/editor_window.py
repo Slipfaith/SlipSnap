@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QToolButton,
     QVBoxLayout,
@@ -30,7 +31,14 @@ from editor.text_tools import TextManager
 from editor.ocr_overlay import OcrCapture
 from editor.editor_logic import EditorLogic
 from editor.image_utils import images_from_mime
-from ocr import OcrError, OcrResult, OcrSettings, run_ocr, get_available_languages
+from ocr import (
+    OcrError,
+    OcrResult,
+    OcrSettings,
+    get_language_display_name,
+    run_ocr,
+    get_available_languages,
+)
 
 from editor.undo_commands import AddCommand, RemoveCommand, ScaleCommand
 
@@ -173,6 +181,8 @@ class EditorWindow(QMainWindow):
         self._ocr_toast_timer = QTimer(self)
         self._ocr_toast_timer.setSingleShot(True)
         self._ocr_toast_timer.timeout.connect(self._clear_ocr_toast)
+        self._ocr_menu: Optional[QMenu] = None
+        self._ocr_button: Optional[QToolButton] = None
 
         self.setCentralWidget(self.canvas)
         self._apply_modern_stylesheet()
@@ -189,8 +199,11 @@ class EditorWindow(QMainWindow):
         self._series_action = actions.get("series")
         self._series_button = action_buttons.get("series")
         self._ocr_text_action = actions.get("ocr_text")
+        self._ocr_button = action_buttons.get("ocr")
         if self._ocr_text_action is not None:
             self._ocr_text_action.setEnabled(False)
+        if self._ocr_button is not None:
+            self._setup_ocr_button(self._ocr_button)
         if self._series_action is not None:
             self._series_action.setIcon(make_icon_series())
         if self._series_button is not None:
@@ -361,6 +374,59 @@ class EditorWindow(QMainWindow):
             pass
 
     # ---- OCR ----
+    def _setup_ocr_button(self, button: QToolButton) -> None:
+        self._ocr_menu = QMenu(button)
+        button.setText("OCR")
+        button.setToolTip("Распознать текст (правый клик — выбор языков)")
+        button.setContextMenuPolicy(Qt.CustomContextMenu)
+        button.customContextMenuRequested.connect(self._open_ocr_menu)
+        self._refresh_ocr_menu()
+
+    def _open_ocr_menu(self, pos) -> None:
+        if self._ocr_menu is None or self._ocr_button is None:
+            return
+        self._refresh_ocr_menu()
+        self._ocr_menu.exec(self._ocr_button.mapToGlobal(pos))
+
+    def _refresh_ocr_menu(self) -> None:
+        if self._ocr_menu is None:
+            return
+        self._ocr_menu.clear()
+        try:
+            available = get_available_languages()
+        except OcrError as e:
+            QMessageBox.warning(self, "SlipSnap · OCR", str(e))
+            available = []
+
+        combined = list(dict.fromkeys((available or []) + self.ocr_settings.preferred_languages))
+        if not combined:
+            combined = ["eng"]
+
+        selected = set(self.ocr_settings.preferred_languages)
+        for code in combined:
+            action = self._ocr_menu.addAction(get_language_display_name(code) or code)
+            action.setCheckable(True)
+            action.setChecked(code in selected)
+            action.toggled.connect(lambda checked, lang=code: self._update_ocr_language_selection(lang, checked))
+
+    def _update_ocr_language_selection(self, language: str, checked: bool) -> None:
+        languages = [lang for lang in self.ocr_settings.preferred_languages if lang != language]
+        if checked:
+            languages.append(language)
+        if not languages:
+            languages = [language]
+        self._apply_ocr_languages(languages)
+        self._refresh_ocr_menu()
+
+    def _apply_ocr_languages(self, languages: list[str]) -> None:
+        normalized = [str(lang).strip() for lang in languages if str(lang).strip()]
+        if not normalized:
+            normalized = ["eng"]
+        self.ocr_settings.preferred_languages = normalized
+        self.ocr_settings.last_language = "+".join(normalized)
+        self.cfg["ocr_settings"] = self.ocr_settings.to_dict()
+        save_config(self.cfg)
+
     def _current_ocr_capture(self) -> Optional[OcrCapture]:
         try:
             capture = self.canvas.current_ocr_capture()
@@ -369,22 +435,12 @@ class EditorWindow(QMainWindow):
         self._last_ocr_capture = capture
         return capture
 
-    def _prompt_ocr_language(self) -> Optional[str]:
-        try:
-            available = get_available_languages()
-        except OcrError as e:
-            QMessageBox.warning(self, "SlipSnap · OCR", str(e))
-            return None
-
-        default_lang = self.ocr_settings.last_language
-        if not default_lang or default_lang.lower() == "auto":
-            default_lang = "+".join(self.ocr_settings.preferred_languages)
-
-        dialog = _LanguagePickerDialog(self, available, default_lang, self.ocr_settings.preferred_languages)
-        if not dialog.exec():
-            return None
-
-        return dialog.selected_language()
+    def _current_ocr_language_hint(self) -> str:
+        languages = [lang for lang in self.ocr_settings.preferred_languages if str(lang).strip()]
+        if not languages:
+            languages = ["eng"]
+            self._apply_ocr_languages(languages)
+        return "+".join(languages)
 
     def _activate_ocr_text_mode(self) -> None:
         if self._ocr_text_action is not None:
@@ -492,9 +548,7 @@ class EditorWindow(QMainWindow):
             QMessageBox.warning(self, "SlipSnap · OCR", "Нет изображения для распознавания.")
             return
 
-        lang_choice = self._prompt_ocr_language()
-        if lang_choice is None:
-            return
+        lang_choice = self._current_ocr_language_hint()
 
         try:
             result = run_ocr(capture.image, self.ocr_settings, language_hint=lang_choice)
@@ -504,8 +558,7 @@ class EditorWindow(QMainWindow):
 
         languages_used = result.languages_used or self.ocr_settings.preferred_languages
         self.ocr_settings.remember_run(lang_choice, languages_used)
-        self.cfg["ocr_settings"] = self.ocr_settings.to_dict()
-        save_config(self.cfg)
+        self._apply_ocr_languages(self.ocr_settings.preferred_languages)
         self._handle_ocr_result(result)
 
     # ---- key events ----

@@ -11,6 +11,33 @@ from pytesseract import TesseractError, TesseractNotFoundError
 
 from logic import qimage_to_pil
 
+LANGUAGE_DISPLAY_NAMES = {
+    "eng": "English",
+    "rus": "Russian",
+    "deu": "German",
+    "fra": "French",
+    "spa": "Spanish",
+    "ita": "Italian",
+    "por": "Portuguese",
+    "ukr": "Ukrainian",
+    "pol": "Polish",
+    "nld": "Dutch",
+    "tur": "Turkish",
+    "ara": "Arabic",
+    "heb": "Hebrew",
+    "jpn": "Japanese",
+    "kor": "Korean",
+    "chi_sim": "Chinese (Simplified)",
+    "chi_tra": "Chinese (Traditional)",
+}
+
+
+def get_language_display_name(code: str) -> str:
+    normalized = str(code).strip()
+    if not normalized:
+        return ""
+    return LANGUAGE_DISPLAY_NAMES.get(normalized, normalized)
+
 
 class OcrError(RuntimeError):
     """User-facing OCR errors with actionable messaging."""

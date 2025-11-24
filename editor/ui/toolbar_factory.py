@@ -446,7 +446,7 @@ def create_actions_toolbar(window, canvas):
     if hasattr(window, "request_series_capture"):
         add_action("series", "Серия скриншотов", window.request_series_capture, icon_text="🎞", show_text=False)
     add_action("collage", "История", window.open_collage, sc="Ctrl+K", icon_text="🖼", show_text=False)
-    add_action("ocr", "Распознать текст…", window.rerun_ocr_with_language, sc="Ctrl+Shift+O", icon_text="🔍", show_text=False)
+    add_action("ocr", "Распознать текст", window.rerun_ocr_with_language, sc="Ctrl+Shift+O", icon_text="OCR", show_text=False)
     add_action("ocr_text", "Режим текста", window.toggle_ocr_text_mode, checkable=True, icon_text="🔡", show_text=False)
     add_action("copy", "Копировать", window.copy_to_clipboard, sc="Ctrl+C", icon_text="📋", show_text=False)
     add_action("save", "Сохранить", window.save_image, sc="Ctrl+S", icon_text="💾", show_text=False)
