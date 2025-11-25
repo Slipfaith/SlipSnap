@@ -144,13 +144,13 @@ class OcrSelectionOverlay(QObject):
             return
         self._selection_anchor = scene_pos
         self._selected_chars = {}
-        self._update_selection_for_rect(QRectF(scene_pos, scene_pos))
+        self._update_selection_for_rect(QRectF(scene_pos, scene_pos), scene_pos)
 
     def update_drag(self, scene_pos: QPointF) -> None:
         if self._selection_anchor is None:
             return
         selection_rect = QRectF(self._selection_anchor, scene_pos).normalized()
-        self._update_selection_for_rect(selection_rect)
+        self._update_selection_for_rect(selection_rect, scene_pos)
 
     def selected_text(self) -> str:
         if not self._selected_chars:
@@ -369,23 +369,101 @@ class OcrSelectionOverlay(QObject):
             visual.selection.setPath(QPainterPath())
             visual.selection.setVisible(self._active)
 
-    def _update_selection_for_rect(self, selection_rect: QRectF) -> None:
-        if not self._char_scene_rects:
+    def _line_for_pos(self, scene_pos: QPointF) -> Optional[int]:
+        candidates: List[Tuple[float, int]] = []
+        for idx, rect in enumerate(self._scene_line_rects):
+            if rect is None:
+                continue
+            if rect.contains(scene_pos):
+                return idx
+            distance = abs(rect.center().y() - scene_pos.y())
+            candidates.append((distance, idx))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda pair: pair[0])
+        return candidates[0][1]
+
+    def _char_index_for_pos(self, line_idx: int, scene_pos: QPointF) -> Optional[int]:
+        if line_idx < 0 or line_idx >= len(self._char_scene_rects):
+            return None
+        chars = self._char_scene_rects[line_idx]
+        if not chars:
+            return None
+
+        first_rect = next((rect for rect in chars if rect is not None), None)
+        last_rect = next((rect for rect in reversed(chars) if rect is not None), None)
+        if first_rect is None or last_rect is None:
+            return None
+
+        if scene_pos.x() <= first_rect.left():
+            return 0
+        if scene_pos.x() >= last_rect.right():
+            return len(chars) - 1
+
+        for idx, rect in enumerate(chars):
+            if rect is None:
+                continue
+            if rect.contains(scene_pos) or scene_pos.x() <= rect.right():
+                return idx
+        return len(chars) - 1
+
+    def _locate_char_position(self, scene_pos: QPointF) -> Optional[Tuple[int, int]]:
+        line_idx = self._line_for_pos(scene_pos)
+        if line_idx is None:
+            return None
+        char_idx = self._char_index_for_pos(line_idx, scene_pos)
+        if char_idx is None:
+            return None
+        return line_idx, char_idx
+
+    def _update_selection_for_rect(self, selection_rect: QRectF, end_pos: Optional[QPointF] = None) -> None:
+        if not self._char_scene_rects or self._selection_anchor is None:
             return
 
+        anchor_pos = self._selection_anchor
+        focus_pos = end_pos or selection_rect.bottomRight()
+
+        anchor_location = self._locate_char_position(anchor_pos)
+        focus_location = self._locate_char_position(focus_pos)
+
+        if anchor_location is None or focus_location is None:
+            self._selected_chars = {}
+            self._update_selection_visuals()
+            return
+
+        anchor_line, anchor_char = anchor_location
+        focus_line, focus_char = focus_location
+
         selected: Dict[int, Set[int]] = {}
-        for line_idx, chars in enumerate(self._char_scene_rects):
+
+        def _select_range(line_idx: int, start_idx: int, end_idx: int) -> None:
+            if line_idx < 0 or line_idx >= len(self._char_scene_rects):
+                return
+            chars = self._char_scene_rects[line_idx]
             if not chars:
-                continue
-            for char_idx, rect in enumerate(chars):
-                if rect is None:
-                    continue
-                if selection_rect.isNull():
-                    if rect.contains(selection_rect.topLeft()):
-                        selected.setdefault(line_idx, set()).add(char_idx)
-                    continue
-                if selection_rect.intersects(rect):
-                    selected.setdefault(line_idx, set()).add(char_idx)
+                return
+            max_idx = len(chars)
+            start = max(0, min(start_idx, end_idx))
+            stop = min(max_idx, max(start_idx, end_idx) + 1)
+            if start < stop:
+                selected[line_idx] = set(range(start, stop))
+
+        if anchor_line == focus_line:
+            _select_range(anchor_line, anchor_char, focus_char)
+        else:
+            step = 1 if anchor_line < focus_line else -1
+            line = anchor_line
+            while True:
+                if line == anchor_line:
+                    _select_range(line, 0, len(self._char_scene_rects[line]))
+                elif line == focus_line:
+                    cutoff = focus_char if focus_char is not None else len(self._char_scene_rects[line])
+                    _select_range(line, 0, cutoff)
+                else:
+                    _select_range(line, 0, len(self._char_scene_rects[line]))
+                if line == focus_line:
+                    break
+                line += step
 
         self._selected_chars = selected
         self._update_selection_visuals()
