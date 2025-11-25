@@ -1,11 +1,10 @@
 from dataclasses import dataclass
-from typing import List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QPen, QPainterPath
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPen, QPainterPath
 from PySide6.QtWidgets import (
     QGraphicsItem,
-    QGraphicsRectItem,
     QGraphicsScene,
     QGraphicsSimpleTextItem,
     QGraphicsPathItem,
@@ -25,8 +24,9 @@ class OcrCapture:
 
 
 @dataclass
-class _WordVisual:
-    background: QGraphicsPathItem  # Изменено на PathItem для скругленных углов
+class _LineVisual:
+    background: QGraphicsPathItem  # фон строки
+    selection: QGraphicsPathItem   # подсветка выбранных участков
     text_item: QGraphicsSimpleTextItem
 
 
@@ -42,10 +42,12 @@ class OcrSelectionOverlay(QObject):
         self._anchor_local_rect: Optional[QRectF] = None
         self._capture_scene_rect: Optional[QRectF] = None
         self._active = False
-        self._word_visuals: List[Optional[_WordVisual]] = []
-        self._normalized_word_rects: List[Optional[QRectF]] = []
-        self._scene_word_rects: List[Optional[QRectF]] = []
-        self._selected_indexes: Set[int] = set()
+        self._line_visuals: List[Optional[_LineVisual]] = []
+        self._normalized_line_rects: List[Optional[QRectF]] = []
+        self._scene_line_rects: List[Optional[QRectF]] = []
+        self._line_texts: List[str] = []
+        self._char_scene_rects: List[List[Optional[QRectF]]] = []
+        self._selected_chars: Dict[int, Set[int]] = {}
         self._selection_anchor: Optional[QPointF] = None
         self._full_text: str = ""
 
@@ -60,14 +62,16 @@ class OcrSelectionOverlay(QObject):
         self._anchor_local_rect = None
         self._capture_scene_rect = None
         self._selection_anchor = None
-        self._selected_indexes = set()
+        self._selected_chars = {}
         self._full_text = ""
-        for visual in self._word_visuals:
+        for visual in self._line_visuals:
             if visual and visual.background.scene() is self.scene:
                 self.scene.removeItem(visual.background)
-        self._word_visuals = []
-        self._normalized_word_rects = []
-        self._scene_word_rects = []
+        self._line_visuals = []
+        self._normalized_line_rects = []
+        self._scene_line_rects = []
+        self._line_texts = []
+        self._char_scene_rects = []
 
     def apply_result(self, result: OcrResult, capture: OcrCapture) -> None:
         self.clear()
@@ -94,23 +98,30 @@ class OcrSelectionOverlay(QObject):
             ordered_lines = [" ".join(parts) for _, parts in sorted(lines.items())]
             text = "\n".join(ordered_lines)
 
+        lines = {}
+        for word in self.words:
+            lines.setdefault(word.line_id, []).append(word)
+        ordered = sorted(lines.items())
+        self._line_texts = [" ".join(w.text for w in words) for _, words in ordered]
+
         self._full_text = text
-        self._normalized_word_rects = self._compute_normalized_rects(capture.pixel_size)
-        self._create_word_items()
+        self._normalized_line_rects = self._compute_normalized_line_rects(capture.pixel_size, ordered)
+        self._create_line_items()
         self._update_geometry()
 
     def set_active(self, active: bool) -> None:
         self._active = active
-        for visual in self._word_visuals:
+        for visual in self._line_visuals:
             if visual:
                 visual.background.setVisible(active)
+                visual.selection.setVisible(active)
         if not active:
             self._selection_anchor = None
-            self._selected_indexes = set()
+            self._selected_chars = {}
             self._update_selection_visuals()
 
     def has_selection(self) -> bool:
-        return bool(self._selected_indexes)
+        return any(self._selected_chars.values())
 
     def has_words(self) -> bool:
         return bool(self.words)
@@ -118,11 +129,13 @@ class OcrSelectionOverlay(QObject):
     def select_all(self) -> None:
         """Select every recognized word to mirror Snipping Tool behavior."""
         if not self.words:
-            self._selected_indexes = set()
+            self._selected_chars = {}
             return
 
-        self._selected_indexes = {
-            idx for idx, rect in enumerate(self._scene_word_rects) if rect is not None
+        self._selected_chars = {
+            line_idx: set(range(len(chars)))
+            for line_idx, chars in enumerate(self._char_scene_rects)
+            if chars
         }
         self._update_selection_visuals()
 
@@ -130,7 +143,7 @@ class OcrSelectionOverlay(QObject):
         if not self.words:
             return
         self._selection_anchor = scene_pos
-        self._selected_indexes = set()
+        self._selected_chars = {}
         self._update_selection_for_rect(QRectF(scene_pos, scene_pos))
 
     def update_drag(self, scene_pos: QPointF) -> None:
@@ -140,29 +153,28 @@ class OcrSelectionOverlay(QObject):
         self._update_selection_for_rect(selection_rect)
 
     def selected_text(self) -> str:
-        if not self._selected_indexes:
+        if not self._selected_chars:
             return ""
-        entries = []
-        for idx, word in enumerate(self.words):
-            if idx not in self._selected_indexes:
+        pieces = []
+        for line_idx, chars in sorted(self._selected_chars.items()):
+            if not chars or line_idx >= len(self._line_texts):
                 continue
-            rect = self._scene_word_rects[idx] if idx < len(self._scene_word_rects) else None
-            entries.append((word.line_id, rect.top() if rect else 0.0, rect.left() if rect else 0.0, word.text))
+            text = self._line_texts[line_idx]
+            ordered = sorted(chars)
+            ranges: List[Tuple[int, int]] = []
+            start = prev = ordered[0]
+            for idx in ordered[1:]:
+                if idx == prev + 1:
+                    prev = idx
+                    continue
+                ranges.append((start, prev + 1))
+                start = prev = idx
+            ranges.append((start, prev + 1))
 
-        entries.sort(key=lambda item: (item[0], item[1], item[2]))
+            segments = [text[a:b] for a, b in ranges if a < len(text)]
+            pieces.append("".join(segments))
 
-        lines: List[List[str]] = []
-        current_line = None
-        for line_id, _, _, text in entries:
-            if current_line is None:
-                current_line = line_id
-                lines.append([text])
-            elif line_id == current_line:
-                lines[-1].append(text)
-            else:
-                current_line = line_id
-                lines.append([text])
-        return "\n".join(" ".join(parts) for parts in lines)
+        return "\n".join(pieces)
 
     def full_text(self) -> str:
         if self._full_text:
@@ -198,19 +210,33 @@ class OcrSelectionOverlay(QObject):
         if mapping is None:
             return
         rect, is_local = mapping
-        self._scene_word_rects = self._map_normalized_to_scene(rect, local=is_local)
+        self._scene_line_rects = self._map_normalized_to_scene(rect, local=is_local)
         self._update_word_visual_geometry()
         self._update_selection_visuals()
 
-    def _compute_normalized_rects(self, pixel_size: Tuple[int, int]) -> List[Optional[QRectF]]:
+    def _compute_normalized_line_rects(
+        self, pixel_size: Tuple[int, int], ordered_lines: List[Tuple[Tuple[int, int, int], List[OcrWord]]]
+    ) -> List[Optional[QRectF]]:
         px_w, px_h = pixel_size
         if px_w <= 0 or px_h <= 0:
-            return [None for _ in self.words]
+            return [None for _ in ordered_lines]
         rects: List[Optional[QRectF]] = []
-        for word in self.words:
+        for _, words in ordered_lines:
             try:
-                x, y, w, h = word.bbox
-                rect = QRectF(x / px_w, y / px_h, w / px_w, h / px_h)
+                xs = [int(w.bbox[0]) for w in words]
+                ys = [int(w.bbox[1]) for w in words]
+                ws = [int(w.bbox[2]) for w in words]
+                hs = [int(w.bbox[3]) for w in words]
+                left = min(xs)
+                top = min(ys)
+                right = max(x + w for x, w in zip(xs, ws))
+                bottom = max(y + h for y, h in zip(ys, hs))
+                rect = QRectF(
+                    left / px_w,
+                    top / px_h,
+                    max(1.0, right - left) / px_w,
+                    max(1.0, bottom - top) / px_h,
+                )
                 rects.append(rect)
             except Exception:
                 rects.append(None)
@@ -218,7 +244,7 @@ class OcrSelectionOverlay(QObject):
 
     def _map_normalized_to_scene(self, scene_rect: QRectF, *, local: bool = False) -> List[Optional[QRectF]]:
         mapped: List[Optional[QRectF]] = []
-        for rect in self._normalized_word_rects:
+        for rect in self._normalized_line_rects:
             if rect is None:
                 mapped.append(None)
                 continue
@@ -234,29 +260,31 @@ class OcrSelectionOverlay(QObject):
                 mapped.append(local_rect)
         return mapped
 
-    def _create_word_items(self) -> None:
-        self._word_visuals = []
-        for word in self.words:
-            # Используем QGraphicsPathItem для скругленных углов
+    def _create_line_items(self) -> None:
+        self._line_visuals = []
+        for text in self._line_texts:
             background = QGraphicsPathItem()
             background.setZValue(9999)
             background.setAcceptedMouseButtons(Qt.NoButton)
 
-            # Полупрозрачный белый фон с тенью
-            background.setBrush(QColor(255, 255, 255, 240))
+            selection = QGraphicsPathItem(background)
+            selection.setZValue(1)
+            selection.setBrush(QColor(ModernColors.PRIMARY_LIGHT))
+            selection.setPen(Qt.NoPen)
+            selection.setVisible(False)
 
-            # Тонкая рамка для четкости
-            pen = QPen(QColor(200, 200, 200, 100))
+            background.setBrush(QColor(255, 255, 255, 235))
+            pen = QPen(QColor(200, 200, 200, 80))
             pen.setWidthF(0.5)
             background.setPen(pen)
 
-            text_item = QGraphicsSimpleTextItem(word.text, background)
+            text_item = QGraphicsSimpleTextItem(text, background)
             text_item.setBrush(QColor(ModernColors.TEXT_PRIMARY))
             text_item.setPen(Qt.NoPen)
             text_item.setAcceptedMouseButtons(Qt.NoButton)
 
             self.scene.addItem(background)
-            self._word_visuals.append(_WordVisual(background=background, text_item=text_item))
+            self._line_visuals.append(_LineVisual(background=background, selection=selection, text_item=text_item))
 
     def _create_rounded_rect_path(self, rect: QRectF, radius: float) -> QPainterPath:
         """Создает путь для прямоугольника со скругленными углами."""
@@ -265,42 +293,42 @@ class OcrSelectionOverlay(QObject):
         return path
 
     def _update_word_visual_geometry(self) -> None:
-        if not self._word_visuals:
+        if not self._line_visuals:
             return
-        for idx, visual in enumerate(self._word_visuals):
-            rect = self._scene_word_rects[idx] if idx < len(self._scene_word_rects) else None
-            if rect is None:
+
+        self._char_scene_rects = []
+        for idx, visual in enumerate(self._line_visuals):
+            rect = self._scene_line_rects[idx] if idx < len(self._scene_line_rects) else None
+            text = self._line_texts[idx] if idx < len(self._line_texts) else ""
+            if rect is None or not text:
                 if visual:
                     visual.background.setVisible(False)
+                    visual.selection.setVisible(False)
+                self._char_scene_rects.append([])
                 continue
 
-            # Увеличенный padding для лучшего вида
-            padding = max(2.0, rect.height() * 0.22)
-            target_height = max(8.0, rect.height() * 0.65)
+            padding = max(2.5, rect.height() * 0.22)
+            target_height = max(9.0, rect.height() * 0.7)
 
-            if visual is None:
-                continue
-
-            # Более четкий шрифт
             font = QFont()
             font.setPointSizeF(target_height)
-            font.setWeight(QFont.Medium)  # Немного жирнее для читаемости
+            font.setWeight(QFont.Medium)
             font.setHintingPreference(QFont.PreferFullHinting)
+
             visual.text_item.setFont(font)
             text_rect = visual.text_item.boundingRect()
 
             available_width = max(1.0, rect.width() - 2 * padding)
             if text_rect.width() > available_width and text_rect.width() > 0:
                 scale = available_width / text_rect.width()
-                font.setPointSizeF(max(7.0, font.pointSizeF() * scale))
+                font.setPointSizeF(max(8.0, font.pointSizeF() * scale))
                 visual.text_item.setFont(font)
                 text_rect = visual.text_item.boundingRect()
 
             bg_width = max(rect.width(), text_rect.width() + 2 * padding)
             bg_height = max(rect.height(), text_rect.height() + 2 * padding)
 
-            # Скругленные углы (радиус = 15% от высоты)
-            radius = min(bg_height * 0.15, bg_width * 0.15, 4.0)
+            radius = min(bg_height * 0.2, bg_width * 0.2, 5.0)
             rounded_path = self._create_rounded_rect_path(
                 QRectF(0, 0, bg_width, bg_height),
                 radius
@@ -309,56 +337,107 @@ class OcrSelectionOverlay(QObject):
             visual.background.setPos(rect.left(), rect.top())
             visual.background.setVisible(self._active)
 
-            # Центрируем текст
             text_x = max(padding, (bg_width - text_rect.width()) / 2)
             text_y = max(padding, (bg_height - text_rect.height()) / 2)
             visual.text_item.setPos(text_x, text_y)
 
+            metrics = QFontMetrics(font)
+            line_chars: List[Optional[QRectF]] = []
+            cursor_x = rect.left() + text_x
+            char_top = rect.top() + text_y
+            for ch in text:
+                width = metrics.horizontalAdvance(ch)
+                height = metrics.height()
+                char_rect = QRectF(cursor_x, char_top, max(1.0, width), max(1.0, height))
+                line_chars.append(char_rect)
+                cursor_x += width
+
+            self._char_scene_rects.append(line_chars)
+
+            visual.selection.setPath(QPainterPath())
+            visual.selection.setVisible(self._active)
+
     def _update_selection_for_rect(self, selection_rect: QRectF) -> None:
-        if not self._scene_word_rects:
+        if not self._char_scene_rects:
             return
-        selected = set()
-        for idx, rect in enumerate(self._scene_word_rects):
-            if rect is None:
+
+        selected: Dict[int, Set[int]] = {}
+        for line_idx, chars in enumerate(self._char_scene_rects):
+            if not chars:
                 continue
-            if selection_rect.isNull():
-                if rect.contains(selection_rect.topLeft()):
-                    selected.add(idx)
-                continue
-            if selection_rect.intersects(rect):
-                selected.add(idx)
-        self._selected_indexes = selected
+            for char_idx, rect in enumerate(chars):
+                if rect is None:
+                    continue
+                if selection_rect.isNull():
+                    if rect.contains(selection_rect.topLeft()):
+                        selected.setdefault(line_idx, set()).add(char_idx)
+                    continue
+                if selection_rect.intersects(rect):
+                    selected.setdefault(line_idx, set()).add(char_idx)
+
+        self._selected_chars = selected
         self._update_selection_visuals()
 
     def _update_selection_visuals(self) -> None:
-        if not self._word_visuals:
+        if not self._line_visuals:
             return
 
-        # Более яркие и современные цвета для выделения
         selected_bg = QColor(ModernColors.PRIMARY_LIGHT)
-        selected_bg.setAlpha(220)
-        selected_fg = QColor(ModernColors.PRIMARY)
+        selected_bg.setAlpha(210)
+        base_bg = QColor(255, 255, 255, 235)
+        base_pen = QPen(QColor(200, 200, 200, 80))
+        base_pen.setWidthF(0.5)
 
-        # Улучшенные базовые цвета
-        base_bg = QColor(255, 255, 255, 240)
-        base_fg = QColor(ModernColors.TEXT_PRIMARY)
-
-        for idx, visual in enumerate(self._word_visuals):
+        for idx, visual in enumerate(self._line_visuals):
             if visual is None:
                 continue
-            is_selected = idx in self._selected_indexes
 
-            visual.background.setBrush(selected_bg if is_selected else base_bg)
-            visual.text_item.setBrush(selected_fg if is_selected else base_fg)
-
-            # Изменяем границу для выделенных элементов
-            if is_selected:
-                pen = QPen(QColor(ModernColors.PRIMARY))
-                pen.setWidthF(1.0)
-                visual.background.setPen(pen)
-            else:
-                pen = QPen(QColor(200, 200, 200, 100))
-                pen.setWidthF(0.5)
-                visual.background.setPen(pen)
-
+            selection = self._selected_chars.get(idx, set())
+            visual.background.setBrush(base_bg)
+            visual.background.setPen(base_pen)
             visual.background.setVisible(self._active)
+
+            visual.text_item.setBrush(QColor(ModernColors.PRIMARY if selection else ModernColors.TEXT_PRIMARY))
+
+            if not selection or idx >= len(self._char_scene_rects):
+                visual.selection.setPath(QPainterPath())
+                visual.selection.setVisible(False)
+                continue
+
+            path = QPainterPath()
+            chars = self._char_scene_rects[idx]
+            if not chars:
+                visual.selection.setPath(path)
+                visual.selection.setVisible(False)
+                continue
+
+            ordered = sorted(selection)
+            start = prev = ordered[0]
+            ranges: List[Tuple[int, int]] = []
+            for char_idx in ordered[1:]:
+                if char_idx == prev + 1:
+                    prev = char_idx
+                    continue
+                ranges.append((start, prev))
+                start = prev = char_idx
+            ranges.append((start, prev))
+
+            for a, b in ranges:
+                if a >= len(chars) or chars[a] is None:
+                    continue
+                left = chars[a].left()
+                top = chars[a].top()
+                right = chars[b].right() if b < len(chars) and chars[b] is not None else left
+                height = chars[a].height()
+                bg_pos = visual.background.pos()
+                highlight_rect = QRectF(
+                    left - bg_pos.x(),
+                    top - bg_pos.y(),
+                    max(1.0, right - left),
+                    height,
+                )
+                path.addRoundedRect(highlight_rect, 3.0, 3.0)
+
+            visual.selection.setPath(path)
+            visual.selection.setBrush(selected_bg)
+            visual.selection.setVisible(self._active)
