@@ -11,6 +11,21 @@ from pytesseract import TesseractError, TesseractNotFoundError
 
 from logic import qimage_to_pil
 
+# === Fallback поиск Tesseract (добавлено) ===
+import os
+
+_FALLBACK_PATHS = [
+    r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+    r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+]
+
+for _p in _FALLBACK_PATHS:
+    if os.path.exists(_p):
+        pytesseract.pytesseract.tesseract_cmd = _p
+        break
+# === конец добавленного кода ===
+
+
 LANGUAGE_DISPLAY_NAMES = {
     "eng": "English",
     "rus": "Russian",
@@ -93,7 +108,6 @@ class OcrSettings:
             self.last_language = requested
         used = [str(lang).strip() for lang in languages_used if str(lang).strip()]
         if used:
-            # Preserve order while removing duplicates
             seen = set()
             ordered = []
             for lang in used:
@@ -150,7 +164,6 @@ def get_available_languages() -> List[str]:
             "Tesseract не найден. Установите бинарник tesseract-ocr и добавьте его в PATH."
         ) from exc
     except TesseractError:
-        # Tesseract is present but cannot list languages (keep working with fallback)
         return []
 
 
@@ -164,7 +177,6 @@ def run_ocr(
     lang_string, missing, usable_langs = _normalize_languages(language_hint, settings, available)
 
     try:
-        # Explicit check so we can present a friendly error before attempting OCR
         pytesseract.get_tesseract_version()
     except TesseractNotFoundError as exc:
         raise OcrError(
