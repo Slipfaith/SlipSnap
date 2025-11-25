@@ -1,8 +1,8 @@
 from typing import Optional, Dict, Tuple
 import math
 
-from PySide6.QtCore import Qt, QPointF, QRectF, Signal, QMarginsF
-from PySide6.QtGui import QPainter, QPen, QColor, QImage, QUndoStack
+from PySide6.QtCore import Qt, QPointF, QRectF, Signal, QMarginsF, QEasingCurve, QVariantAnimation
+from PySide6.QtGui import QPainter, QPen, QColor, QImage, QUndoStack, QLinearGradient, QBrush, QPainterPath
 from PySide6.QtWidgets import (
     QGraphicsView,
     QGraphicsScene,
@@ -11,6 +11,9 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QFrame,
+    QGraphicsRectItem,
+    QGraphicsPathItem,
+    QGraphicsDropShadowEffect,
 )
 from PIL import Image
 
@@ -92,6 +95,10 @@ class Canvas(QGraphicsView):
         self._text_manager: Optional[TextManager] = None
         self._zoom = 1.0
         self.ocr_overlay = OcrSelectionOverlay(self)
+        self._ocr_scan_bar: Optional[QGraphicsPathItem] = None
+        self._ocr_scan_dim: Optional[QGraphicsRectItem] = None
+        self._ocr_scan_anim = None
+        self._ocr_scan_fade = None
 
         self.tools = {
             "select": SelectionTool(self),
@@ -166,6 +173,7 @@ class Canvas(QGraphicsView):
         if self._text_manager:
             self._text_manager.finish_current_editing()
         self._apply_lock_state()
+        self.hide_ocr_scanner()
         self.update_scene_rect()
 
     def handle_item_removed(self, item: QGraphicsItem) -> None:
@@ -330,6 +338,109 @@ class Canvas(QGraphicsView):
         if self.ocr_overlay and self.ocr_overlay.has_words():
             return self.ocr_overlay.full_text()
         return ""
+
+    # ---- OCR scanner animation ----
+    def show_ocr_scanner(self, target_rect: Optional[QRectF] = None, *, laser_color: Optional[QColor] = None) -> None:
+        self.hide_ocr_scanner()
+        if target_rect is None:
+            target_rect = self.pixmap_item.sceneBoundingRect() if self.pixmap_item else self.scene.itemsBoundingRect()
+        if target_rect is None or target_rect.isNull():
+            return
+
+        color = QColor(laser_color or ModernColors.PRIMARY)
+        bar_height = 34.0
+        gradient = self._build_scanner_gradient(color, bar_height)
+
+        dim_rect = QGraphicsRectItem(target_rect)
+        dim_rect.setBrush(QColor(0, 0, 0, 70))
+        dim_rect.setPen(Qt.NoPen)
+        dim_rect.setZValue(9997)
+        dim_rect.setData(0, "ocr_scanner")
+        self.scene.addItem(dim_rect)
+        self._ocr_scan_dim = dim_rect
+
+        bar_path = QGraphicsPathItem()
+        bar_path.setBrush(QBrush(gradient))
+        bar_path.setPen(Qt.NoPen)
+        bar_path.setZValue(9999)
+        bar_path.setData(0, "ocr_scanner")
+
+        path = QPainterPath()
+        path.addRect(0, 0, target_rect.width(), bar_height)
+        bar_path.setPath(path)
+        bar_path.setPos(target_rect.left(), target_rect.top() - bar_height)
+
+        glow = QGraphicsDropShadowEffect()
+        glow.setBlurRadius(22)
+        glow.setColor(self._laser_tip_color(color))
+        glow.setOffset(0, 0)
+        bar_path.setGraphicsEffect(glow)
+
+        self.scene.addItem(bar_path)
+        self._ocr_scan_bar = bar_path
+
+        anim = QVariantAnimation(self)
+        anim.setStartValue(target_rect.top() - bar_height)
+        anim.setEndValue(target_rect.bottom())
+        anim.setDuration(1800)
+        anim.setLoopCount(-1)
+        anim.setEasingCurve(QEasingCurve.InOutQuad)
+        anim.valueChanged.connect(lambda value: bar_path.setY(float(value)))
+        anim.start()
+        self._ocr_scan_anim = anim
+
+    def hide_ocr_scanner(self, *, final_color: Optional[QColor] = None) -> None:
+        if self._ocr_scan_anim:
+            self._ocr_scan_anim.stop()
+            self._ocr_scan_anim = None
+
+        if self._ocr_scan_bar is None and self._ocr_scan_dim is None:
+            return
+
+        if self._ocr_scan_bar and final_color:
+            bar_height = self._ocr_scan_bar.path().boundingRect().height()
+            self._ocr_scan_bar.setBrush(QBrush(self._build_scanner_gradient(final_color, bar_height)))
+        fade = QVariantAnimation(self)
+        fade.setDuration(240)
+        fade.setStartValue(1.0)
+        fade.setEndValue(0.0)
+        fade.valueChanged.connect(self._set_scanner_opacity)
+        fade.finished.connect(self._remove_scanner_items)
+        fade.start()
+        self._ocr_scan_fade = fade
+
+    def _set_scanner_opacity(self, opacity: float) -> None:
+        if self._ocr_scan_bar:
+            self._ocr_scan_bar.setOpacity(float(opacity))
+        if self._ocr_scan_dim:
+            self._ocr_scan_dim.setOpacity(float(opacity))
+
+    def _remove_scanner_items(self) -> None:
+        if self._ocr_scan_bar:
+            self.scene.removeItem(self._ocr_scan_bar)
+        if self._ocr_scan_dim:
+            self.scene.removeItem(self._ocr_scan_dim)
+        self._ocr_scan_bar = None
+        self._ocr_scan_dim = None
+        self._ocr_scan_fade = None
+
+    def _laser_tip_color(self, color: QColor) -> QColor:
+        tip = QColor(color)
+        tip.setAlpha(230)
+        return tip
+
+    def _build_scanner_gradient(self, color: QColor, bar_height: float) -> QLinearGradient:
+        gradient = QLinearGradient(0, 0, 0, bar_height)
+        top = QColor(color)
+        top.setAlpha(0)
+        middle = QColor(color)
+        middle.setAlpha(120)
+        bottom = QColor(color)
+        bottom.setAlpha(255)
+        gradient.setColorAt(0.0, top)
+        gradient.setColorAt(0.5, middle)
+        gradient.setColorAt(1.0, bottom)
+        return gradient
 
     def undo(self):
         self.undo_stack.undo()

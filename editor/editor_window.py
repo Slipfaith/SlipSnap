@@ -4,8 +4,8 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from PIL import Image
-from PySide6.QtCore import Qt, QTimer, QRectF
-from PySide6.QtGui import QAction, QImage, QPixmap, QPainter, QPainterPath, QKeySequence, QShortcut
+from PySide6.QtCore import Qt, QTimer, QRectF, Signal, QThread
+from PySide6.QtGui import QAction, QImage, QPixmap, QPainter, QPainterPath, QKeySequence, QShortcut, QColor
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -52,6 +52,25 @@ from .ui.meme_library_dialog import MemesDialog
 from icons import make_icon_series
 
 from design_tokens import Metrics, editor_main_stylesheet
+
+
+class _OcrWorker(QThread):
+    finished = Signal(object, object)
+
+    def __init__(self, capture: OcrCapture, settings: OcrSettings, language_hint: str):
+        super().__init__()
+        self.capture = capture
+        self.settings = settings
+        self.language_hint = language_hint
+
+    def run(self):
+        result = None
+        error = None
+        try:
+            result = run_ocr(self.capture.image.copy(), self.settings, language_hint=self.language_hint)
+        except Exception as exc:  # noqa: BLE001
+            error = exc
+        self.finished.emit(result, error)
 
 
 class _LanguagePickerDialog(QDialog):
@@ -239,6 +258,8 @@ class EditorWindow(QMainWindow):
         self.logic = EditorLogic(self.canvas)
         self.ocr_settings = OcrSettings.from_config(self.cfg)
         self._last_ocr_capture: Optional[OcrCapture] = None
+        self._last_ocr_language_hint: str = ""
+        self._ocr_worker: Optional[_OcrWorker] = None
         self._ocr_toast: Optional[QWidget] = None
         self._ocr_toast_timer = QTimer(self)
         self._ocr_toast_timer.setSingleShot(True)
@@ -590,6 +611,38 @@ class EditorWindow(QMainWindow):
             self._apply_ocr_languages(languages)
         return "+".join(languages)
 
+    def _start_ocr_scan(self, capture: OcrCapture) -> None:
+        if self.canvas.ocr_overlay:
+            self.canvas.ocr_overlay.clear()
+            self.canvas.ocr_overlay.set_active(False)
+        self.canvas.show_ocr_scanner(capture.scene_rect)
+
+    def _stop_ocr_scan(self, *, success: bool = True) -> None:
+        color = QColor(ModernColors.SUCCESS if success else ModernColors.ERROR)
+        self.canvas.hide_ocr_scanner(final_color=color)
+
+    def _on_ocr_worker_finished(self, result: Optional[OcrResult], error: Optional[Exception]) -> None:
+        worker = self._ocr_worker
+        self._ocr_worker = None
+        if worker:
+            worker.deleteLater()
+
+        self._stop_ocr_scan(success=error is None)
+
+        if error:
+            message = str(error)
+            QMessageBox.warning(self, "SlipSnap · OCR", message)
+            return
+
+        if result is None:
+            QMessageBox.warning(self, "SlipSnap · OCR", "Не удалось получить результат OCR.")
+            return
+
+        languages_used = result.languages_used or self.ocr_settings.preferred_languages
+        self.ocr_settings.remember_run(self._last_ocr_language_hint, languages_used)
+        self._apply_ocr_languages(self.ocr_settings.preferred_languages)
+        self._handle_ocr_result(result)
+
     def _activate_ocr_text_mode(self) -> None:
         self.canvas.set_tool("ocr")
 
@@ -691,23 +744,22 @@ class EditorWindow(QMainWindow):
             self.canvas.update_scene_rect()
 
     def rerun_ocr_with_language(self):
+        if self._ocr_worker:
+            return
+
         capture = self._current_ocr_capture()
         if capture is None:
             QMessageBox.warning(self, "SlipSnap · OCR", "Нет изображения для распознавания.")
             return
 
         lang_choice = self._current_ocr_language_hint()
+        self._last_ocr_language_hint = lang_choice
+        self._start_ocr_scan(capture)
 
-        try:
-            result = run_ocr(capture.image, self.ocr_settings, language_hint=lang_choice)
-        except OcrError as e:
-            QMessageBox.warning(self, "SlipSnap · OCR", str(e))
-            return
-
-        languages_used = result.languages_used or self.ocr_settings.preferred_languages
-        self.ocr_settings.remember_run(lang_choice, languages_used)
-        self._apply_ocr_languages(self.ocr_settings.preferred_languages)
-        self._handle_ocr_result(result)
+        worker = _OcrWorker(capture, self.ocr_settings, lang_choice)
+        worker.finished.connect(self._on_ocr_worker_finished)
+        self._ocr_worker = worker
+        worker.start()
 
     # ---- key events ----
     def keyPressEvent(self, event):
