@@ -32,9 +32,9 @@ class ImageStitcher:
         for i in range(1, len(frame_list)):
             previous = result
             current = frame_list[i]
-            offset = self._find_overlap_offset(previous, current)
+            overlap = self._find_overlap_offset(previous, current)
             # Добавляем только уникальную часть
-            unique_part = current[offset:]
+            unique_part = current[overlap:]
             if unique_part.size == 0:
                 continue
             result = np.vstack([previous, unique_part])
@@ -45,7 +45,7 @@ class ImageStitcher:
         return str(output)
 
     def _find_overlap_offset(self, img1: np.ndarray, img2: np.ndarray) -> int:
-        """Находит смещение по Y между двумя кадрами."""
+        """Возвращает высоту перекрытия между двумя кадрами."""
         if img1 is None or img2 is None:
             return self.default_overlap
         # Ограничиваем области поиска
@@ -65,6 +65,11 @@ class ImageStitcher:
                 return self.default_overlap
             # Позиция совпадения определяет пересечение
             overlap_y = max_loc[1]
-            return max(int(h1 * 0.7) + overlap_y, self.default_overlap)
+            overlap_start = int(h1 * 0.7) + overlap_y
+            # Перекрытие — часть предыдущего кадра ниже точки совпадения
+            overlap_height = h1 - overlap_start
+            if overlap_height <= 0:
+                return self.default_overlap
+            return max(overlap_height, self.default_overlap)
         except Exception:
             return self.default_overlap
