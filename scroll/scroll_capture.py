@@ -13,9 +13,7 @@ try:
     import win32gui
     import win32ui
 except Exception as exc:  # pragma: no cover - платформа без win32
-    raise ImportError(
-        "scroll_capture доступен только под Windows с установленным pywin32"
-    ) from exc
+    raise ImportError("scroll_capture доступен только под Windows") from exc
 
 try:
     import comtypes.client  # type: ignore

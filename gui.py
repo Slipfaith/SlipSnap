@@ -1,6 +1,7 @@
 from typing import List, Tuple, Optional, TYPE_CHECKING, Type
 from pathlib import Path
 from time import perf_counter
+import platform
 from PIL import Image, ImageFilter, ImageDraw, ImageQt
 
 try:
@@ -838,7 +839,7 @@ class App(QObject):
             manager = self._get_scroll_manager()
         except ImportError:
             QMessageBox.warning(
-                None, "SlipSnap", "Скролл-снимок доступен только на Windows с установленным pywin32."
+                None, "SlipSnap", "Скролл-снимок доступен только на Windows."
             )
             return
 
@@ -926,6 +927,8 @@ class App(QObject):
 
     def _get_scroll_manager(self):
         if self._scroll_manager is None:
+            if platform.system() != "Windows":
+                raise ImportError("scroll capture supported only on Windows")
             from scroll.scroll_capture_manager import ScrollCaptureManager
 
             self._scroll_manager = ScrollCaptureManager(self)
