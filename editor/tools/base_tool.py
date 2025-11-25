@@ -9,12 +9,9 @@ class BaseTool:
 
     def press(self, pos: QPointF):
         """Handle mouse press at scene position."""
-        pass
 
     def move(self, pos: QPointF):
         """Handle mouse move while pressing."""
-        pass
 
     def release(self, pos: QPointF):
         """Handle mouse release."""
-        pass

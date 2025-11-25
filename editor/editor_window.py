@@ -3,7 +3,6 @@
 from pathlib import Path
 from typing import Callable, Optional
 
-from PIL import Image
 from PySide6.QtCore import Qt, QTimer, QRectF, Signal, QThread
 from PySide6.QtGui import QAction, QImage, QPixmap, QPainter, QPainterPath, QKeySequence, QShortcut, QColor
 from PySide6.QtWidgets import (

@@ -12,7 +12,6 @@ from PySide6.QtGui import QImage
 
 try:
     import win32clipboard as wc
-    import win32con
     HAS_WIN32 = True
 except ImportError:
     HAS_WIN32 = False

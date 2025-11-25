@@ -3,7 +3,7 @@ import sys
 from collections import defaultdict
 
 import ctypes
-from ctypes import c_bool, c_int, WINFUNCTYPE, GetLastError
+from ctypes import c_bool, c_int, WINFUNCTYPE
 from ctypes.wintypes import UINT
 
 from .keybindutil import keys_from_string

@@ -596,7 +596,7 @@ class App(QObject):
         app = QApplication.instance()
         if app is not None:
             app.aboutToQuit.connect(self._cleanup_on_exit)
-        elapsed = perf_counter() - init_started
+        perf_counter() - init_started
 
     def _toggle_shape(self):
         if hasattr(self, "ovm"):

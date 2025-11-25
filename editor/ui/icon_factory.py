@@ -1,8 +1,7 @@
 from PySide6.QtCore import QPointF, Qt, QRectF
 from PySide6.QtGui import (
     QPainter, QPen, QPixmap, QIcon, QColor, QCursor,
-    QBrush, QLinearGradient, QPainterPath, QRadialGradient,
-    QPolygonF
+    QBrush, QPainterPath, QRadialGradient
 )
 
 from .styles import ModernColors
