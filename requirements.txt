@@ -2,6 +2,6 @@ PySide6
 Pillow
 mss
 pytesseract
-pyqtkeybind
 psutil
 pyinstaller>=6
+pynput
