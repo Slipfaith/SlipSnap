@@ -47,6 +47,7 @@ from .ui.canvas import Canvas
 from .ui.high_quality_pixmap_item import HighQualityPixmapItem
 from .ui.color_widgets import HexColorDialog
 from .ui.toolbar_factory import create_tools_toolbar, create_actions_toolbar
+from .ui.styles import ModernColors
 from .ui.window_utils import size_to_image
 from .ui.meme_library_dialog import MemesDialog
 from icons import make_icon_series
