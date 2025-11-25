@@ -41,10 +41,11 @@ from PySide6.QtWidgets import (
     QKeySequenceEdit,
     QSystemTrayIcon,
     QMenu,
+    QProgressDialog,
 )
 from logic import load_config, save_config, qimage_to_pil, save_history
 from clipboard_utils import copy_pil_image_to_clipboard
-from icons import make_icon_capture, make_icon_shape, make_icon_close
+from icons import make_icon_capture, make_icon_shape, make_icon_close, make_icon_scroll
 from pyqtkeybind import keybinder
 
 from editor.series_capture import SeriesCaptureController
@@ -434,6 +435,7 @@ class OverlayManager(QObject):
 
 class Launcher(QWidget):
     start_capture = Signal()
+    start_scroll_capture = Signal()
     toggle_shape = Signal()
     hotkey_changed = Signal(str)
     request_hide = Signal()
@@ -472,6 +474,16 @@ class Launcher(QWidget):
         self.btn_capture.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
         self.btn_capture.clicked.connect(self.start_capture.emit)
         btns.addWidget(self.btn_capture)
+
+        self.btn_scroll = QToolButton()
+        self.btn_scroll.setIcon(make_icon_scroll())
+        self.btn_scroll.setIconSize(QSize(Metrics.LAUNCHER_ICON, Metrics.LAUNCHER_ICON))
+        self.btn_scroll.setText("Скролл")
+        self.btn_scroll.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+        scroll_hotkey = self.cfg.get("scroll_capture_hotkey", "Ctrl+Alt+Shift+S")
+        self.btn_scroll.setToolTip(f"Скролл-снимок ({scroll_hotkey})")
+        self.btn_scroll.clicked.connect(self.start_scroll_capture.emit)
+        btns.addWidget(self.btn_scroll)
 
         self.btn_shape = QToolButton()
         self.btn_shape.setIcon(make_icon_shape(self.cfg.get("shape", "rect")))
@@ -564,6 +576,7 @@ class App(QObject):
         self.cfg = load_config()
         self.launcher = Launcher(self.cfg)
         self.launcher.start_capture.connect(self.capture_region)
+        self.launcher.start_scroll_capture.connect(self.start_scroll_capture)
         self.launcher.toggle_shape.connect(self._toggle_shape)
         self.launcher.hotkey_changed.connect(self._update_hotkey)
         self.launcher.request_hide.connect(self._on_launcher_hide_request)
@@ -574,7 +587,9 @@ class App(QObject):
             self._keybinder_event_filter = _KeybinderEventFilter()
             dispatcher.installNativeEventFilter(self._keybinder_event_filter)
         self._hotkey_seq = None
+        self._scroll_hotkey_seq = None
         self._register_hotkey(self.cfg.get("capture_hotkey", "Ctrl+Alt+S"))
+        self._register_scroll_hotkey(self.cfg.get("scroll_capture_hotkey", "Ctrl+Alt+Shift+S"))
         self.launcher.show()
         self._captured_once = False
         self._hidden_editors: List["EditorWindow"] = []
@@ -592,6 +607,8 @@ class App(QObject):
         self._is_background = False
         self._series_controller = SeriesCaptureController(self.cfg)
         self._series_parent: Optional[QWidget] = None
+        self._scroll_manager = None
+        self._scroll_progress: Optional[QProgressDialog] = None
         self._init_tray_icon()
         app = QApplication.instance()
         if app is not None:
@@ -617,6 +634,21 @@ class App(QObject):
         else:
             self._hotkey_seq = None
             QMessageBox.warning(None, "SlipSnap", f"Не удалось зарегистрировать горячую клавишу: {seq}")
+
+    def _register_scroll_hotkey(self, seq: str):
+        if self._scroll_hotkey_seq:
+            try:
+                keybinder.unregister_hotkey(None, self._scroll_hotkey_seq)
+            except (KeyError, AttributeError):
+                pass
+
+        if keybinder.register_hotkey(None, seq, self.start_scroll_capture):
+            self._scroll_hotkey_seq = seq
+        else:
+            self._scroll_hotkey_seq = None
+            QMessageBox.warning(
+                None, "SlipSnap", f"Не удалось зарегистрировать горячую клавишу скролла: {seq}"
+            )
 
     def _update_hotkey(self, seq: str):
         self._register_hotkey(seq)
@@ -801,6 +833,22 @@ class App(QObject):
         self._full_capture_in_progress = False
         self._update_tray_actions()
 
+    def start_scroll_capture(self):
+        try:
+            manager = self._get_scroll_manager()
+        except ImportError:
+            QMessageBox.warning(
+                None, "SlipSnap", "Скролл-снимок доступен только на Windows с установленным pywin32."
+            )
+            return
+
+        self._hide_editor_windows()
+        self.launcher.hide()
+        try:
+            manager.start_selection()
+        except Exception as exc:  # noqa: BLE001
+            self._on_scroll_capture_error(str(exc))
+
     def _on_finished(self):
         self._restore_hidden_editors()
         if not self._captured_once:
@@ -875,6 +923,76 @@ class App(QObject):
             QMessageBox.critical(None, "SlipSnap", f"Ошибка обработки: {e}")
             self.launcher.show()
             self._restore_hidden_editors()
+
+    def _get_scroll_manager(self):
+        if self._scroll_manager is None:
+            from scroll.scroll_capture_manager import ScrollCaptureManager
+
+            self._scroll_manager = ScrollCaptureManager(self)
+            self._scroll_manager.selection_started.connect(self._on_scroll_selection_started)
+            self._scroll_manager.capture_started.connect(self._on_scroll_capture_started)
+            self._scroll_manager.progress_updated.connect(self._on_scroll_progress)
+            self._scroll_manager.capture_completed.connect(self._on_scroll_capture_complete)
+            self._scroll_manager.error_occurred.connect(self._on_scroll_capture_error)
+        return self._scroll_manager
+
+    def _on_scroll_selection_started(self):
+        self._show_scroll_progress("Наведите курсор и выберите окно для скролл-снимка", 0)
+
+    def _on_scroll_capture_started(self, _hwnd: int):
+        self._show_scroll_progress("Захват прокручиваемого окна...", 5)
+
+    def _on_scroll_progress(self, percent: int, message: str):
+        self._show_scroll_progress(message, max(0, min(percent, 100)))
+
+    def _on_scroll_capture_complete(self, image_path: str):
+        self._hide_scroll_progress()
+        try:
+            img = Image.open(image_path).convert("RGBA")
+            qimg = copy_pil_image_to_clipboard(img)
+            preserved_hidden = list(self._hidden_editors)
+            self._on_captured(qimg)
+            self._hidden_editors = preserved_hidden
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(None, "SlipSnap", f"Ошибка скролл-снимка: {exc}")
+        self._restore_hidden_editors()
+
+    def _on_scroll_capture_error(self, message: str):
+        self._hide_scroll_progress()
+        QMessageBox.warning(None, "SlipSnap", message)
+        self.launcher.show()
+        self._restore_hidden_editors()
+
+    def _cancel_scroll_capture(self):
+        if self._scroll_manager is not None:
+            try:
+                self._scroll_manager.stop()
+            except Exception:
+                pass
+        self._hide_scroll_progress()
+        self.launcher.show()
+        self._restore_hidden_editors()
+
+    def _show_scroll_progress(self, text: str, value: int = 0):
+        if self._scroll_progress is None:
+            self._scroll_progress = QProgressDialog("", "Отмена", 0, 100, self.launcher)
+            self._scroll_progress.setWindowTitle("SlipSnap · Скролл-снимок")
+            self._scroll_progress.canceled.connect(self._cancel_scroll_capture)
+            self._scroll_progress.setAutoClose(False)
+            self._scroll_progress.setAutoReset(False)
+            self._scroll_progress.setWindowModality(Qt.WindowModal)
+        self._scroll_progress.setLabelText(text)
+        self._scroll_progress.setValue(max(0, min(value, 100)))
+        self._scroll_progress.show()
+
+    def _hide_scroll_progress(self):
+        if self._scroll_progress is not None:
+            try:
+                self._scroll_progress.hide()
+                self._scroll_progress.deleteLater()
+            except Exception:
+                pass
+            self._scroll_progress = None
 
     def _on_main_editor_destroyed(self, *_):
         self._main_editor = None
@@ -984,6 +1102,13 @@ class App(QObject):
                 pass
             self._hotkey_seq = None
 
+        if self._scroll_hotkey_seq:
+            try:
+                keybinder.unregister_hotkey(None, self._scroll_hotkey_seq)
+            except (KeyError, AttributeError):
+                pass
+            self._scroll_hotkey_seq = None
+
         if self._tray_icon is not None:
             self._tray_icon.hide()
             self._tray_icon.deleteLater()
@@ -992,6 +1117,14 @@ class App(QObject):
         if self._tray_menu is not None:
             self._tray_menu.deleteLater()
             self._tray_menu = None
+
+        if self._scroll_manager is not None:
+            try:
+                self._scroll_manager.stop()
+            except Exception:
+                pass
+            self._scroll_manager = None
+        self._hide_scroll_progress()
 
         self._release_background_resources()
         return True

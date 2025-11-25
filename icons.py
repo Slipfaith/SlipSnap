@@ -130,3 +130,26 @@ def make_icon_series(size: int = Metrics.ICON_SMALL) -> QIcon:
     p.drawLine(size // 2 - 3, size - m - 2, size // 2 + 4, size - m - 2)
     p.end()
     return QIcon(pm)
+
+
+def make_icon_scroll(size: int = Metrics.ICON_SMALL) -> QIcon:
+    """Иконка свитка со стрелкой — «Скролл-снимок»"""
+    pm = _pm(size)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+    margin = Metrics.ICON_MARGIN_SMALL
+
+    # Свиток
+    body_pen = QPen(QColor(*Palette.ICON_NEUTRAL), 2)
+    p.setPen(body_pen)
+    p.drawRoundedRect(margin, margin, size - 2 * margin, size - 2 * margin, 6, 6)
+    p.drawArc(size // 2, margin // 2, size // 2, size // 2, 30 * 16, 210 * 16)
+
+    # Стрелка вниз
+    p.setPen(QPen(QColor(*Palette.ICON_POSITIVE), 2.4))
+    arrow_y = size // 2 + 2
+    p.drawLine(size // 2, arrow_y - 4, size // 2, arrow_y + 6)
+    p.drawLine(size // 2, arrow_y + 6, size // 2 - 5, arrow_y + 1)
+    p.drawLine(size // 2, arrow_y + 6, size // 2 + 5, arrow_y + 1)
+    p.end()
+    return QIcon(pm)
