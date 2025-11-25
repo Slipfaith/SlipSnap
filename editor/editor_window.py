@@ -461,24 +461,46 @@ class EditorWindow(QMainWindow):
         quick_row = QHBoxLayout()
         quick_row.setSpacing(6)
         quick_row.setContentsMargins(0, 0, 0, 0)
-        quick_checks: dict[str, QCheckBox] = {}
+        quick_buttons: dict[str, QToolButton] = {}
 
         def _apply_and_refresh(lang: str, checked: bool) -> None:
             self._update_ocr_language_selection(lang, checked, refresh_ui=False)
             selected_set.clear()
             selected_set.update(self.ocr_settings.preferred_languages)
-            for code, check in quick_checks.items():
-                check.blockSignals(True)
-                check.setChecked(code in selected_set)
-                check.blockSignals(False)
+            for code, button in quick_buttons.items():
+                button.blockSignals(True)
+                button.setChecked(code in selected_set)
+                button.blockSignals(False)
             _populate(search_edit.text())
 
+        flag_map = {
+            "rus": "🇷🇺",
+            "eng": "🇺🇸",
+            "chi_sim": "🇨🇳",
+        }
+
         for code, label in quick_codes:
-            cb = QCheckBox(label)
-            cb.setChecked(code in selected_set)
-            cb.toggled.connect(lambda checked, lang=code: _apply_and_refresh(lang, checked))
-            quick_checks[code] = cb
-            quick_row.addWidget(cb)
+            btn = QToolButton()
+            btn.setText(flag_map.get(code, label))
+            btn.setCheckable(True)
+            btn.setChecked(code in selected_set)
+            btn.setToolTip(label)
+            btn.setFixedSize(40, 32)
+            btn.setStyleSheet(
+                "QToolButton {"
+                "  border: 1px solid #d0d7de;"
+                "  border-radius: 8px;"
+                "  background: #f6f8fa;"
+                "  font-size: 18px;"
+                "}"
+                "QToolButton:checked {"
+                "  background: #e6f1ff;"
+                "  border-color: #4c8bf5;"
+                "}"
+            )
+            btn.toggled.connect(lambda checked, lang=code: _apply_and_refresh(lang, checked))
+            quick_buttons[code] = btn
+            quick_row.addWidget(btn)
         quick_row.addStretch(1)
         layout.addLayout(quick_row)
 
