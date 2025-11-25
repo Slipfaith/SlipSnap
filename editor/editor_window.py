@@ -4,7 +4,17 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from PySide6.QtCore import Qt, QTimer, QRectF, Signal, QThread
-from PySide6.QtGui import QAction, QImage, QPixmap, QPainter, QPainterPath, QKeySequence, QShortcut, QColor
+from PySide6.QtGui import (
+    QAction,
+    QImage,
+    QPixmap,
+    QPainter,
+    QPainterPath,
+    QKeySequence,
+    QShortcut,
+    QColor,
+    QIcon,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -249,6 +259,10 @@ class EditorWindow(QMainWindow):
         super().__init__()
         self.cfg = cfg
         self.setWindowTitle("SlipSnap — Редактор")
+
+        icon_path = Path(__file__).resolve().parents[1] / "SlipSnap.ico"
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
 
         self.setMinimumSize(Metrics.MAIN_WINDOW_MIN_WIDTH, Metrics.MAIN_WINDOW_MIN_HEIGHT)
 
