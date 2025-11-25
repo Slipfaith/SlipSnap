@@ -28,6 +28,7 @@ DEFAULT_CONFIG = {
     "pen_width": 3,
     "font_px": Typography.TEXT_TOOL_DEFAULT_POINT,
     "capture_hotkey": "Ctrl+Alt+S",
+    "scroll_capture_hotkey": "Ctrl+Alt+Shift+S",
     "series_prefix": "Series",
     "series_folder": str(Path.home()),
     "ocr_settings": {

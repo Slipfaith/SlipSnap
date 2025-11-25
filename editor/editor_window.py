@@ -365,6 +365,8 @@ class EditorWindow(QMainWindow):
     def show_shortcuts(self):
         shortcuts = (
             "SlipSnap — горячие клавиши\n\n"
+            f"{self.cfg.get('capture_hotkey', 'Ctrl+Alt+S')} — глобальный снимок\n"
+            f"{self.cfg.get('scroll_capture_hotkey', 'Ctrl+Alt+Shift+S')} — скролл-снимок окна\n"
             "Ctrl+N — новый снимок\n"
             "Ctrl+Shift+N — коллаж\n"
             "Ctrl+K — история\n"

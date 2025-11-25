@@ -133,7 +133,7 @@ class Metrics:
     ICON_MARGIN_SERIES: int = 6
     ICON_SERIES_OFFSET: int = 4
 
-    LAUNCHER_WIDTH: int = 260
+    LAUNCHER_WIDTH: int = 320
     LAUNCHER_HEIGHT: int = 85
     LAUNCHER_ICON: int = 20
     LAUNCHER_MARGIN: Tuple[int, int, int, int] = (16, 12, 16, 14)
