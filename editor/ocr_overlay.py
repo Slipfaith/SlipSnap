@@ -455,10 +455,14 @@ class OcrSelectionOverlay(QObject):
             line = anchor_line
             while True:
                 if line == anchor_line:
-                    _select_range(line, 0, len(self._char_scene_rects[line]))
+                    start_idx = anchor_char if anchor_char is not None else 0
+                    _select_range(line, start_idx, len(self._char_scene_rects[line]))
                 elif line == focus_line:
-                    cutoff = focus_char if focus_char is not None else len(self._char_scene_rects[line])
-                    _select_range(line, 0, cutoff)
+                    if step == 1:
+                        start_idx, end_idx = 0, focus_char if focus_char is not None else len(self._char_scene_rects[line])
+                    else:
+                        start_idx, end_idx = focus_char if focus_char is not None else 0, len(self._char_scene_rects[line])
+                    _select_range(line, start_idx, end_idx)
                 else:
                     _select_range(line, 0, len(self._char_scene_rects[line]))
                 if line == focus_line:
