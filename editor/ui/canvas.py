@@ -1,7 +1,7 @@
 from typing import Optional, Dict, Tuple
 import math
 
-from PySide6.QtCore import Qt, QPointF, QRectF, Signal, QMarginsF, QEasingCurve, QVariantAnimation
+from PySide6.QtCore import Qt, QPointF, QRectF, Signal, QMarginsF, QEasingCurve, QVariantAnimation, QAbstractAnimation
 from PySide6.QtGui import QPainter, QPen, QColor, QImage, QUndoStack, QLinearGradient, QBrush, QPainterPath
 from PySide6.QtWidgets import (
     QGraphicsView,
@@ -383,9 +383,22 @@ class Canvas(QGraphicsView):
         anim.setStartValue(target_rect.top() - bar_height)
         anim.setEndValue(target_rect.bottom())
         anim.setDuration(1800)
-        anim.setLoopCount(-1)
         anim.setEasingCurve(QEasingCurve.InOutQuad)
+
         anim.valueChanged.connect(lambda value: bar_path.setY(float(value)))
+
+        def _restart_scan_animation() -> None:
+            if self._ocr_scan_anim is not anim:
+                return
+            next_direction = (
+                QAbstractAnimation.Backward
+                if anim.direction() == QAbstractAnimation.Forward
+                else QAbstractAnimation.Forward
+            )
+            anim.setDirection(next_direction)
+            anim.start()
+
+        anim.finished.connect(_restart_scan_animation)
         anim.start()
         self._ocr_scan_anim = anim
 
