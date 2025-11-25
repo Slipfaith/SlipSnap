@@ -266,6 +266,8 @@ class OcrSelectionOverlay(QObject):
             background = QGraphicsPathItem()
             background.setZValue(9999)
             background.setAcceptedMouseButtons(Qt.NoButton)
+            background.setAcceptHoverEvents(True)
+            background.setCursor(Qt.IBeamCursor)
 
             selection = QGraphicsPathItem(background)
             selection.setZValue(1)
@@ -273,15 +275,16 @@ class OcrSelectionOverlay(QObject):
             selection.setPen(Qt.NoPen)
             selection.setVisible(False)
 
-            background.setBrush(QColor(255, 255, 255, 235))
-            pen = QPen(QColor(200, 200, 200, 80))
-            pen.setWidthF(0.5)
-            background.setPen(pen)
+            background.setBrush(Qt.transparent)
+            background.setPen(Qt.NoPen)
 
             text_item = QGraphicsSimpleTextItem(text, background)
-            text_item.setBrush(QColor(ModernColors.TEXT_PRIMARY))
+            text_item.setBrush(Qt.transparent)
             text_item.setPen(Qt.NoPen)
             text_item.setAcceptedMouseButtons(Qt.NoButton)
+            text_item.setAcceptHoverEvents(True)
+            text_item.setCursor(Qt.IBeamCursor)
+            text_item.setZValue(2)
 
             self.scene.addItem(background)
             self._line_visuals.append(_LineVisual(background=background, selection=selection, text_item=text_item))
@@ -307,7 +310,7 @@ class OcrSelectionOverlay(QObject):
                 self._char_scene_rects.append([])
                 continue
 
-            padding = max(2.5, rect.height() * 0.22)
+            padding = 0.0
             target_height = max(9.0, rect.height() * 0.7)
 
             font = QFont()
@@ -319,11 +322,20 @@ class OcrSelectionOverlay(QObject):
             text_rect = visual.text_item.boundingRect()
 
             available_width = max(1.0, rect.width() - 2 * padding)
-            if text_rect.width() > available_width and text_rect.width() > 0:
+            if text_rect.width() > 0:
                 scale = available_width / text_rect.width()
-                font.setPointSizeF(max(8.0, font.pointSizeF() * scale))
-                visual.text_item.setFont(font)
-                text_rect = visual.text_item.boundingRect()
+                if scale < 1.0:
+                    font.setPointSizeF(max(8.0, font.pointSizeF() * scale))
+                    visual.text_item.setFont(font)
+                    text_rect = visual.text_item.boundingRect()
+
+                char_slots = max(len(text) - 1, 1)
+                stretched_width = rect.width()
+                if text_rect.width() > 0 and stretched_width > 0:
+                    spacing = (stretched_width - text_rect.width()) / char_slots
+                    font.setLetterSpacing(QFont.AbsoluteSpacing, spacing)
+                    visual.text_item.setFont(font)
+                    text_rect = visual.text_item.boundingRect()
 
             bg_width = max(rect.width(), text_rect.width() + 2 * padding)
             bg_height = max(rect.height(), text_rect.height() + 2 * padding)
@@ -384,9 +396,8 @@ class OcrSelectionOverlay(QObject):
 
         selected_bg = QColor(ModernColors.PRIMARY_LIGHT)
         selected_bg.setAlpha(210)
-        base_bg = QColor(255, 255, 255, 235)
-        base_pen = QPen(QColor(200, 200, 200, 80))
-        base_pen.setWidthF(0.5)
+        base_bg = Qt.transparent
+        base_pen = QPen(Qt.NoPen)
 
         for idx, visual in enumerate(self._line_visuals):
             if visual is None:
@@ -397,7 +408,7 @@ class OcrSelectionOverlay(QObject):
             visual.background.setPen(base_pen)
             visual.background.setVisible(self._active)
 
-            visual.text_item.setBrush(QColor(ModernColors.PRIMARY if selection else ModernColors.TEXT_PRIMARY))
+            visual.text_item.setBrush(Qt.transparent)
 
             if not selection or idx >= len(self._char_scene_rects):
                 visual.selection.setPath(QPainterPath())
