@@ -13,9 +13,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 try:
     import win32gui
 except Exception as exc:  # pragma: no cover - платформа без win32
-    raise ImportError(
-        "crosshair_picker доступен только под Windows с установленным pywin32"
-    ) from exc
+    raise ImportError("crosshair_picker доступен только под Windows") from exc
 
 
 class CrosshairWindowPicker(QtWidgets.QWidget):
