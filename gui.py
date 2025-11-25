@@ -15,8 +15,6 @@ from PySide6.QtCore import (
     QSize,
     Signal,
     QObject,
-    QAbstractNativeEventFilter,
-    QAbstractEventDispatcher,
 )
 from PySide6.QtGui import (
     QGuiApplication,
@@ -42,10 +40,12 @@ from PySide6.QtWidgets import (
     QSystemTrayIcon,
     QMenu,
 )
+from pynput import keyboard
+from hotkey_translator import translate_hotkey
+
 from logic import load_config, save_config, qimage_to_pil, save_history
 from clipboard_utils import copy_pil_image_to_clipboard
 from icons import make_icon_capture, make_icon_shape, make_icon_close
-from pyqtkeybind import keybinder
 
 from editor.series_capture import SeriesCaptureController
 
@@ -61,12 +61,6 @@ from design_tokens import (
 if TYPE_CHECKING:
     from editor.editor_window import EditorWindow
     from logic import ScreenGrabber
-
-
-class _KeybinderEventFilter(QAbstractNativeEventFilter):
-    def nativeEventFilter(self, eventType, message):
-        handled = keybinder.handler(eventType, message)
-        return handled, 0
 
 
 class SelectionOverlayBase(QWidget):
@@ -558,6 +552,8 @@ class Launcher(QWidget):
 
 
 class App(QObject):
+    hotkey_activated = Signal()
+
     def __init__(self):
         super().__init__()
         init_started = perf_counter()
@@ -567,13 +563,8 @@ class App(QObject):
         self.launcher.toggle_shape.connect(self._toggle_shape)
         self.launcher.hotkey_changed.connect(self._update_hotkey)
         self.launcher.request_hide.connect(self._on_launcher_hide_request)
-        keybinder.init()
-        dispatcher = QAbstractEventDispatcher.instance()
-        self._keybinder_event_filter = None
-        if dispatcher is not None:
-            self._keybinder_event_filter = _KeybinderEventFilter()
-            dispatcher.installNativeEventFilter(self._keybinder_event_filter)
-        self._hotkey_seq = None
+        self._hotkey_listener = None
+        self.hotkey_activated.connect(self.capture_region)
         self._register_hotkey(self.cfg.get("capture_hotkey", "Ctrl+Alt+S"))
         self.launcher.show()
         self._captured_once = False
@@ -603,20 +594,23 @@ class App(QObject):
             self.ovm.set_shape(self.cfg.get("shape", "rect"))
 
     def _register_hotkey(self, seq: str):
-        if self._hotkey_seq:
-            try:
-                # Passing ``None`` lets the backend decide which window handle
-                # to use. Using ``0`` breaks registration on X11 backends
-                # (pyqtkeybind expects ``None`` for the root window).
-                keybinder.unregister_hotkey(None, self._hotkey_seq)
-            except (KeyError, AttributeError):
-                pass
+        if self._hotkey_listener:
+            self._hotkey_listener.stop()
 
-        if keybinder.register_hotkey(None, seq, self.capture_region):
-            self._hotkey_seq = seq
-        else:
-            self._hotkey_seq = None
-            QMessageBox.warning(None, "SlipSnap", f"Не удалось зарегистрировать горячую клавишу: {seq}")
+        pynput_seq = translate_hotkey(seq)
+
+        try:
+            hotkey = keyboard.HotKey(
+                keyboard.HotKey.parse(pynput_seq),
+                self.hotkey_activated.emit
+            )
+            self._hotkey_listener = keyboard.Listener(
+                on_press=hotkey.press,
+                on_release=hotkey.release
+            )
+            self._hotkey_listener.start()
+        except Exception as e:
+            QMessageBox.warning(None, "SlipSnap", f"Не удалось зарегистрировать горячую клавишу: {seq}\n{e}")
 
     def _update_hotkey(self, seq: str):
         self._register_hotkey(seq)
@@ -977,12 +971,8 @@ class App(QObject):
             return True
 
         self._cleaned_up = True
-        if self._hotkey_seq:
-            try:
-                keybinder.unregister_hotkey(None, self._hotkey_seq)
-            except (KeyError, AttributeError):
-                pass
-            self._hotkey_seq = None
+        if self._hotkey_listener:
+            self._hotkey_listener.stop()
 
         if self._tray_icon is not None:
             self._tray_icon.hide()
