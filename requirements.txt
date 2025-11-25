@@ -4,3 +4,4 @@ mss
 pytesseract
 pyqtkeybind
 psutil
+pyinstaller>=6

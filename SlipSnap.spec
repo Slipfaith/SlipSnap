@@ -34,6 +34,9 @@ hiddenimports = [
 ]
 hiddenimports += collect_submodules("editor")
 hiddenimports += collect_submodules("pyqtkeybind")
+# OCR stack (pytesseract pulls optional submodules dynamically)
+hiddenimports += collect_submodules("pytesseract")
+hiddenimports += collect_submodules("PIL")
 
 # ----------------------------------------------------------------------
 # 🧩 Path & icon
