@@ -5,3 +5,7 @@ pytesseract
 pyqtkeybind
 psutil
 pyinstaller>=6
+numpy
+opencv-python
+pywin32
+comtypes

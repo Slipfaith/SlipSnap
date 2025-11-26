@@ -31,6 +31,7 @@ from editor.text_tools import TextManager
 from editor.ocr_overlay import OcrCapture
 from editor.editor_logic import EditorLogic
 from editor.image_utils import images_from_mime
+from scroll.scroll_capture_manager import ScrollCaptureManager
 from ocr import (
     OcrError,
     OcrResult,
@@ -266,6 +267,7 @@ class EditorWindow(QMainWindow):
         self._ocr_toast_timer.timeout.connect(self._clear_ocr_toast)
         self._ocr_menu: Optional[QMenu] = None
         self._ocr_button: Optional[QToolButton] = None
+        self.scroll_capture_manager: Optional[ScrollCaptureManager] = None
 
         self.setCentralWidget(self.canvas)
         self._apply_modern_stylesheet()
@@ -833,6 +835,64 @@ class EditorWindow(QMainWindow):
 
     def new_screenshot(self):
         self.add_screenshot(collage=False)
+
+    # ---- scroll capture ----
+    def _ensure_scroll_capture_manager(self) -> ScrollCaptureManager:
+        if self.scroll_capture_manager is None:
+            self.scroll_capture_manager = ScrollCaptureManager(self)
+            self.scroll_capture_manager.selection_started.connect(self._on_scroll_selection_started)
+            self.scroll_capture_manager.capture_started.connect(self._on_scroll_capture_started)
+            self.scroll_capture_manager.progress_updated.connect(self._on_scroll_progress)
+            self.scroll_capture_manager.capture_completed.connect(self._on_scroll_capture_completed)
+            self.scroll_capture_manager.error_occurred.connect(self._on_scroll_capture_error)
+        return self.scroll_capture_manager
+
+    def start_scroll_capture(self):
+        try:
+            self.begin_capture_hide()
+            manager = self._ensure_scroll_capture_manager()
+            manager.start()
+        except Exception as exc:  # noqa: BLE001
+            self.restore_from_capture()
+            QMessageBox.critical(self, "Ошибка", f"Скролл-захват недоступен: {exc}")
+
+    def _on_scroll_selection_started(self) -> None:
+        self.statusBar().showMessage("Прицелом выберите окно для скролл-захвата (Esc — отмена)", 4000)
+
+    def _on_scroll_capture_started(self, hwnd: int) -> None:
+        try:
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+        except Exception:
+            pass
+        self.statusBar().showMessage(f"Захват окна {hwnd}...", 2000)
+
+    def _on_scroll_progress(self, percent: int, message: str) -> None:
+        self.statusBar().showMessage(f"Скролл-захват: {percent}% — {message}", 1500)
+
+    def _on_scroll_capture_completed(self, image_path: str) -> None:
+        self.restore_from_capture()
+        try:
+            QApplication.restoreOverrideCursor()
+        except Exception:
+            pass
+        qimg = QImage(image_path)
+        if qimg.isNull():
+            QMessageBox.warning(self, "SlipSnap", "Не удалось загрузить длинный скриншот.")
+            return
+        try:
+            save_history(qimage_to_pil(qimg))
+        except Exception:
+            pass
+        self.load_base_screenshot(qimg, message="◉ Скролл-захват готов", duration=4000)
+
+    def _on_scroll_capture_error(self, message: str) -> None:
+        self.restore_from_capture()
+        try:
+            QApplication.restoreOverrideCursor()
+        except Exception:
+            pass
+        if message:
+            QMessageBox.warning(self, "SlipSnap", message)
 
     def _rounded_pixmap(self, qimg: QImage, radius: int = 16) -> QPixmap:
         pixmap = QPixmap(qimg.size())

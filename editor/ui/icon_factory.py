@@ -385,6 +385,33 @@ def make_icon_collage() -> QIcon:
     p.end()
     return QIcon(pm)
 
+def make_icon_scroll_capture() -> QIcon:
+    pm = _base_pixmap()
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+
+    # Контур документа
+    p.setPen(QPen(QColor(ModernColors.TEXT_SECONDARY), 2))
+    p.setBrush(QColor(ModernColors.SURFACE))
+    p.drawRoundedRect(QRectF(8, 6, 24, 30), 3, 3)
+
+    # Стрелки скролла
+    p.setPen(QPen(QColor(ModernColors.PRIMARY), 2, Qt.SolidLine, Qt.RoundCap))
+    p.drawLine(20, 12, 20, 20)
+    p.drawLine(20, 26, 20, 34)
+    p.drawLine(16, 16, 20, 12)
+    p.drawLine(24, 16, 20, 12)
+    p.drawLine(16, 30, 20, 34)
+    p.drawLine(24, 30, 20, 34)
+
+    # Линии текста
+    p.setPen(QPen(QColor(ModernColors.TEXT_SECONDARY), 1.5))
+    p.drawLine(12, 22, 28, 22)
+    p.drawLine(12, 26, 28, 26)
+
+    p.end()
+    return QIcon(pm)
+
 def make_icon_ocr() -> QIcon:
     pm = _base_pixmap()
     p = QPainter(pm)
