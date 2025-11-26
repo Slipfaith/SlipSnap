@@ -1,4 +1,3 @@
-from datetime import datetime
 from pathlib import Path
 
 from PIL import Image
@@ -27,8 +26,7 @@ class EditorLogic:
 
     def save_image(self, parent):
         img = self.export_image()
-        timestamp = datetime.now().strftime("%M:%S")
-        default_name = Path.home() / f"snap_{timestamp}.png"
+        default_name = self._next_snap_name(Path.home())
         path, _ = QFileDialog.getSaveFileName(
             parent,
             "Сохранить изображение",
@@ -41,6 +39,17 @@ class EditorLogic:
             img = img.convert("RGB")
         img.save(path)
         return Path(path).name
+
+    def _next_snap_name(self, directory: Path) -> Path:
+        existing_numbers = []
+        for ext in ("png", "jpg", "jpeg"):
+            for file in directory.glob(f"snap_*.{ext}"):
+                suffix = file.stem.removeprefix("snap_")
+                if suffix.isdigit():
+                    existing_numbers.append(int(suffix))
+
+        next_number = max(existing_numbers, default=0) + 1
+        return directory / f"snap_{next_number:02d}.png"
 
     def collage_available(self):
         return any(HISTORY_DIR.glob("*.png")) or any(HISTORY_DIR.glob("*.jpg")) or any(
