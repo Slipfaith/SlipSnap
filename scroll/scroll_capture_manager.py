@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Signal, Qt
 from PySide6.QtWidgets import QApplication
 
 from scroll.crosshair_picker import CrosshairWindowPicker
@@ -37,7 +37,7 @@ class ScrollCaptureManager(QObject):
         if root_logger.handlers:
             return
         logging.basicConfig(
-            level=logging.INFO,
+            level=logging.DEBUG,
             format="[%(levelname)s] %(asctime)s - %(name)s - %(message)s",
         )
         logging.info("Логирование включено. Готов к запуску скролл-захвата.")
@@ -53,8 +53,9 @@ class ScrollCaptureManager(QObject):
         logging.info("Запущен выбор окна для скролл-захвата")
         self.selection_started.emit()
         self._picker = CrosshairWindowPicker()
+        QApplication.setOverrideCursor(Qt.CrossCursor)
         self._picker.window_selected.connect(self._on_window_selected)
-        self._picker.selection_canceled.connect(lambda: self.error_occurred.emit("Выбор отменён"))
+        self._picker.selection_canceled.connect(self._on_selection_canceled)
         self._picker.start()
 
     def _on_window_selected(self, hwnd: int) -> None:
@@ -70,6 +71,11 @@ class ScrollCaptureManager(QObject):
         self._thread.error_occurred.connect(self.error_occurred)
         self._thread.finished.connect(self._cleanup_thread)
         self._thread.start()
+
+    def _on_selection_canceled(self) -> None:
+        logging.info("Пользователь отменил выбор окна")
+        QApplication.restoreOverrideCursor()
+        self.error_occurred.emit("Выбор отменён")
 
     def _relay_progress(self, current: int, total: int, message: str) -> None:
         percent = 0

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import sys
 from dataclasses import dataclass
 from typing import Optional
@@ -49,6 +50,7 @@ class CrosshairWindowPicker(QWidget):
             geometry = geometry.united(screen.geometry())
         if geometry.isValid():
             self.setGeometry(geometry)
+        logging.debug("Запуск выбора окна: охватываемая геометрия %s", geometry)
         self.showFullScreen()
         self.raise_()
         self.activateWindow()
@@ -88,6 +90,7 @@ class CrosshairWindowPicker(QWidget):
         if rect:
             self._state.hwnd = hwnd
             self._state.rect = rect
+            logging.debug("Прицел навёлся на hwnd=%s, прямоугольник=%s", hwnd, rect)
             self.update()
 
     # ---- Qt events -------------------------------------------------

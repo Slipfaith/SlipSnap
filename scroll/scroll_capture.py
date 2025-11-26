@@ -53,18 +53,23 @@ class ScrollCaptureThread(QThread):
 
     # ---- helpers ---------------------------------------------------
     def _is_hwnd_valid(self) -> bool:
-        return bool(win32gui and win32gui.IsWindow(self.hwnd))
+        valid = bool(win32gui and win32gui.IsWindow(self.hwnd))
+        logging.debug("Проверка hwnd=%s валиден=%s", self.hwnd, valid)
+        return valid
 
     def _capture_window(self) -> Optional[np.ndarray]:
         """Снимает окно через PrintWindow с fallback на BitBlt."""
         if not (win32gui and win32ui):
+            logging.error("Win32 GUI библиотеки недоступны: win32gui=%s, win32ui=%s", bool(win32gui), bool(win32ui))
             return None
         try:
             left, top, right, bottom = win32gui.GetWindowRect(self.hwnd)
         except Exception:
+            logging.exception("Не удалось получить прямоугольник окна hwnd=%s", self.hwnd)
             return None
         width, height = max(0, right - left), max(0, bottom - top)
         if width == 0 or height == 0:
+            logging.warning("Окно hwnd=%s имеет некорректные размеры: %sx%s", self.hwnd, width, height)
             return None
 
         hwindc = None
@@ -85,9 +90,11 @@ class ScrollCaptureThread(QThread):
                 try:
                     result = bool(win32gui.PrintWindow(self.hwnd, save_dc.GetSafeHdc(), 1))
                 except Exception:
+                    logging.exception("PrintWindow не сработал для hwnd=%s", self.hwnd)
                     result = False
             if not result and win32con is not None:
                 # Fallback BitBlt, помогает если PrintWindow рисует чёрный экран
+                logging.debug("Используем BitBlt как запасной способ захвата окна hwnd=%s", self.hwnd)
                 save_dc.BitBlt((0, 0), (width, height), mfc_dc, (0, 0), win32con.SRCCOPY)
 
             bmpinfo = bitmap.GetInfo()
@@ -98,6 +105,7 @@ class ScrollCaptureThread(QThread):
             img = img[..., [2, 1, 0, 3]]
             return img.copy()
         except Exception:
+            logging.exception("Ошибка при попытке захвата окна hwnd=%s", self.hwnd)
             return None
         finally:
             try:
@@ -114,12 +122,14 @@ class ScrollCaptureThread(QThread):
 
     def _get_scroll_pattern(self):
         if not self._automation:
+            logging.debug("UIAutomation недоступен, пропускаем поиск ScrollPattern")
             return None
         try:
             element = self._automation.ElementFromHandle(self.hwnd)
             pattern = element.GetCurrentPattern(UIAutomationClient.UIA_ScrollPatternId)
             return pattern
         except Exception:
+            logging.exception("Не удалось получить ScrollPattern для hwnd=%s", self.hwnd)
             return None
 
     def _can_scroll(self) -> bool:
@@ -128,8 +138,16 @@ class ScrollCaptureThread(QThread):
             return False
         try:
             vert_view_size = pattern.CurrentVerticalViewSize
-            return bool(pattern.CurrentVerticallyScrollable and vert_view_size < 100)
+            can_scroll = bool(pattern.CurrentVerticallyScrollable and vert_view_size < 100)
+            logging.debug(
+                "Проверка возможности скролла hwnd=%s: scrollable=%s, видимая часть=%s%%",
+                self.hwnd,
+                can_scroll,
+                vert_view_size,
+            )
+            return can_scroll
         except Exception:
+            logging.exception("Ошибка проверки ScrollPattern hwnd=%s", self.hwnd)
             return False
 
     def _frames_similar(self, prev: np.ndarray, current: np.ndarray) -> bool:
@@ -149,7 +167,15 @@ class ScrollCaptureThread(QThread):
         if prev_crop.size == 0 or cur_crop.size == 0:
             return False
         similarity = float(np.mean(np.isclose(prev_crop, cur_crop, atol=2)))
-        return similarity >= 0.95
+        similar = similarity >= 0.95
+        logging.debug(
+            "Сравнение кадров: similarity=%.4f, similar=%s, prev_shape=%s, cur_shape=%s",
+            similarity,
+            similar,
+            prev.shape,
+            current.shape,
+        )
+        return similar
 
     def _frames_duplicate(self, prev: np.ndarray, current: np.ndarray) -> bool:
         if prev is None or current is None:
@@ -159,17 +185,26 @@ class ScrollCaptureThread(QThread):
         small_prev = cv2.resize(prev[:, :, :3], (32, 32), interpolation=cv2.INTER_AREA)
         small_current = cv2.resize(current[:, :, :3], (32, 32), interpolation=cv2.INTER_AREA)
         diff = np.mean(np.abs(small_prev.astype(np.int16) - small_current.astype(np.int16)))
-        return diff <= 1.5
+        duplicate = diff <= 1.5
+        logging.debug("Проверка дубликата кадров: diff=%.4f, duplicate=%s", diff, duplicate)
+        return duplicate
 
     def _normalize_frame_size(self, frame: np.ndarray) -> np.ndarray:
         if self._base_width is None:
             self._base_width = frame.shape[1]
+            logging.debug("Фиксируем базовую ширину кадра: %s", self._base_width)
             return frame
         if frame.shape[1] == self._base_width:
             return frame
         scale = self._base_width / max(1, frame.shape[1])
         new_height = max(1, int(frame.shape[0] * scale))
         resized = cv2.resize(frame, (self._base_width, new_height), interpolation=cv2.INTER_AREA)
+        logging.debug(
+            "Нормализуем размер кадра: исходный=%s, новый=%s, scale=%.3f",
+            frame.shape,
+            resized.shape,
+            scale,
+        )
         return resized
 
     def _ensure_focus(self) -> None:
@@ -190,6 +225,7 @@ class ScrollCaptureThread(QThread):
         try:
             self._ensure_focus()
             win32api.SendMessage(self.hwnd, win32con.WM_VSCROLL, win32con.SB_PAGEDOWN, 0)
+            logging.debug("Отправили WM_VSCROLL для hwnd=%s", self.hwnd)
         except Exception:
             pass
 
@@ -202,7 +238,14 @@ class ScrollCaptureThread(QThread):
             if view_size <= 0 or view_size >= 100:
                 return self.MAX_FRAMES
             estimated = int(np.ceil(100 / view_size)) + 2
-            return int(max(self.MAX_FRAMES, min(self.MAX_FRAMES_CAP, estimated)))
+            max_frames = int(max(self.MAX_FRAMES, min(self.MAX_FRAMES_CAP, estimated)))
+            logging.debug(
+                "Оценили количество кадров: view_size=%.2f, estimated=%s, max_frames=%s",
+                view_size,
+                estimated,
+                max_frames,
+            )
+            return max_frames
         except Exception:
             return self.MAX_FRAMES
 
@@ -266,8 +309,14 @@ class ScrollCaptureThread(QThread):
             if pattern:
                 try:
                     self._initial_scroll_percent = pattern.CurrentVerticalScrollPercent
+                    logging.debug(
+                        "Запоминаем начальный скролл hwnd=%s: %.2f%%",
+                        self.hwnd,
+                        self._initial_scroll_percent,
+                    )
                 except Exception:
                     self._initial_scroll_percent = None
+                    logging.exception("Не удалось прочитать стартовую позицию скролла hwnd=%s", self.hwnd)
 
             if not scrollable:
                 # Окно не скроллится — возвращаем обычный скриншот
@@ -296,6 +345,7 @@ class ScrollCaptureThread(QThread):
                         duplicate_streak,
                     )
                     if duplicate_streak >= 2:
+                        logging.info("Достигнута граница содержимого после %s кадров", len(self.frames))
                         break
                     continue
                 if self._frames_duplicate(self.frames[-1], frame):
