@@ -48,6 +48,7 @@ from icons import make_icon_capture, make_icon_shape, make_icon_close
 from pyqtkeybind import keybinder
 
 from editor.series_capture import SeriesCaptureController
+from ocr import warm_up_ocr
 
 from design_tokens import (
     Palette,
@@ -562,6 +563,7 @@ class App(QObject):
         super().__init__()
         init_started = perf_counter()
         self.cfg = load_config()
+        warm_up_ocr()
         self.launcher = Launcher(self.cfg)
         self.launcher.start_capture.connect(self.capture_region)
         self.launcher.toggle_shape.connect(self._toggle_shape)
