@@ -10,6 +10,7 @@ from logic import HISTORY_DIR
 class EditorLogic:
     def __init__(self, canvas):
         self.canvas = canvas
+        self._last_save_directory = Path.home()
 
     def export_image(self) -> Image.Image:
         return self.canvas.export_image()
@@ -26,7 +27,7 @@ class EditorLogic:
 
     def save_image(self, parent):
         img = self.export_image()
-        default_name = self._next_snap_name(Path.home())
+        default_name = self._next_snap_name(self._last_save_directory)
         path, _ = QFileDialog.getSaveFileName(
             parent,
             "Сохранить изображение",
@@ -38,6 +39,7 @@ class EditorLogic:
         if path.lower().endswith((".jpg", ".jpeg")):
             img = img.convert("RGB")
         img.save(path)
+        self._last_save_directory = Path(path).parent
         return Path(path).name
 
     def _next_snap_name(self, directory: Path) -> Path:
