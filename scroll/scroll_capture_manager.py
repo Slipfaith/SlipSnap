@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import platform
 import tempfile
 from pathlib import Path
@@ -28,11 +29,28 @@ class ScrollCaptureManager(QObject):
         super().__init__(parent)
         self._picker: Optional[CrosshairWindowPicker] = None
         self._thread: Optional[ScrollCaptureThread] = None
+        self._configure_logging()
+
+    def _configure_logging(self) -> None:
+        """Готовит вывод логов в командную строку."""
+        root_logger = logging.getLogger()
+        if root_logger.handlers:
+            return
+        logging.basicConfig(
+            level=logging.INFO,
+            format="[%(levelname)s] %(asctime)s - %(name)s - %(message)s",
+        )
+        logging.info("Логирование включено. Готов к запуску скролл-захвата.")
 
     def start(self) -> None:
         if platform.system().lower() != "windows":
+            logging.error(
+                "Скролл-захват не поддерживается: требуется Windows, текущая ОС: %s",
+                platform.system(),
+            )
             self.error_occurred.emit("Скролл-захват поддерживается только в Windows")
             return
+        logging.info("Запущен выбор окна для скролл-захвата")
         self.selection_started.emit()
         self._picker = CrosshairWindowPicker()
         self._picker.window_selected.connect(self._on_window_selected)
@@ -41,8 +59,10 @@ class ScrollCaptureManager(QObject):
 
     def _on_window_selected(self, hwnd: int) -> None:
         if not hwnd:
+            logging.warning("Выбор окна отменён пользователем")
             self.error_occurred.emit("Окно не выбрано")
             return
+        logging.info("Окно выбрано, hwnd=%s", hwnd)
         self.capture_started.emit(hwnd)
         self._thread = ScrollCaptureThread(hwnd)
         self._thread.progress_updated.connect(self._relay_progress)
@@ -55,10 +75,12 @@ class ScrollCaptureManager(QObject):
         percent = 0
         if total:
             percent = int((current / max(total, 1)) * 100)
+        logging.info("Прогресс скролл-захвата: %s/%s (%s%%) — %s", current, total, percent, message)
         self.progress_updated.emit(percent, message)
 
     def _on_capture_finished(self, frames) -> None:
         if not frames:
+            logging.error("Поток скролл-захвата завершился без кадров")
             self.error_occurred.emit("Кадры не получены")
             return
         try:
@@ -66,11 +88,14 @@ class ScrollCaptureManager(QObject):
             output_path = output_dir / "scroll_capture.png"
             stitcher = ImageStitcher(frames)
             final_path = stitcher.stitch(output_path)
+            logging.info("Скролл-захват успешно собран: %s", final_path)
         except Exception as exc:  # noqa: BLE001
+            logging.exception("Ошибка сборки скролла: %s", exc)
             self.error_occurred.emit(f"Ошибка сборки скролла: {exc}")
             return
         self.capture_completed.emit(str(final_path))
 
     def _cleanup_thread(self) -> None:
+        logging.info("Очистка ресурсов потока скролл-захвата")
         self._thread = None
         QApplication.restoreOverrideCursor()

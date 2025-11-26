@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import random
 from typing import List, Optional
 
@@ -222,6 +223,7 @@ class ScrollCaptureThread(QThread):
     # ---- thread ----------------------------------------------------
     def run(self) -> None:  # noqa: D401 - логика потока
         if not self._is_hwnd_valid():
+            logging.error("Получен невалидный hwnd: %s", self.hwnd)
             self.error_occurred.emit("Окно недоступно или закрыто.")
             return
 
@@ -231,24 +233,34 @@ class ScrollCaptureThread(QThread):
                     pythoncom.CoInitialize()
                     self._co_initialized = True
                 except Exception:
+                    logging.exception("Не удалось инициализировать COM")
                     self._co_initialized = False
             if client and UIAutomationClient:
                 try:
                     self._automation = client.CreateObject(UIAutomationClient.CUIAutomation)
                 except Exception:
+                    logging.exception("Не удалось создать объект UIAutomation")
                     self._automation = None
 
             scrollable = self._can_scroll()
             self._max_frames = self._estimate_max_frames()
             message = "Захват первого кадра"
             self.progress_updated.emit(0, self._max_frames, message)
+            logging.info(
+                "Старт скролл-захвата hwnd=%s. Скроллируется=%s. Планируемых кадров=%s",
+                self.hwnd,
+                scrollable,
+                self._max_frames,
+            )
 
             first_frame = self._capture_window()
             if first_frame is None:
+                logging.error("Первый кадр не получен")
                 self.error_occurred.emit("Не удалось снять содержимое окна.")
                 return
             first_frame = self._normalize_frame_size(first_frame)
             self.frames.append(first_frame)
+            logging.info("Первый кадр получен и нормализован. Базовая ширина=%s", self._base_width)
 
             pattern = self._get_scroll_pattern()
             if pattern:
@@ -260,35 +272,47 @@ class ScrollCaptureThread(QThread):
             if not scrollable:
                 # Окно не скроллится — возвращаем обычный скриншот
                 self.progress_updated.emit(1, 1, "Окно не скроллится, сохранён одиночный кадр")
+                logging.info("Окно не поддерживает скролл. Завершаем после первого кадра")
                 self.capture_finished.emit(self.frames)
                 return
 
             duplicate_streak = 0
             for idx in range(1, self._max_frames):
                 if self.isInterruptionRequested():
+                    logging.info("Остановка по запросу после %s кадров", len(self.frames))
                     break
                 self._send_scroll()
                 self.msleep(random.randint(300, 500))
                 frame = self._capture_window()
                 if frame is None:
+                    logging.warning("Кадр #%s не получен, прекращаем", idx + 1)
                     break
                 frame = self._normalize_frame_size(frame)
                 if self._frames_similar(self.frames[-1], frame):
                     duplicate_streak += 1
+                    logging.debug(
+                        "Кадр #%s похож на предыдущий (стрик %s). Возможный конец страницы",
+                        idx + 1,
+                        duplicate_streak,
+                    )
                     if duplicate_streak >= 2:
                         break
                     continue
                 if self._frames_duplicate(self.frames[-1], frame):
+                    logging.debug("Кадр #%s дублирует предыдущий — пропускаем", idx + 1)
                     continue
                 duplicate_streak = 0
                 self.frames.append(frame)
                 self.progress_updated.emit(idx + 1, self._max_frames, f"Кадров собрано: {len(self.frames)}")
+                logging.info("Кадр #%s добавлен. Всего кадров: %s", idx + 1, len(self.frames))
 
             self.capture_finished.emit(self.frames)
+            logging.info("Скролл-захват завершён. Получено кадров: %s", len(self.frames))
         finally:
             self._restore_scroll()
             if self._co_initialized and pythoncom:
                 try:
                     pythoncom.CoUninitialize()
                 except Exception:
+                    logging.exception("Не удалось корректно остановить COM")
                     pass
