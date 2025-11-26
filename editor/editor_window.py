@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+import platform
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -848,6 +849,9 @@ class EditorWindow(QMainWindow):
         return self.scroll_capture_manager
 
     def start_scroll_capture(self):
+        if platform.system().lower() != "windows":
+            QMessageBox.information(self, "SlipSnap", "Скролл-захват доступен только в Windows.")
+            return
         try:
             self.begin_capture_hide()
             manager = self._ensure_scroll_capture_manager()
