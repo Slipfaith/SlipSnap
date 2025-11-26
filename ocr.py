@@ -27,6 +27,16 @@ for _p in _FALLBACK_PATHS:
 # === конец добавленного кода ===
 
 
+# На Windows скрываем всплывающие консольные окна Tesseract
+if os.name == "nt":
+    import subprocess
+
+    _existing_kwargs = getattr(pytesseract.pytesseract, "popen_kwargs", {})
+    _popen_kwargs = dict(_existing_kwargs) if isinstance(_existing_kwargs, dict) else {}
+    _popen_kwargs.setdefault("creationflags", subprocess.CREATE_NO_WINDOW)
+    pytesseract.pytesseract.popen_kwargs = _popen_kwargs
+
+
 _AVAILABLE_LANG_CACHE: Optional[List[str]] = None
 _WARMUP_LOCK = threading.Lock()
 _WARMUP_STARTED = False
