@@ -33,6 +33,7 @@ from editor.ocr_overlay import OcrCapture
 from editor.editor_logic import EditorLogic
 from editor.image_utils import images_from_mime
 from scroll.scroll_capture_manager import ScrollCaptureManager
+from scroll.panoramic_capture_manager import PanoramicCaptureManager
 from ocr import (
     OcrError,
     OcrResult,
@@ -269,6 +270,7 @@ class EditorWindow(QMainWindow):
         self._ocr_menu: Optional[QMenu] = None
         self._ocr_button: Optional[QToolButton] = None
         self.scroll_capture_manager: Optional[ScrollCaptureManager] = None
+        self.panoramic_capture_manager: Optional[PanoramicCaptureManager] = None
 
         self.setCentralWidget(self.canvas)
         self._apply_modern_stylesheet()
@@ -889,6 +891,69 @@ class EditorWindow(QMainWindow):
         self.load_base_screenshot(qimg, message="◉ Скролл-захват готов", duration=4000)
 
     def _on_scroll_capture_error(self, message: str) -> None:
+        self.restore_from_capture()
+        try:
+            QApplication.restoreOverrideCursor()
+        except Exception:
+            pass
+        if message:
+            QMessageBox.warning(self, "SlipSnap", message)
+
+    # ---- panoramic capture ----
+    def _ensure_panoramic_capture_manager(self) -> PanoramicCaptureManager:
+        if self.panoramic_capture_manager is None:
+            self.panoramic_capture_manager = PanoramicCaptureManager(self.cfg, self)
+            self.panoramic_capture_manager.selection_started.connect(self._on_panoramic_selection_started)
+            self.panoramic_capture_manager.selection_canceled.connect(self._on_panoramic_canceled)
+            self.panoramic_capture_manager.capture_started.connect(self._on_panoramic_capture_started)
+            self.panoramic_capture_manager.frame_captured.connect(self._on_panoramic_frame_captured)
+            self.panoramic_capture_manager.capture_completed.connect(self._on_panoramic_capture_completed)
+            self.panoramic_capture_manager.error_occurred.connect(self._on_panoramic_capture_error)
+        return self.panoramic_capture_manager
+
+    def start_panoramic_capture(self) -> None:
+        try:
+            self.begin_capture_hide()
+            manager = self._ensure_panoramic_capture_manager()
+            manager.start()
+        except Exception as exc:  # noqa: BLE001
+            self.restore_from_capture()
+            QMessageBox.critical(self, "Ошибка", f"Панорамный захват недоступен: {exc}")
+
+    def _on_panoramic_selection_started(self) -> None:
+        self.statusBar().showMessage("Выделите фиксированную область для панорамы (Esc — отмена)", 4000)
+
+    def _on_panoramic_canceled(self) -> None:
+        self.restore_from_capture()
+        self.statusBar().showMessage("Панорамный захват отменён", 2000)
+
+    def _on_panoramic_capture_started(self) -> None:
+        try:
+            QApplication.setOverrideCursor(Qt.CrossCursor)
+        except Exception:
+            pass
+        self.statusBar().showMessage("Панорамный захват запущен — скролльте страницу", 4000)
+
+    def _on_panoramic_frame_captured(self, count: int) -> None:
+        self.statusBar().showMessage(f"Панорамный захват: кадров собрано {count}", 1200)
+
+    def _on_panoramic_capture_completed(self, image_path: str) -> None:
+        self.restore_from_capture()
+        try:
+            QApplication.restoreOverrideCursor()
+        except Exception:
+            pass
+        qimg = QImage(image_path)
+        if qimg.isNull():
+            QMessageBox.warning(self, "SlipSnap", "Не удалось загрузить панораму.")
+            return
+        try:
+            save_history(qimage_to_pil(qimg))
+        except Exception:
+            pass
+        self.load_base_screenshot(qimg, message="◉ Панорама готова", duration=4000)
+
+    def _on_panoramic_capture_error(self, message: str) -> None:
         self.restore_from_capture()
         try:
             QApplication.restoreOverrideCursor()
