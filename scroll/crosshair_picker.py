@@ -43,6 +43,12 @@ class CrosshairWindowPicker(QWidget):
     def start(self) -> None:
         """Показывает оверлей."""
         self._state = _HighlightState()
+        # Покрываем всю виртуальную область, чтобы захват работал при нескольких мониторах
+        geometry = QRect()
+        for screen in QGuiApplication.screens():
+            geometry = geometry.united(screen.geometry())
+        if geometry.isValid():
+            self.setGeometry(geometry)
         self.showFullScreen()
         self.raise_()
         self.activateWindow()
