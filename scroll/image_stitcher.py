@@ -37,24 +37,30 @@ class ImageStitcher:
         hb, wb = frame_b.shape[:2]
         if ha == 0 or hb == 0:
             return 0, 0.0
-        bottom_a = frame_a[int(ha * 0.7):, :wa]
-        top_b = frame_b[: int(hb * 0.3), :wb]
-        # Подгоняем ширину если кадры отличаются
-        width = min(bottom_a.shape[1], top_b.shape[1])
-        bottom_a = bottom_a[:, :width]
-        top_b = top_b[:, :width]
+
+        search_height = max(1, min(int(min(ha, hb) * 0.6), hb))
+        width = min(wa, wb)
+        bottom_a = frame_a[-search_height:, :width]
+        top_b = frame_b[:search_height, :width]
         if bottom_a.shape[0] == 0 or top_b.shape[0] == 0:
             return 0, 0.0
 
         gray_a = cv2.cvtColor(bottom_a, cv2.COLOR_RGBA2GRAY if bottom_a.shape[2] == 4 else cv2.COLOR_RGB2GRAY)
         gray_b = cv2.cvtColor(top_b, cv2.COLOR_RGBA2GRAY if top_b.shape[2] == 4 else cv2.COLOR_RGB2GRAY)
-        if gray_a.shape[0] > gray_b.shape[0]:
-            gray_a = gray_a[-gray_b.shape[0]:, :]
-        res = cv2.matchTemplate(gray_b, gray_a, cv2.TM_CCOEFF_NORMED)
-        _, max_val, _, max_loc = cv2.minMaxLoc(res)
-        overlap_height = gray_a.shape[0]
-        y_offset = max_loc[1]
-        return y_offset + overlap_height, max_val
+
+        best_confidence = 0.0
+        best_offset = search_height
+        for ratio in (0.6, 0.5, 0.4, 0.3):
+            template_height = max(20, int(gray_a.shape[0] * ratio))
+            template = gray_a[-template_height:, :]
+            if template.shape[0] > gray_b.shape[0]:
+                template = template[-gray_b.shape[0]:, :]
+            res = cv2.matchTemplate(gray_b, template, cv2.TM_CCOEFF_NORMED)
+            _, max_val, _, max_loc = cv2.minMaxLoc(res)
+            if max_val > best_confidence:
+                best_confidence = float(max_val)
+                best_offset = max_loc[1] + template.shape[0]
+        return best_offset, best_confidence
 
     def stitch(self, output_path: Path) -> Path:
         if not self.frames:
@@ -69,7 +75,7 @@ class ImageStitcher:
                 offset, confidence = (int(frame.shape[0] * 0.2), 0.0)
             # Если не нашли достоверное совпадение — используем фиксированный отступ
             if confidence < 0.6:
-                offset = min(frame.shape[0], max(50, int(frame.shape[0] * 0.3)))
+                offset = min(frame.shape[0], max(offset, int(frame.shape[0] * 0.15)))
 
             append_region = frame[offset:]
             if append_region.size == 0:
