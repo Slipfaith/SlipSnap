@@ -13,6 +13,7 @@ from logic import qimage_to_pil
 
 # === Fallback поиск Tesseract (добавлено) ===
 import os
+import threading
 
 _FALLBACK_PATHS = [
     r"C:\Program Files\Tesseract-OCR\tesseract.exe",
@@ -24,6 +25,11 @@ for _p in _FALLBACK_PATHS:
         pytesseract.pytesseract.tesseract_cmd = _p
         break
 # === конец добавленного кода ===
+
+
+_AVAILABLE_LANG_CACHE: Optional[List[str]] = None
+_WARMUP_LOCK = threading.Lock()
+_WARMUP_STARTED = False
 
 
 LANGUAGE_DISPLAY_NAMES = {
@@ -157,14 +163,47 @@ def _normalize_languages(language_hint: LangHint, settings: OcrSettings, availab
 
 
 def get_available_languages() -> List[str]:
+    global _AVAILABLE_LANG_CACHE
+    if _AVAILABLE_LANG_CACHE is not None:
+        return list(_AVAILABLE_LANG_CACHE)
+
     try:
-        return pytesseract.get_languages(config="")
+        langs = pytesseract.get_languages(config="")
     except TesseractNotFoundError as exc:
         raise OcrError(
             "Tesseract не найден. Установите бинарник tesseract-ocr и добавьте его в PATH."
         ) from exc
     except TesseractError:
-        return []
+        langs = []
+
+    _AVAILABLE_LANG_CACHE = list(langs)
+    return list(_AVAILABLE_LANG_CACHE)
+
+
+def warm_up_ocr(async_run: bool = True) -> None:
+    """Preload Tesseract binaries and language list to avoid first-use lag."""
+
+    def _warm() -> None:
+        try:
+            pytesseract.get_tesseract_version()
+        except Exception:
+            return
+        try:
+            get_available_languages()
+        except Exception:
+            pass
+
+    global _WARMUP_STARTED
+    with _WARMUP_LOCK:
+        if _WARMUP_STARTED:
+            return
+        _WARMUP_STARTED = True
+
+    if async_run:
+        thread = threading.Thread(target=_warm, name="ocr-warmup", daemon=True)
+        thread.start()
+    else:
+        _warm()
 
 
 def run_ocr(
