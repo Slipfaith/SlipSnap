@@ -853,11 +853,9 @@ class EditorWindow(QMainWindow):
             QMessageBox.information(self, "SlipSnap", "Скролл-захват доступен только в Windows.")
             return
         try:
-            self.begin_capture_hide()
             manager = self._ensure_scroll_capture_manager()
             manager.start()
         except Exception as exc:  # noqa: BLE001
-            self.restore_from_capture()
             QMessageBox.critical(self, "Ошибка", f"Скролл-захват недоступен: {exc}")
 
     def _on_scroll_selection_started(self) -> None:
@@ -865,6 +863,7 @@ class EditorWindow(QMainWindow):
 
     def _on_scroll_capture_started(self, hwnd: int) -> None:
         try:
+            self.begin_capture_hide()
             QApplication.setOverrideCursor(Qt.WaitCursor)
         except Exception:
             pass
