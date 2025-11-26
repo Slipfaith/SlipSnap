@@ -220,6 +220,17 @@ class ScrollCaptureThread(QThread):
             pass
 
     def _send_scroll(self) -> None:
+        pattern = self._get_scroll_pattern()
+        if pattern:
+            try:
+                # Попытка проскроллить через UI Automation — работает даже для
+                # окон, которые игнорируют WinAPI сообщения.
+                pattern.Scroll(0, UIAutomationClient.ScrollAmount_LargeIncrement)
+                logging.debug("Прокрутка через ScrollPattern hwnd=%s", self.hwnd)
+                return
+            except Exception:
+                logging.exception("ScrollPattern не смог проскроллить hwnd=%s", self.hwnd)
+
         if not (win32api and win32con):
             return
         try:
