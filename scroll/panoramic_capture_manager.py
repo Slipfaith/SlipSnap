@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import tempfile
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, TYPE_CHECKING
 
 import cv2
 import mss
@@ -13,8 +13,10 @@ import numpy as np
 from PySide6.QtCore import QObject, QThread, Signal, Qt
 from PySide6.QtWidgets import QApplication, QDialog, QLabel, QPushButton, QVBoxLayout, QHBoxLayout
 
-from gui import OverlayManager
 from scroll.image_stitcher import ImageStitcher
+
+if TYPE_CHECKING:  # pragma: no cover - used only for type hints
+    from gui import OverlayManager
 
 
 class _PanoramicCaptureThread(QThread):
@@ -116,7 +118,7 @@ class PanoramicCaptureManager(QObject):
     def __init__(self, cfg: dict, parent=None) -> None:
         super().__init__(parent)
         self.cfg = cfg
-        self._overlay: Optional[OverlayManager] = None
+        self._overlay: Optional["OverlayManager"] = None
         self._thread: Optional[_PanoramicCaptureThread] = None
         self._dialog: Optional[PanoramicControlDialog] = None
         self._selected_region: Optional[Tuple[int, int, int, int]] = None
@@ -124,6 +126,8 @@ class PanoramicCaptureManager(QObject):
     # ---- selection ----
     def start(self) -> None:
         self.selection_started.emit()
+        from gui import OverlayManager
+
         self._overlay = OverlayManager(self.cfg)
         self._overlay.region_selected.connect(self._on_region_selected)
         self._overlay.finished.connect(self._on_selection_finished)
