@@ -62,6 +62,55 @@ class ImageStitcher:
                 best_offset = max_loc[1] + template.shape[0]
         return best_offset, best_confidence
 
+    @staticmethod
+    def _blend_images(base_image: Image.Image, next_image: Image.Image, overlap: int) -> Image.Image:
+        """Сшивает два изображения с мягким переходом в зоне overlap."""
+
+        if overlap <= 0:
+            # Нет пересечения — просто конкатенация
+            new_width = max(base_image.width, next_image.width)
+            combined = Image.new(
+                "RGB", (new_width, base_image.height + next_image.height), color=(255, 255, 255)
+            )
+            combined.paste(base_image, (0, 0))
+            combined.paste(next_image, (0, base_image.height))
+            return combined
+
+        base_arr = np.array(base_image)
+        next_arr = np.array(next_image)
+
+        overlap = min(overlap, base_arr.shape[0], next_arr.shape[0])
+        new_height = base_arr.shape[0] + next_arr.shape[0] - overlap
+        new_width = max(base_arr.shape[1], next_arr.shape[1])
+        canvas = np.full((new_height, new_width, 3), 255, dtype=np.uint8)
+
+        # Копируем основную часть базового изображения
+        canvas[: base_arr.shape[0], : base_arr.shape[1]] = base_arr
+
+        start_y = base_arr.shape[0] - overlap
+        min_width = min(base_arr.shape[1], next_arr.shape[1])
+
+        # Мягко смешиваем перекрывающуюся зону
+        blend_height = overlap
+        alpha = np.linspace(0, 1, blend_height, dtype=np.float32)[:, None, None]
+        base_overlap = canvas[start_y : start_y + blend_height, :min_width].astype(np.float32)
+        next_overlap = next_arr[:blend_height, :min_width].astype(np.float32)
+        blended = (1 - alpha) * base_overlap + alpha * next_overlap
+        canvas[start_y : start_y + blend_height, :min_width] = np.clip(blended, 0, 255).astype(np.uint8)
+
+        # Если следующий кадр шире — добавляем недостающие столбцы в зоне смешивания
+        if next_arr.shape[1] > min_width:
+            canvas[start_y : start_y + blend_height, min_width : next_arr.shape[1]] = next_arr[
+                :blend_height, min_width : next_arr.shape[1]
+            ]
+
+        # Основная часть следующего кадра
+        canvas[start_y + blend_height : start_y + blend_height + (next_arr.shape[0] - overlap), : next_arr.shape[1]] = next_arr[
+            overlap:, : next_arr.shape[1]
+        ]
+
+        return Image.fromarray(canvas)
+
     def stitch(self, output_path: Path) -> Path:
         if not self.frames:
             raise ValueError("Нет кадров для склейки")
@@ -77,16 +126,16 @@ class ImageStitcher:
             if confidence < 0.6:
                 offset = min(frame.shape[0], max(offset, int(frame.shape[0] * 0.15)))
 
-            append_region = frame[offset:]
+            # Захватываем небольшую часть перекрытия для плавного перехода
+            blend_height = min(max(10, offset // 4), 80)
+            crop_start = max(offset - blend_height, 0)
+
+            append_region = frame[crop_start:]
             if append_region.size == 0:
                 continue
+
             next_part = self._to_pil(append_region)
-            new_width = max(base_image.width, next_part.width)
-            new_height = base_image.height + next_part.height
-            combined = Image.new("RGB", (new_width, new_height), color=(255, 255, 255))
-            combined.paste(base_image, (0, 0))
-            combined.paste(next_part, (0, base_image.height))
-            base_image = combined
+            base_image = self._blend_images(base_image, next_part, overlap=offset - crop_start)
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
         base_image.save(output_path, format="PNG", optimize=True)
