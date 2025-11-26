@@ -33,7 +33,17 @@ if os.name == "nt":
 
     _existing_kwargs = getattr(pytesseract.pytesseract, "popen_kwargs", {})
     _popen_kwargs = dict(_existing_kwargs) if isinstance(_existing_kwargs, dict) else {}
+
+    # Блокируем создание консольного окна даже на доли секунды.
+    # combination of CREATE_NO_WINDOW + скрытый STARTUPINFO помогает
+    # и при установке tesseract_cmd пользователем.
     _popen_kwargs.setdefault("creationflags", subprocess.CREATE_NO_WINDOW)
+    if "startupinfo" not in _popen_kwargs:
+        startup = subprocess.STARTUPINFO()
+        startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startup.wShowWindow = subprocess.SW_HIDE
+        _popen_kwargs["startupinfo"] = startup
+
     pytesseract.pytesseract.popen_kwargs = _popen_kwargs
 
 
