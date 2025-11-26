@@ -31,6 +31,7 @@ from .icon_factory import (
     make_icon_series,
     make_icon_collage,
     make_icon_ocr,
+    make_icon_scroll_capture,
     make_icon_copy,
     make_icon_save,
     make_icon_undo,
@@ -462,6 +463,8 @@ def create_actions_toolbar(window, canvas):
     tb.addSeparator()
 
     add_action("new", "Новый снимок", window.new_screenshot, sc="Ctrl+N", icon=make_icon_new(), show_text=False)
+    if hasattr(window, "start_scroll_capture"):
+        add_action("scroll", "Скролл-захват", window.start_scroll_capture, icon=make_icon_scroll_capture(), show_text=False)
     if hasattr(window, "request_series_capture"):
         add_action("series", "Серия скриншотов", window.request_series_capture, icon=make_icon_series(), show_text=False)
     add_action("collage", "История", window.open_collage, sc="Ctrl+K", icon=make_icon_collage(), show_text=False)

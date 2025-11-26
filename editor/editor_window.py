@@ -53,6 +53,12 @@ from icons import make_icon_series
 
 from design_tokens import Metrics, editor_main_stylesheet
 
+try:
+    from scroll.scroll_capture_manager import ScrollCaptureManager
+    _scroll_capture_available = True
+except (ImportError, RuntimeError):
+    _scroll_capture_available = False
+
 
 class _OcrWorker(QThread):
     finished = Signal(object, object)
@@ -314,6 +320,42 @@ class EditorWindow(QMainWindow):
         act_shortcuts.triggered.connect(self.show_shortcuts)
         act_about = help_menu.addAction("ⓘ О программе")
         act_about.triggered.connect(self.show_about)
+
+        self.scroll_capture_manager = None
+        if _scroll_capture_available:
+            self.scroll_capture_manager = ScrollCaptureManager(self)
+            self.scroll_capture_manager.capture_completed.connect(self._on_scroll_capture_completed)
+            self.scroll_capture_manager.error_occurred.connect(self._on_scroll_capture_error)
+            self.scroll_capture_manager.progress_updated.connect(self._on_scroll_capture_progress)
+
+
+    def start_scroll_capture(self):
+        if not self.scroll_capture_manager:
+            QMessageBox.warning(self, "Ошибка", "Функция скролл-захвата недоступна в вашей системе.")
+            return
+
+        # Скрываем окно редактора, чтобы не мешать выбору
+        self.begin_capture_hide()
+        # Даем время окну скрыться перед запуском
+        QTimer.singleShot(300, self.scroll_capture_manager.start_capture)
+
+
+    def _on_scroll_capture_completed(self, image_path: str):
+        self.restore_from_capture()
+        qimg = QImage(image_path)
+        if not qimg.isNull():
+            self.load_base_screenshot(qimg, "✓ Скролл-захват завершен")
+        else:
+            self.statusBar().showMessage("Ошибка: не удалось загрузить изображение после скролл-захвата", 5000)
+
+    def _on_scroll_capture_error(self, error_message: str):
+        self.restore_from_capture()
+        self.statusBar().showMessage(f"Ошибка скролл-захвата: {error_message}", 5000)
+        QMessageBox.warning(self, "Ошибка скролл-захвата", error_message)
+
+    def _on_scroll_capture_progress(self, percent: int, message: str):
+        self.statusBar().showMessage(f"Скролл-захват ({percent}%): {message}")
+
 
     # ---- series controls ------------------------------------------
     def set_series_controls(

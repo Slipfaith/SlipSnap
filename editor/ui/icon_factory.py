@@ -43,6 +43,38 @@ def make_icon_rect() -> QIcon:
     p.end()
     return QIcon(pm)
 
+def make_icon_scroll_capture() -> QIcon:
+    pm = _base_pixmap()
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+
+    # Документ/Лист
+    p.setPen(QPen(QColor(ModernColors.TEXT_SECONDARY), 2))
+    p.setBrush(QColor(ModernColors.SURFACE))
+    p.drawRoundedRect(QRectF(8, 6, 24, 28), 3, 3)
+
+    # Символические линии текста
+    p.setPen(QPen(QColor(ModernColors.TEXT_SECONDARY), 1.5))
+    p.drawLine(12, 12, 28, 12)
+    p.drawLine(12, 16, 28, 16)
+    p.drawLine(12, 20, 20, 20)
+
+    # Стрелка "скролл вниз"
+    p.setPen(QPen(QColor(ModernColors.PRIMARY), 2.5, Qt.SolidLine, Qt.RoundCap))
+    p.setBrush(QColor(ModernColors.PRIMARY))
+
+    arrow_path = QPainterPath()
+    arrow_path.moveTo(20, 24)
+    arrow_path.lineTo(20, 32) # Вертикальная линия
+    # Головка стрелки
+    arrow_path.moveTo(17, 29)
+    arrow_path.lineTo(20, 32)
+    arrow_path.lineTo(23, 29)
+    p.drawPath(arrow_path)
+
+    p.end()
+    return QIcon(pm)
+
 def make_icon_ellipse() -> QIcon:
     pm = _base_pixmap()
     p = QPainter(pm)
