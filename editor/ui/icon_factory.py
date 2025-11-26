@@ -412,6 +412,32 @@ def make_icon_scroll_capture() -> QIcon:
     p.end()
     return QIcon(pm)
 
+
+def make_icon_panoramic_capture() -> QIcon:
+    pm = _base_pixmap()
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+
+    # Лента кадра
+    p.setPen(QPen(QColor(ModernColors.PRIMARY), 2))
+    p.setBrush(QColor(ModernColors.SURFACE))
+    p.drawRoundedRect(QRectF(6, 10, 28, 16), 4, 4)
+
+    # Стрелка движения
+    p.setPen(QPen(QColor(ModernColors.TEXT_SECONDARY), 2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+    p.drawLine(12, 26, 26, 26)
+    p.drawLine(26, 26, 22, 22)
+    p.drawLine(26, 26, 22, 30)
+
+    # Индикатор закреплённого окна
+    p.setPen(QPen(QColor(ModernColors.TEXT_SECONDARY), 1.8))
+    p.drawRect(QRectF(10, 12, 14, 12))
+    p.setBrush(QColor(ModernColors.PRIMARY))
+    p.drawEllipse(QRectF(22, 14, 6, 6))
+
+    p.end()
+    return QIcon(pm)
+
 def make_icon_ocr() -> QIcon:
     pm = _base_pixmap()
     p = QPainter(pm)

@@ -31,6 +31,7 @@ from .icon_factory import (
     make_icon_series,
     make_icon_collage,
     make_icon_scroll_capture,
+    make_icon_panoramic_capture,
     make_icon_ocr,
     make_icon_copy,
     make_icon_save,
@@ -471,6 +472,13 @@ def create_actions_toolbar(window, canvas):
         "Скролл-захват",
         window.start_scroll_capture,
         icon=make_icon_scroll_capture(),
+        show_text=False,
+    )
+    add_action(
+        "panoramic_capture",
+        "Панорама (ручной скролл)",
+        window.start_panoramic_capture,
+        icon=make_icon_panoramic_capture(),
         show_text=False,
     )
     add_action(

@@ -328,8 +328,50 @@ class VirtualOverlay(SelectionOverlayBase):
         return left, top, w, h
 
 
+class RegionOverlay(VirtualOverlay):
+    """Выделение прямоугольной области без создания снимка."""
+
+    region_selected = Signal(tuple)
+
+    def __init__(
+        self,
+        base_img: Image.Image,
+        cfg: dict,
+        virt_geom: QRect,
+        screen_map: List[Tuple[object, dict]],
+        base_origin: Tuple[int, int],
+    ) -> None:
+        super().__init__(base_img, cfg, virt_geom, screen_map, base_origin)
+        # Панорамный захват всегда использует прямоугольную область
+        self.shape = "rect"
+        self.shape_hint.hide()
+
+    def keyPressEvent(self, e):  # noqa: D401 - подавляем смену формы
+        if e.key() == Qt.Key_Escape:
+            self.releaseKeyboard()
+            self.cancel_all.emit()
+            return
+        if e.key() == Qt.Key_Space:
+            return
+        super().keyPressEvent(e)
+
+    def mouseReleaseEvent(self, e):
+        if e.button() == Qt.LeftButton and self.selecting:
+            self.selecting = False
+            gr = self._norm(self.origin, self.current)
+            if gr.width() > 5 and gr.height() > 5:
+                left, top, w, h = self._map_rect_to_image_coords(gr)
+                abs_left = left + self._base_left
+                abs_top = top + self._base_top
+                self.region_selected.emit((abs_left, abs_top, w, h))
+        elif e.button() == Qt.RightButton:
+            self.cancel_all.emit()
+        super().mouseReleaseEvent(e)
+
+
 class OverlayManager(QObject):
     captured = Signal(QImage)
+    region_selected = Signal(tuple)
     finished = Signal()
 
     def __init__(self, cfg: dict, grabber: Optional["ScreenGrabber"] = None):
@@ -395,6 +437,20 @@ class OverlayManager(QObject):
         else:
             self._start_virtual()
 
+    def start_region_selection(self):
+        """Запускает режим выбора области без немедленного скриншота."""
+        virt = QGuiApplication.primaryScreen().virtualGeometry()
+        grabber = self._ensure_grabber()
+        img = grabber.grab_virtual()
+        mapping = self._match_monitors()
+        base_origin = (grabber._sct.monitors[0]["left"], grabber._sct.monitors[0]["top"])
+        ov = RegionOverlay(img, self.cfg, virt, mapping, base_origin)
+        ov.region_selected.connect(self._on_region_selected)
+        ov.cancel_all.connect(self.close_all)
+        self._overlays = [ov]
+        ov.show()
+        ov.raise_()
+
     def _start_virtual(self):
         virt = QGuiApplication.primaryScreen().virtualGeometry()
         grabber = self._ensure_grabber()
@@ -431,6 +487,10 @@ class OverlayManager(QObject):
 
     def _on_captured(self, qimg: QImage):
         self.captured.emit(qimg)
+
+    def _on_region_selected(self, rect: tuple):
+        self.region_selected.emit(rect)
+        self.close_all()
 
 
 class Launcher(QWidget):
