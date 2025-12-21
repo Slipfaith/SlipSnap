@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QGraphicsScene,
     QGraphicsPixmapItem,
     QGraphicsItem,
+    QGraphicsTextItem,
     QMenu,
     QMessageBox,
     QFrame,
@@ -220,6 +221,7 @@ class Canvas(QGraphicsView):
         if hasattr(self, "ocr_overlay"):
             self.ocr_overlay.set_active(tool == "ocr")
         self.toolChanged.emit(tool)
+        self._apply_lock_state()
 
     # ---- scene management ----
     def update_scene_rect(self, padding: float = 48.0) -> None:
@@ -606,6 +608,7 @@ class Canvas(QGraphicsView):
             item.setZValue(new)
             changes[item] = (old, new)
         self._ensure_blur_top(items, changes)
+        self._ensure_text_top(items, changes)
         if record and changes:
             self.undo_stack.push(ZValueCommand(changes))
 
@@ -620,6 +623,7 @@ class Canvas(QGraphicsView):
             item.setZValue(new)
             changes[item] = (old, new)
         self._ensure_blur_top(items, changes)
+        self._ensure_text_top(items, changes)
         if changes:
             self.undo_stack.push(ZValueCommand(changes))
 
@@ -631,6 +635,18 @@ class Canvas(QGraphicsView):
             if it.data(0) == "blur" and it.zValue() != blur_z:
                 changes[it] = (it.zValue(), blur_z)
                 it.setZValue(blur_z)
+
+    def _ensure_text_top(self, items, changes):
+        text_items = [it for it in items if it.data(0) == "text" or isinstance(it, QGraphicsTextItem)]
+        if not text_items:
+            return
+        base_max = max((it.zValue() for it in items if it not in text_items), default=0)
+        next_z = base_max + 1
+        for it in text_items:
+            if it.zValue() < next_z:
+                changes[it] = (it.zValue(), next_z)
+                it.setZValue(next_z)
+            next_z = max(next_z, it.zValue()) + 1
 
     def contextMenuEvent(self, event):
         scene_pos = self.mapToScene(event.pos())

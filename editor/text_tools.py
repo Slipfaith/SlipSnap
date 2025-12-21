@@ -44,6 +44,7 @@ class EditableTextItem(QGraphicsTextItem):
         self.setFlag(QGraphicsItem.ItemIsFocusable, True)
         self.setTextInteractionFlags(Qt.TextEditorInteraction)
         self.setAcceptHoverEvents(True)
+        self.setData(0, "text")
 
         # Устанавливаем начальные параметры
         self.setFont(self._font)
@@ -383,6 +384,7 @@ class TextManager:
 
         # Добавляем на сцену
         self.canvas.scene.addItem(item)
+        self.canvas.bring_to_front(item, record=False)
 
         # Устанавливаем как текущий
         self._current_text_item = item
