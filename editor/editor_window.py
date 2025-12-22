@@ -611,10 +611,17 @@ class EditorWindow(QMainWindow):
             self._apply_ocr_languages(languages)
         return "+".join(languages)
 
-    def _start_ocr_scan(self, capture: OcrCapture) -> None:
+    def _reset_ocr_state(self) -> None:
+        """Remove previous OCR visuals before starting a new scan."""
+
+        self._clear_ocr_toast()
         if self.canvas.ocr_overlay:
             self.canvas.ocr_overlay.clear()
             self.canvas.ocr_overlay.set_active(False)
+        self.canvas.hide_ocr_scanner()
+
+    def _start_ocr_scan(self, capture: OcrCapture) -> None:
+        self._reset_ocr_state()
         self.canvas.show_ocr_scanner(capture.scene_rect)
 
     def _stop_ocr_scan(self, *, success: bool = True) -> None:
@@ -745,6 +752,7 @@ class EditorWindow(QMainWindow):
         if self._ocr_worker:
             return
 
+        self._reset_ocr_state()
         capture = self._current_ocr_capture()
         if capture is None:
             QMessageBox.warning(self, "SlipSnap · OCR", "Нет изображения для распознавания.")
