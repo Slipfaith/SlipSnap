@@ -4,6 +4,7 @@ from PySide6.QtWidgets import QGraphicsItem
 
 from .base_tool import BaseTool
 from editor.undo_commands import AddCommand
+from editor.ui.selection_items import ModernEllipseItem, ModernPathItem
 
 
 class _BaseShapeTool(BaseTool):
@@ -28,9 +29,11 @@ class RectangleTool(_BaseShapeTool):
         path = QPainterPath()
         path.addRoundedRect(rect, 4, 4)
         if self._tmp is None:
-            self._tmp = self.canvas.scene.addPath(path, self.canvas._pen)
+            self._tmp = ModernPathItem(path)
+            self._tmp.setPen(self.canvas._pen)
             self._tmp.setFlag(QGraphicsItem.ItemIsSelectable, True)
             self._tmp.setFlag(QGraphicsItem.ItemIsMovable, True)
+            self.canvas.scene.addItem(self._tmp)
             self.canvas.undo_stack.push(AddCommand(self.canvas.scene, self._tmp))
             self.canvas.bring_to_front(self._tmp, record=False)
         else:
@@ -42,9 +45,11 @@ class EllipseTool(_BaseShapeTool):
 
     def move(self, pos: QPointF):
         if self._tmp is None:
-            self._tmp = self.canvas.scene.addEllipse(QRectF(self._start, pos).normalized(), self.canvas._pen)
+            self._tmp = ModernEllipseItem(QRectF(self._start, pos).normalized())
+            self._tmp.setPen(self.canvas._pen)
             self._tmp.setFlag(QGraphicsItem.ItemIsSelectable, True)
             self._tmp.setFlag(QGraphicsItem.ItemIsMovable, True)
+            self.canvas.scene.addItem(self._tmp)
             self.canvas.undo_stack.push(AddCommand(self.canvas.scene, self._tmp))
             self.canvas.bring_to_front(self._tmp, record=False)
         else:

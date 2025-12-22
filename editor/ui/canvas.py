@@ -118,6 +118,39 @@ class Canvas(QGraphicsView):
         self._apply_lock_state()
         self.update_scene_rect()
 
+    def drawForeground(self, painter: QPainter, rect: QRectF) -> None:  # type: ignore[override]
+        super().drawForeground(painter, rect)
+        selected = [it for it in self.scene.selectedItems() if it.isVisible()]
+        if not selected:
+            return
+
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing, True)
+
+        stroke = QColor(ModernColors.PRIMARY)
+        stroke.setAlpha(220)
+        fill = QColor(ModernColors.PRIMARY)
+        fill.setAlpha(50)
+
+        for item in selected:
+            scene_rect = item.sceneBoundingRect().adjusted(-4, -4, 4, 4)
+            view_rect = self.mapFromScene(scene_rect).boundingRect()
+            side = min(view_rect.width(), view_rect.height())
+            radius = min(12.0, max(4.0, side * 0.25))
+
+            path = QPainterPath()
+            path.addRoundedRect(view_rect, radius, radius)
+
+            painter.fillPath(path, QBrush(fill))
+            pen = QPen(stroke, 2.2)
+            pen.setCosmetic(True)
+            pen.setCapStyle(Qt.RoundCap)
+            pen.setJoinStyle(Qt.RoundJoin)
+            painter.setPen(pen)
+            painter.drawPath(path)
+
+        painter.restore()
+
     # ---- drag & drop ----
     def dragEnterEvent(self, event):
         if images_from_mime(event.mimeData()):
@@ -314,7 +347,14 @@ class Canvas(QGraphicsView):
         rect = selected[0].sceneBoundingRect()
         for it in selected[1:]:
             rect = rect.united(it.sceneBoundingRect())
+        focus_item = self.scene.focusItem()
+        for it in selected:
+            it.setSelected(False)
         img, _, _ = self._render_rect_to_qimage(rect, selected)
+        for it in selected:
+            it.setSelected(True)
+        if focus_item:
+            focus_item.setFocus()
         return qimage_to_pil(img)
 
     def export_selection_with_geometry(self) -> Tuple[Image.Image, QRectF, Tuple[int, int], float]:
@@ -326,7 +366,14 @@ class Canvas(QGraphicsView):
             rect = selected[0].sceneBoundingRect()
             for it in selected[1:]:
                 rect = rect.united(it.sceneBoundingRect())
+            focus_item = self.scene.focusItem()
+            for it in selected:
+                it.setSelected(False)
             img, rect, dpr = self._render_rect_to_qimage(rect, selected)
+            for it in selected:
+                it.setSelected(True)
+            if focus_item:
+                focus_item.setFocus()
         return qimage_to_pil(img), rect, (img.width(), img.height()), dpr
 
     def current_ocr_capture(self) -> OcrCapture:

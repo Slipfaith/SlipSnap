@@ -1,8 +1,9 @@
 from PySide6.QtCore import QPointF, QLineF
-from PySide6.QtWidgets import QGraphicsItem, QGraphicsItemGroup
+from PySide6.QtWidgets import QGraphicsItem
 
 from .base_tool import BaseTool
 from editor.undo_commands import AddCommand
+from editor.ui.selection_items import ModernItemGroup, ModernLineItem
 
 
 class LineTool(BaseTool):
@@ -19,9 +20,11 @@ class LineTool(BaseTool):
 
     def move(self, pos: QPointF):
         if self._tmp is None:
-            self._tmp = self.canvas.scene.addLine(QLineF(self._start, pos), self.canvas._pen)
+            self._tmp = ModernLineItem(QLineF(self._start, pos))
+            self._tmp.setPen(self.canvas._pen)
             self._tmp.setFlag(QGraphicsItem.ItemIsMovable, True)
             self._tmp.setFlag(QGraphicsItem.ItemIsSelectable, True)
+            self.canvas.scene.addItem(self._tmp)
             self.canvas.undo_stack.push(AddCommand(self.canvas.scene, self._tmp))
             self.canvas.bring_to_front(self._tmp, record=False)
         else:
@@ -60,8 +63,10 @@ class ArrowTool(BaseTool):
             self._tmp = None
 
     def _create_arrow_group(self, start: QPointF, end: QPointF):
-        group = QGraphicsItemGroup()
-        line = self.canvas.scene.addLine(QLineF(start, end), self.canvas._pen)
+        group = ModernItemGroup()
+        line = ModernLineItem(QLineF(start, end))
+        line.setPen(self.canvas._pen)
+        self.canvas.scene.addItem(line)
         group.addToGroup(line)
 
         v = end - start
@@ -77,8 +82,12 @@ class ArrowTool(BaseTool):
                 end.x() - ux * head + uy * head * 0.5,
                 end.y() - uy * head - ux * head * 0.5,
             )
-            left_line = self.canvas.scene.addLine(QLineF(end, left), self.canvas._pen)
-            right_line = self.canvas.scene.addLine(QLineF(end, right), self.canvas._pen)
+            left_line = ModernLineItem(QLineF(end, left))
+            left_line.setPen(self.canvas._pen)
+            right_line = ModernLineItem(QLineF(end, right))
+            right_line.setPen(self.canvas._pen)
+            self.canvas.scene.addItem(left_line)
+            self.canvas.scene.addItem(right_line)
             group.addToGroup(left_line)
             group.addToGroup(right_line)
 

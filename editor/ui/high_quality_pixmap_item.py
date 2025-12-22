@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 
 from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtGui import QImage, QPixmap, QPainter
 from PySide6.QtWidgets import QGraphicsPixmapItem
 
 
@@ -47,6 +47,15 @@ class HighQualityPixmapItem(QGraphicsPixmapItem):
             return
         self._current_scale = scale
         self._update_display_for_scale(scale)
+
+    def paint(self, painter, option, widget=None):  # type: ignore[override]
+        """Render pixmap without the default dashed selection frame."""
+        if self.pixmap().isNull():
+            return
+        painter.save()
+        painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        painter.drawPixmap(0, 0, self.pixmap())
+        painter.restore()
 
     def scale(self) -> float:  # type: ignore[override]
         return self._current_scale
