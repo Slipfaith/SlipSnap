@@ -1,11 +1,12 @@
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QPen, QColor, QImage, QPainter
-from PySide6.QtWidgets import QGraphicsItem, QGraphicsPixmapItem
+from PySide6.QtWidgets import QGraphicsItem
 from PIL import ImageFilter, ImageDraw, Image
 
 from logic import pil_to_qpixmap, qimage_to_pil
 from .base_tool import BaseTool
 from editor.undo_commands import AddCommand
+from editor.ui.selection_items import ModernPixmapItem
 
 
 class BlurTool(BaseTool):
@@ -51,8 +52,10 @@ class BlurTool(BaseTool):
         clipped_rect = user_rect.intersected(img_rect)
 
         if self._rect_item is None:
-            pen = QPen(Qt.DashLine)
-            pen.setColor(QColor(self.preview_color))
+            pen = QPen(QColor(self.preview_color))
+            pen.setCosmetic(True)
+            pen.setWidthF(2.0)
+            pen.setStyle(Qt.SolidLine)
             self._rect_item = self.canvas.scene.addRect(clipped_rect, pen)
         else:
             self._rect_item.setRect(clipped_rect)
@@ -176,7 +179,7 @@ class BlurTool(BaseTool):
         if result is None:
             return None
         pix, pos = result
-        item = QGraphicsPixmapItem(pix)
+        item = ModernPixmapItem(pix)
         item.setPos(pos)
         item.setZValue(1)
         item.setFlag(QGraphicsItem.ItemIsSelectable, True)

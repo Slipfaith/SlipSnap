@@ -224,19 +224,15 @@ class EditableTextItem(QGraphicsTextItem):
         if self.isSelected():
             painter.save()
 
-            # Рисуем рамку выделения
+            # Рисуем компактный маркер для изменения размера только в правом нижнем углу
             rect = super().boundingRect()
-            pen = QPen(QColor(*Palette.TEXT_TOOL_SELECTION), 1, Qt.DashLine)
-            painter.setPen(pen)
-            painter.setBrush(Qt.NoBrush)
-            painter.drawRoundedRect(rect, 8, 8)
-
-            # Рисуем квадрат для изменения размера только в правом нижнем углу
             handle_size = RESIZE_HANDLE_SIZE
             handle_pos = rect.bottomRight()
 
-            painter.setBrush(QColor(*Palette.TEXT_TOOL_SELECTION))
-            painter.setPen(QPen(QColor(*Palette.TEXT_TOOL_SELECTION_FILL), 1))
+            accent = QColor(*Palette.TEXT_TOOL_SELECTION)
+            accent.setAlpha(230)
+            glow = QColor(*Palette.TEXT_TOOL_SELECTION)
+            glow.setAlpha(80)
 
             handle_rect = QRectF(
                 handle_pos.x() - handle_size / 2,
@@ -244,7 +240,13 @@ class EditableTextItem(QGraphicsTextItem):
                 handle_size,
                 handle_size,
             )
-            painter.drawRoundedRect(handle_rect, 2, 2)
+            halo_rect = handle_rect.adjusted(-3, -3, 3, 3)
+
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(glow)
+            painter.drawRoundedRect(halo_rect, handle_size / 2, handle_size / 2)
+            painter.setBrush(accent)
+            painter.drawRoundedRect(handle_rect, handle_size / 2, handle_size / 2)
 
             painter.restore()
 

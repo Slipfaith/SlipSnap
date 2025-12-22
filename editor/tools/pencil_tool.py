@@ -1,9 +1,10 @@
 from PySide6.QtCore import QPointF
 from PySide6.QtGui import QPainterPath
-from PySide6.QtWidgets import QGraphicsItem, QGraphicsPathItem
+from PySide6.QtWidgets import QGraphicsItem
 
 from .base_tool import BaseTool
 from editor.undo_commands import AddCommand
+from editor.ui.selection_items import ModernPathItem
 
 
 class PencilTool(BaseTool):
@@ -16,7 +17,7 @@ class PencilTool(BaseTool):
 
     def press(self, pos: QPointF):
         self._path = QPainterPath(pos)
-        self._path_item = QGraphicsPathItem(self._path)
+        self._path_item = ModernPathItem(self._path)
         self._path_item.setPen(self.canvas._pen)
         self._path_item.setFlag(QGraphicsItem.ItemIsSelectable, True)
         self._path_item.setFlag(QGraphicsItem.ItemIsMovable, True)
