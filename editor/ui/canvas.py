@@ -131,15 +131,19 @@ class Canvas(QGraphicsView):
         stroke.setAlpha(220)
         fill = QColor(ModernColors.PRIMARY)
         fill.setAlpha(50)
+        scale = abs(self.transform().m11()) or 1.0
+        scale = max(scale, 1e-3)
 
         for item in selected:
-            scene_rect = item.sceneBoundingRect().adjusted(-4, -4, 4, 4)
+            padding = 4.0 / scale
+            scene_rect = item.sceneBoundingRect().adjusted(-padding, -padding, padding, padding)
             view_rect = self.mapFromScene(scene_rect).boundingRect()
             side = min(view_rect.width(), view_rect.height())
             radius = min(12.0, max(4.0, side * 0.25))
+            radius_scene = radius / scale
 
             path = QPainterPath()
-            path.addRoundedRect(view_rect, radius, radius)
+            path.addRoundedRect(scene_rect, radius_scene, radius_scene)
 
             painter.fillPath(path, QBrush(fill))
             pen = QPen(stroke, 2.2)
