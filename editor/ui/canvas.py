@@ -52,6 +52,9 @@ class Canvas(QGraphicsView):
         self.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
         self.scene = QGraphicsScene(self)
         self.setScene(self.scene)
+        # Force full repaints while dragging items to avoid visual ghosting
+        # when the selection is moved.
+        self.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
         self.setAcceptDrops(True)
         self.setFrameShape(QFrame.NoFrame)
 
