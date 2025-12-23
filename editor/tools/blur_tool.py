@@ -1,6 +1,6 @@
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QPen, QColor, QImage, QPainter
-from PySide6.QtWidgets import QGraphicsItem
+from PySide6.QtWidgets import QGraphicsItem, QGraphicsPixmapItem
 from PIL import ImageFilter, ImageDraw, Image
 
 from logic import pil_to_qpixmap, qimage_to_pil

@@ -48,17 +48,6 @@ if os.name == "nt":
 
     # Дополнительно патчим subprocess.Popen, чтобы любые внутренние вызовы
     # (включая subprocess.run) Tesseract не всплывали отдельным окном.
-    _original_popen = subprocess.Popen
-
-    def _silent_popen(*args, **kwargs):
-        creationflags = kwargs.pop("creationflags", 0) | subprocess.CREATE_NO_WINDOW
-        kwargs["creationflags"] = creationflags
-        kwargs.setdefault("startupinfo", _popen_kwargs.get("startupinfo"))
-        return _original_popen(*args, **kwargs)
-
-    subprocess.Popen = _silent_popen
-
-
 _AVAILABLE_LANG_CACHE: Optional[List[str]] = None
 _WARMUP_LOCK = threading.Lock()
 _WARMUP_STARTED = False

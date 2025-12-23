@@ -1,5 +1,5 @@
 from PySide6.QtCore import QPointF, Qt, QRectF, QLineF
-from PySide6.QtGui import QPen, QBrush, QColor, QCursor, QPixmap, QPainter, QImage
+from PySide6.QtGui import QPen, QBrush, QColor, QCursor, QPixmap, QPainter, QImage, QUndoCommand
 from PySide6.QtWidgets import (
     QWidget,
     QSlider,
@@ -27,11 +27,13 @@ class EraserTool(BaseTool):
         self.size_step = Metrics.ERASER_STEP
         self._last_pos = None
         self._last_item = None
+        self._pending_erase = {}
         self._create_cursor()
 
     def press(self, pos: QPointF):
         self._last_pos = pos
         self._last_item = None
+        self._pending_erase = {}
         self._erase_at_position(pos)
 
     def move(self, pos: QPointF):
@@ -45,6 +47,19 @@ class EraserTool(BaseTool):
     def release(self, pos: QPointF):
         self._last_pos = None
         self._last_item = None
+        if self._pending_erase:
+            changes = []
+            for item, before in list(self._pending_erase.items()):
+                if item is None:
+                    continue
+                try:
+                    after = QPixmap(item.pixmap())
+                except Exception:
+                    continue
+                changes.append((item, before, after))
+            if changes:
+                self.canvas.undo_stack.push(_EraseCommand(changes))
+        self._pending_erase = {}
 
     def wheel_event(self, delta: int, pos: QPointF):
         if delta > 0:
@@ -164,6 +179,8 @@ class EraserTool(BaseTool):
         return pix_item
 
     def _erase_pixmap_item(self, item, pos: QPointF):
+        if item not in self._pending_erase:
+            self._pending_erase[item] = QPixmap(item.pixmap())
         pix = item.pixmap()
         painter = QPainter(pix)
         painter.setRenderHint(QPainter.Antialiasing)
@@ -263,3 +280,29 @@ class _EraserSizePopup(QWidget):
     def _on_value_changed(self, value: int):
         self.label.setText(f"{value} px")
         self.tool.set_size(value)
+
+
+class _EraseCommand(QUndoCommand):
+    """Undo command for eraser changes to pixmap items."""
+
+    def __init__(self, changes):
+        super().__init__("Erase")
+        self._changes = changes
+
+    def undo(self):
+        for item, before, _after in self._changes:
+            if item is None:
+                continue
+            try:
+                item.setPixmap(before)
+            except Exception:
+                continue
+
+    def redo(self):
+        for item, _before, after in self._changes:
+            if item is None:
+                continue
+            try:
+                item.setPixmap(after)
+            except Exception:
+                continue

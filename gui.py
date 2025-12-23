@@ -610,7 +610,7 @@ class App(QObject):
                 # Passing ``None`` lets the backend decide which window handle
                 # to use. Using ``0`` breaks registration on X11 backends
                 # (pyqtkeybind expects ``None`` for the root window).
-                keybinder.unregister_hotkey(None, self._hotkey_seq)
+                keybinder.unregister_hotkey(0, self._hotkey_seq)
             except (KeyError, AttributeError):
                 pass
 
@@ -981,7 +981,7 @@ class App(QObject):
         self._cleaned_up = True
         if self._hotkey_seq:
             try:
-                keybinder.unregister_hotkey(None, self._hotkey_seq)
+                keybinder.unregister_hotkey(0, self._hotkey_seq)
             except (KeyError, AttributeError):
                 pass
             self._hotkey_seq = None
