@@ -362,6 +362,8 @@ class OverlayManager(QObject):
         grabber = self._ensure_grabber()
         sct = grabber._sct
         mons = sct.monitors[1:]
+        if not mons:
+            return []
         out: List[Tuple[object, dict]] = []
         for s in QGuiApplication.screens():
             sx, sy, sw, sh = self._screen_phys_rect(s)
@@ -400,7 +402,12 @@ class OverlayManager(QObject):
         grabber = self._ensure_grabber()
         img = grabber.grab_virtual()
         mapping = self._match_monitors()
-        base_origin = (grabber._sct.monitors[0]["left"], grabber._sct.monitors[0]["top"])
+        if not mapping:
+            raise RuntimeError("Не удалось получить список физических мониторов MSS.")
+        monitors = grabber._sct.monitors
+        if not monitors:
+            raise RuntimeError("Не удалось получить список мониторов MSS.")
+        base_origin = (monitors[0]["left"], monitors[0]["top"])
         ov = VirtualOverlay(img, self.cfg, virt, mapping, base_origin)
         ov.captured.connect(self._on_captured)
         ov.cancel_all.connect(self.close_all)
@@ -410,6 +417,8 @@ class OverlayManager(QObject):
 
     def _start_per_screen(self):
         mapping = self._match_monitors()
+        if not mapping:
+            raise RuntimeError("Не удалось получить список физических мониторов MSS.")
         grabber = self._ensure_grabber()
         for s, mon in mapping:
             img = grabber.grab(s)
@@ -604,13 +613,13 @@ class App(QObject):
         if hasattr(self, "ovm"):
             self.ovm.set_shape(self.cfg.get("shape", "rect"))
 
-    def _register_hotkey(self, seq: str):
+    def _register_hotkey(self, seq: str, fallback_seq: Optional[str] = None):
         if self._hotkey_seq:
             try:
                 # Passing ``None`` lets the backend decide which window handle
                 # to use. Using ``0`` breaks registration on X11 backends
                 # (pyqtkeybind expects ``None`` for the root window).
-                keybinder.unregister_hotkey(0, self._hotkey_seq)
+                keybinder.unregister_hotkey(None, self._hotkey_seq)
             except (KeyError, AttributeError):
                 pass
 
@@ -619,9 +628,16 @@ class App(QObject):
         else:
             self._hotkey_seq = None
             QMessageBox.warning(None, "SlipSnap", f"Не удалось зарегистрировать горячую клавишу: {seq}")
+            if fallback_seq and fallback_seq != seq:
+                if keybinder.register_hotkey(None, fallback_seq, self.capture_region):
+                    self._hotkey_seq = fallback_seq
+                    self.cfg["capture_hotkey"] = fallback_seq
+                    save_config(self.cfg)
+                    if hasattr(self.launcher, "btn_hotkey"):
+                        self.launcher.btn_hotkey.setText(fallback_seq)
 
     def _update_hotkey(self, seq: str):
-        self._register_hotkey(seq)
+        self._register_hotkey(seq, fallback_seq=self._hotkey_seq)
 
     def _start_series_capture(self, parent: Optional[QWidget] = None) -> bool:
         if parent is None:
@@ -981,7 +997,7 @@ class App(QObject):
         self._cleaned_up = True
         if self._hotkey_seq:
             try:
-                keybinder.unregister_hotkey(0, self._hotkey_seq)
+                keybinder.unregister_hotkey(None, self._hotkey_seq)
             except (KeyError, AttributeError):
                 pass
             self._hotkey_seq = None

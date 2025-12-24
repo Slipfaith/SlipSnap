@@ -5,3 +5,4 @@ pytesseract
 pyqtkeybind
 psutil
 pyinstaller>=6
+pywin32

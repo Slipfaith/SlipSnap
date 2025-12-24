@@ -8,13 +8,24 @@ from io import BytesIO
 import sys
 
 from PIL import Image
-from PySide6.QtGui import QImage
+from PySide6.QtGui import QImage, QGuiApplication
 
 try:
     import win32clipboard as wc
     HAS_WIN32 = True
 except ImportError:
     HAS_WIN32 = False
+
+
+def _set_qt_clipboard_image(qimg: QImage) -> bool:
+    app = QGuiApplication.instance()
+    if app is None:
+        return False
+    clipboard = QGuiApplication.clipboard()
+    if clipboard is None:
+        return False
+    clipboard.setImage(qimg)
+    return True
 
 
 def copy_pil_image_to_clipboard(img: Image.Image) -> QImage:
@@ -44,10 +55,12 @@ def copy_pil_image_to_clipboard(img: Image.Image) -> QImage:
 
     # Копируем через Win32 API
     if HAS_WIN32 and sys.platform.startswith("win"):
-        _copy_png_and_dibv5_win32(img, png_data)
-    else:
+        if _copy_png_and_dibv5_win32(img, png_data):
+            return qimg
+        _set_qt_clipboard_image(qimg)
         return qimg
 
+    _set_qt_clipboard_image(qimg)
     return qimg
 
 
@@ -65,12 +78,13 @@ def _copy_png_win32(png_data: bytes) -> None:
         wc.SetClipboardData(png_format, png_data)
 
     except Exception:
-        pass
+        return False
     finally:
         try:
             wc.CloseClipboard()
         except:
             pass
+    return True
 
 
 def _create_dibv5_with_alpha(img: Image.Image) -> bytes:
@@ -146,7 +160,7 @@ def _create_dibv5_with_alpha(img: Image.Image) -> bytes:
     return full_header + pixel_data
 
 
-def _copy_png_and_dibv5_win32(img: Image.Image, png_data: bytes) -> None:
+def _copy_png_and_dibv5_win32(img: Image.Image, png_data: bytes) -> bool:
     """Копирует PNG + CF_DIBV5 для максимальной совместимости"""
 
     try:
@@ -164,7 +178,7 @@ def _copy_png_and_dibv5_win32(img: Image.Image, png_data: bytes) -> None:
         wc.SetClipboardData(wc.CF_DIBV5, dibv5_data)
 
     except Exception:
-        pass
+        _set_qt_clipboard_image(qimg)
     finally:
         try:
             wc.CloseClipboard()
@@ -193,6 +207,7 @@ def copy_pil_image_to_clipboard_with_fallback(img: Image.Image) -> QImage:
         qimg = qimg.convertToFormat(QImage.Format_ARGB32)
 
     if not (HAS_WIN32 and sys.platform.startswith("win")):
+        _set_qt_clipboard_image(qimg)
         return qimg
 
     # CF_DIB для старых программ (RGB без альфы, чтобы не конфликтовать)
