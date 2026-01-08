@@ -9,6 +9,171 @@ from editor.undo_commands import AddCommand
 from editor.ui.selection_items import ModernPixmapItem
 
 
+def _image_rect_for_canvas(canvas) -> QRectF:
+    """Combined bounding rect of all screenshot items."""
+    items = [
+        it
+        for it in canvas.scene.items()
+        if isinstance(it, QGraphicsPixmapItem) and it.data(0) != "blur"
+    ]
+    if not items:
+        return QRectF()
+    rect = items[0].sceneBoundingRect()
+    for it in items[1:]:
+        rect = rect.united(it.sceneBoundingRect())
+    return rect
+
+
+def _generate_blur_pixmap(
+    canvas,
+    rect: QRectF,
+    blur_radius: float,
+    edge_width: float,
+    *,
+    hidden_items=None,
+    target_size=None,
+):
+    img_rect = _image_rect_for_canvas(canvas).toAlignedRect()
+
+    rect = rect.intersected(img_rect).toAlignedRect()
+    if rect.isNull() or rect.isEmpty():
+        return None
+
+    if target_size is None:
+        target_size = rect.size()
+
+    scale_x = target_size.width() / rect.width() if rect.width() else 1.0
+    scale_y = target_size.height() / rect.height() if rect.height() else 1.0
+    scale = min(scale_x, scale_y) if scale_x and scale_y else 1.0
+
+    radius_scene = max(0.0, float(blur_radius))
+    radius = int(round(radius_scene * scale))
+    radius = max(radius, 0)
+
+    expanded = rect.adjusted(-radius_scene, -radius_scene, radius_scene, radius_scene)
+    expanded = expanded.intersected(img_rect)
+    ex, ey, ew, eh = expanded.x(), expanded.y(), expanded.width(), expanded.height()
+
+    target_w = max(1, int(round(ew * scale_x)))
+    target_h = max(1, int(round(eh * scale_y)))
+    img = QImage(target_w, target_h, QImage.Format_RGBA8888)
+    img.fill(Qt.transparent)
+    p = QPainter(img)
+    hidden_items = hidden_items or []
+    for item in hidden_items:
+        item.setVisible(False)
+    canvas.scene.render(p, QRectF(0, 0, target_w, target_h), QRectF(ex, ey, ew, eh))
+    p.end()
+    for item in hidden_items:
+        item.setVisible(True)
+
+    pil_img = qimage_to_pil(img)
+
+    def _pad_with_edge(image: Image.Image, pad: int) -> Image.Image:
+        if pad <= 0:
+            return image
+        w, h = image.size
+        padded = Image.new(image.mode, (w + pad * 2, h + pad * 2))
+        padded.paste(image, (pad, pad))
+        padded.paste(image.crop((0, 0, w, 1)).resize((w, pad)), (pad, 0))
+        padded.paste(image.crop((0, h - 1, w, h)).resize((w, pad)), (pad, h + pad))
+        padded.paste(image.crop((0, 0, 1, h)).resize((pad, h)), (0, pad))
+        padded.paste(image.crop((w - 1, 0, w, h)).resize((pad, h)), (w + pad, pad))
+        tl = Image.new(image.mode, (pad, pad), image.getpixel((0, 0)))
+        tr = Image.new(image.mode, (pad, pad), image.getpixel((w - 1, 0)))
+        bl = Image.new(image.mode, (pad, pad), image.getpixel((0, h - 1)))
+        br = Image.new(image.mode, (pad, pad), image.getpixel((w - 1, h - 1)))
+        padded.paste(tl, (0, 0))
+        padded.paste(tr, (w + pad, 0))
+        padded.paste(bl, (0, h + pad))
+        padded.paste(br, (w + pad, h + pad))
+        return padded
+
+    original_alpha = pil_img.getchannel("A") if pil_img.mode == "RGBA" else None
+
+    pil_img = _pad_with_edge(pil_img, radius)
+    pil_blur = pil_img.filter(ImageFilter.GaussianBlur(radius))
+
+    crop_x = radius + int(round((rect.left() - expanded.left()) * scale_x))
+    crop_y = radius + int(round((rect.top() - expanded.top()) * scale_y))
+    crop_w = int(round(rect.width() * scale_x))
+    crop_h = int(round(rect.height() * scale_y))
+    pil_blur = pil_blur.crop((crop_x, crop_y, crop_x + crop_w, crop_y + crop_h))
+
+    edge = int(round(edge_width * scale))
+    edge = min(edge, crop_w // 2, crop_h // 2)
+    if original_alpha:
+        original_alpha_padded = _pad_with_edge(original_alpha, radius)
+        original_alpha_cropped = original_alpha_padded.crop(
+            (crop_x, crop_y, crop_x + crop_w, crop_y + crop_h)
+        )
+
+        if edge > 0:
+            mask = Image.new("L", (crop_w, crop_h), 0)
+            draw = ImageDraw.Draw(mask)
+            draw.rounded_rectangle((edge, edge, crop_w - edge, crop_h - edge), radius=edge, fill=255)
+            mask = mask.filter(ImageFilter.GaussianBlur(edge))
+
+            from PIL import ImageChops
+
+            final_alpha = ImageChops.darker(original_alpha_cropped, mask)
+            pil_blur.putalpha(final_alpha)
+        else:
+            pil_blur.putalpha(original_alpha_cropped)
+    else:
+        if edge > 0:
+            mask = Image.new("L", (crop_w, crop_h), 0)
+            draw = ImageDraw.Draw(mask)
+            draw.rounded_rectangle((edge, edge, crop_w - edge, crop_h - edge), radius=edge, fill=255)
+            mask = mask.filter(ImageFilter.GaussianBlur(edge))
+            pil_blur.putalpha(mask)
+
+    return pil_to_qpixmap(pil_blur), QPointF(rect.topLeft())
+
+
+class DynamicBlurItem(ModernPixmapItem):
+    """Pixmap item that refreshes its blur based on the underlying scene."""
+
+    def __init__(self, canvas, rect: QRectF, blur_radius: float, edge_width: float):
+        super().__init__()
+        self.canvas = canvas
+        self.blur_radius = blur_radius
+        self.edge_width = edge_width
+        self._updating = False
+        self._refresh_from_rect(rect, set_pos=True)
+
+    def itemChange(self, change, value):  # type: ignore[override]
+        if change in (QGraphicsItem.ItemPositionHasChanged, QGraphicsItem.ItemTransformHasChanged):
+            if not self._updating and self.scene() is not None:
+                rect = self.sceneBoundingRect()
+                self._refresh_from_rect(rect, set_pos=False)
+        return super().itemChange(change, value)
+
+    def _refresh_from_rect(self, rect: QRectF, *, set_pos: bool) -> None:
+        if self._updating:
+            return
+        self._updating = True
+        try:
+            target_size = self.pixmap().size()
+            if target_size.isEmpty():
+                target_size = rect.size().toSize()
+            result = _generate_blur_pixmap(
+                self.canvas,
+                rect,
+                self.blur_radius,
+                self.edge_width,
+                hidden_items=[self],
+                target_size=target_size,
+            )
+            if result is None:
+                return
+            pix, pos = result
+            self.setPixmap(pix)
+            if set_pos:
+                self.setPos(pos)
+        finally:
+            self._updating = False
+
 class BlurTool(BaseTool):
     """Tool for blurring rectangular regions."""
 
@@ -20,20 +185,6 @@ class BlurTool(BaseTool):
         self.preview_color = preview_color
         self.blur_radius = 5
         self.edge_width = 2
-
-    def _image_rect(self) -> QRectF:
-        """Combined bounding rect of all screenshot items."""
-        items = [
-            it
-            for it in self.canvas.scene.items()
-            if isinstance(it, QGraphicsPixmapItem) and it.data(0) != "blur"
-        ]
-        if not items:
-            return QRectF()
-        rect = items[0].sceneBoundingRect()
-        for it in items[1:]:
-            rect = rect.united(it.sceneBoundingRect())
-        return rect
 
     def press(self, pos: QPointF):
         self._start = pos
@@ -47,7 +198,7 @@ class BlurTool(BaseTool):
     def move(self, pos: QPointF):
         user_rect = QRectF(self._start, pos).normalized()
 
-        img_rect = self._image_rect()
+        img_rect = _image_rect_for_canvas(self.canvas)
 
         clipped_rect = user_rect.intersected(img_rect)
 
@@ -60,7 +211,13 @@ class BlurTool(BaseTool):
         else:
             self._rect_item.setRect(clipped_rect)
 
-        result = self._generate_blur_pixmap(clipped_rect)
+        result = _generate_blur_pixmap(
+            self.canvas,
+            clipped_rect,
+            self.blur_radius,
+            self.edge_width,
+            hidden_items=[self._preview_item] if self._preview_item is not None else None,
+        )
         if result is None:
             if self._preview_item is not None:
                 self.canvas.scene.removeItem(self._preview_item)
@@ -92,95 +249,11 @@ class BlurTool(BaseTool):
                     self.canvas.undo_stack.push(AddCommand(self.canvas.scene, item))
                     self.canvas.bring_to_front(item, record=False)
 
-    def _generate_blur_pixmap(self, rect: QRectF):
-        img_rect = self._image_rect().toAlignedRect()
-
-        rect = rect.intersected(img_rect).toAlignedRect()
-        if rect.isNull() or rect.isEmpty():
-            return None
-
-        radius = int(self.blur_radius)
-
-        expanded = rect.adjusted(-radius, -radius, radius, radius)
-        expanded = expanded.intersected(img_rect)
-        ex, ey, ew, eh = expanded.x(), expanded.y(), expanded.width(), expanded.height()
-
-        img = QImage(ew, eh, QImage.Format_RGBA8888)
-        img.fill(Qt.transparent)
-        p = QPainter(img)
-        if self._preview_item is not None:
-            self._preview_item.hide()
-        self.canvas.scene.render(p, QRectF(0, 0, ew, eh), expanded)
-        p.end()
-        if self._preview_item is not None:
-            self._preview_item.show()
-        pil_img = qimage_to_pil(img)
-
-        def _pad_with_edge(image: Image.Image, pad: int) -> Image.Image:
-            if pad <= 0:
-                return image
-            w, h = image.size
-            padded = Image.new(image.mode, (w + pad * 2, h + pad * 2))
-            padded.paste(image, (pad, pad))
-            padded.paste(image.crop((0, 0, w, 1)).resize((w, pad)), (pad, 0))
-            padded.paste(image.crop((0, h - 1, w, h)).resize((w, pad)), (pad, h + pad))
-            padded.paste(image.crop((0, 0, 1, h)).resize((pad, h)), (0, pad))
-            padded.paste(image.crop((w - 1, 0, w, h)).resize((pad, h)), (w + pad, pad))
-            tl = Image.new(image.mode, (pad, pad), image.getpixel((0, 0)))
-            tr = Image.new(image.mode, (pad, pad), image.getpixel((w - 1, 0)))
-            bl = Image.new(image.mode, (pad, pad), image.getpixel((0, h - 1)))
-            br = Image.new(image.mode, (pad, pad), image.getpixel((w - 1, h - 1)))
-            padded.paste(tl, (0, 0))
-            padded.paste(tr, (w + pad, 0))
-            padded.paste(bl, (0, h + pad))
-            padded.paste(br, (w + pad, h + pad))
-            return padded
-
-        original_alpha = pil_img.getchannel('A') if pil_img.mode == 'RGBA' else None
-
-        pil_img = _pad_with_edge(pil_img, radius)
-        pil_blur = pil_img.filter(ImageFilter.GaussianBlur(radius))
-
-        crop_x = radius + rect.left() - expanded.left()
-        crop_y = radius + rect.top() - expanded.top()
-        crop_w = rect.width()
-        crop_h = rect.height()
-        pil_blur = pil_blur.crop((crop_x, crop_y, crop_x + crop_w, crop_y + crop_h))
-
-        if original_alpha:
-            original_alpha_padded = _pad_with_edge(original_alpha, radius)
-            original_alpha_cropped = original_alpha_padded.crop((crop_x, crop_y, crop_x + crop_w, crop_y + crop_h))
-
-            edge = min(self.edge_width, crop_w // 2, crop_h // 2)
-            if edge > 0:
-                mask = Image.new("L", (crop_w, crop_h), 0)
-                draw = ImageDraw.Draw(mask)
-                draw.rounded_rectangle((edge, edge, crop_w - edge, crop_h - edge), radius=edge, fill=255)
-                mask = mask.filter(ImageFilter.GaussianBlur(edge))
-
-                from PIL import ImageChops
-                final_alpha = ImageChops.darker(original_alpha_cropped, mask)
-                pil_blur.putalpha(final_alpha)
-            else:
-                pil_blur.putalpha(original_alpha_cropped)
-        else:
-            edge = min(self.edge_width, crop_w // 2, crop_h // 2)
-            if edge > 0:
-                mask = Image.new("L", (crop_w, crop_h), 0)
-                draw = ImageDraw.Draw(mask)
-                draw.rounded_rectangle((edge, edge, crop_w - edge, crop_h - edge), radius=edge, fill=255)
-                mask = mask.filter(ImageFilter.GaussianBlur(edge))
-                pil_blur.putalpha(mask)
-
-        return pil_to_qpixmap(pil_blur), QPointF(rect.topLeft())
-
     def _create_blur_item(self, rect: QRectF):
-        result = self._generate_blur_pixmap(rect)
+        result = _generate_blur_pixmap(self.canvas, rect, self.blur_radius, self.edge_width)
         if result is None:
             return None
-        pix, pos = result
-        item = ModernPixmapItem(pix)
-        item.setPos(pos)
+        item = DynamicBlurItem(self.canvas, rect, self.blur_radius, self.edge_width)
         item.setZValue(1)
         item.setFlag(QGraphicsItem.ItemIsSelectable, True)
         item.setFlag(QGraphicsItem.ItemIsMovable, True)
