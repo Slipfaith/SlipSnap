@@ -149,6 +149,12 @@ class DynamicBlurItem(ModernPixmapItem):
                 self._refresh_from_rect(rect, set_pos=False)
         return super().itemChange(change, value)
 
+    def refresh(self) -> None:
+        if self.scene() is None:
+            return
+        rect = self.sceneBoundingRect()
+        self._refresh_from_rect(rect, set_pos=False)
+
     def _refresh_from_rect(self, rect: QRectF, *, set_pos: bool) -> None:
         if self._updating:
             return
