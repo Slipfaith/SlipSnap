@@ -196,8 +196,9 @@ class Canvas(QGraphicsView):
 
     def _set_pixmap_items_interactive(self, enabled: bool):
         for it in self.scene.items():
-            if isinstance(it, QGraphicsPixmapItem):
+            if isinstance(it, QGraphicsPixmapItem) or it.data(0) == "blur":
                 it.setFlag(QGraphicsItem.ItemIsMovable, enabled)
+                it.setFlag(QGraphicsItem.ItemIsSelectable, True)
                 it.setAcceptedMouseButtons(Qt.AllButtons if enabled else Qt.NoButton)
                 if not enabled and it.isSelected():
                     it.setSelected(False)
