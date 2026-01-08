@@ -10,7 +10,6 @@ from PySide6.QtCore import (
     QEasingCurve,
     QVariantAnimation,
     QAbstractAnimation,
-    QTimer,
 )
 from PySide6.QtGui import QPainter, QPen, QColor, QImage, QUndoStack, QLinearGradient, QBrush, QPainterPath
 from PySide6.QtWidgets import (
@@ -130,9 +129,6 @@ class Canvas(QGraphicsView):
         self._select_cursor = create_select_cursor()
         self._apply_lock_state()
         self.update_scene_rect()
-        self._blur_refresh_pending = False
-        self._blur_refreshing = False
-        self.scene.changed.connect(self._queue_blur_refresh)
 
     def drawForeground(self, painter: QPainter, rect: QRectF) -> None:  # type: ignore[override]
         super().drawForeground(painter, rect)
@@ -285,24 +281,6 @@ class Canvas(QGraphicsView):
             rect = QRectF(0, 0, 0, 0)
         margins = QMarginsF(padding, padding, padding, padding)
         self.scene.setSceneRect(rect.marginsAdded(margins))
-
-    def _queue_blur_refresh(self, _regions=None) -> None:
-        if self._blur_refreshing or self._blur_refresh_pending:
-            return
-        self._blur_refresh_pending = True
-        QTimer.singleShot(0, self._refresh_blur_items)
-
-    def _refresh_blur_items(self) -> None:
-        if self._blur_refreshing:
-            return
-        self._blur_refresh_pending = False
-        self._blur_refreshing = True
-        try:
-            for item in self.scene.items():
-                if item.data(0) == "blur" and hasattr(item, "refresh"):
-                    item.refresh()
-        finally:
-            self._blur_refreshing = False
 
     def set_text_manager(self, text_manager: TextManager):
         self._text_manager = text_manager
