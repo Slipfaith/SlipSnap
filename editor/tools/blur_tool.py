@@ -1,5 +1,5 @@
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QPen, QColor, QImage, QPainter
+from PySide6.QtGui import QPen, QColor, QImage, QPainter, QPainterPath
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsPixmapItem
 from PIL import ImageFilter, ImageDraw, Image
 
@@ -136,6 +136,11 @@ class DynamicBlurItem(ModernPixmapItem):
 
     def __init__(self, canvas, rect: QRectF, blur_radius: float, edge_width: float):
         super().__init__()
+        self.setShapeMode(QGraphicsPixmapItem.BoundingRectShape)
+        self.setAcceptedMouseButtons(Qt.AllButtons)
+        self.setAcceptHoverEvents(True)
+        self.setFlag(QGraphicsItem.ItemIsSelectable, True)
+        self.setFlag(QGraphicsItem.ItemIsMovable, True)
         self.canvas = canvas
         self.blur_radius = blur_radius
         self.edge_width = edge_width
@@ -148,6 +153,11 @@ class DynamicBlurItem(ModernPixmapItem):
                 rect = self.sceneBoundingRect()
                 self._refresh_from_rect(rect, set_pos=False)
         return super().itemChange(change, value)
+
+    def shape(self):  # type: ignore[override]
+        path = QPainterPath()
+        path.addRect(self.boundingRect())
+        return path
 
     def refresh(self) -> None:
         if self.scene() is None:
