@@ -1,5 +1,5 @@
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QPen, QColor, QImage, QPainter, QPainterPath
+from PySide6.QtGui import QPen, QColor, QImage, QPainter
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsPixmapItem
 from PIL import ImageFilter, ImageDraw, Image
 
@@ -131,65 +131,6 @@ def _generate_blur_pixmap(
     return pil_to_qpixmap(pil_blur), QPointF(rect.topLeft())
 
 
-class DynamicBlurItem(ModernPixmapItem):
-    """Pixmap item that refreshes its blur based on the underlying scene."""
-
-    def __init__(self, canvas, rect: QRectF, blur_radius: float, edge_width: float):
-        super().__init__()
-        self.setShapeMode(QGraphicsPixmapItem.BoundingRectShape)
-        self.setAcceptedMouseButtons(Qt.AllButtons)
-        self.setAcceptHoverEvents(True)
-        self.setFlag(QGraphicsItem.ItemIsSelectable, True)
-        self.setFlag(QGraphicsItem.ItemIsMovable, True)
-        self.canvas = canvas
-        self.blur_radius = blur_radius
-        self.edge_width = edge_width
-        self._updating = False
-        self._refresh_from_rect(rect, set_pos=True)
-
-    def itemChange(self, change, value):  # type: ignore[override]
-        if change in (QGraphicsItem.ItemPositionHasChanged, QGraphicsItem.ItemTransformHasChanged):
-            if not self._updating and self.scene() is not None:
-                rect = self.sceneBoundingRect()
-                self._refresh_from_rect(rect, set_pos=False)
-        return super().itemChange(change, value)
-
-    def shape(self):  # type: ignore[override]
-        path = QPainterPath()
-        path.addRect(self.boundingRect())
-        return path
-
-    def refresh(self) -> None:
-        if self.scene() is None:
-            return
-        rect = self.sceneBoundingRect()
-        self._refresh_from_rect(rect, set_pos=False)
-
-    def _refresh_from_rect(self, rect: QRectF, *, set_pos: bool) -> None:
-        if self._updating:
-            return
-        self._updating = True
-        try:
-            target_size = self.pixmap().size()
-            if target_size.isEmpty():
-                target_size = rect.size().toSize()
-            result = _generate_blur_pixmap(
-                self.canvas,
-                rect,
-                self.blur_radius,
-                self.edge_width,
-                hidden_items=[self],
-                target_size=target_size,
-            )
-            if result is None:
-                return
-            pix, pos = result
-            self.setPixmap(pix)
-            if set_pos:
-                self.setPos(pos)
-        finally:
-            self._updating = False
-
 class BlurTool(BaseTool):
     """Tool for blurring rectangular regions."""
 
@@ -269,7 +210,10 @@ class BlurTool(BaseTool):
         result = _generate_blur_pixmap(self.canvas, rect, self.blur_radius, self.edge_width)
         if result is None:
             return None
-        item = DynamicBlurItem(self.canvas, rect, self.blur_radius, self.edge_width)
+        pix, pos = result
+        item = ModernPixmapItem()
+        item.setPixmap(pix)
+        item.setPos(pos)
         item.setZValue(1)
         item.setFlag(QGraphicsItem.ItemIsSelectable, True)
         item.setFlag(QGraphicsItem.ItemIsMovable, True)
