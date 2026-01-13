@@ -1,17 +1,33 @@
 from typing import Optional, Dict, Tuple
+from pathlib import Path
+import tempfile
 import math
 
 from PySide6.QtCore import (
     Qt,
     QPointF,
     QRectF,
+    QPoint,
+    QRect,
     Signal,
     QMarginsF,
     QEasingCurve,
     QVariantAnimation,
     QAbstractAnimation,
+    QMimeData,
+    QUrl,
 )
-from PySide6.QtGui import QPainter, QPen, QColor, QImage, QUndoStack, QLinearGradient, QBrush, QPainterPath
+from PySide6.QtGui import (
+    QPainter,
+    QPen,
+    QColor,
+    QImage,
+    QUndoStack,
+    QLinearGradient,
+    QBrush,
+    QPainterPath,
+    QDrag,
+)
 from PySide6.QtWidgets import (
     QGraphicsView,
     QGraphicsScene,
@@ -24,6 +40,7 @@ from PySide6.QtWidgets import (
     QGraphicsRectItem,
     QGraphicsPathItem,
     QGraphicsDropShadowEffect,
+    QApplication,
 )
 from PIL import Image
 
@@ -112,6 +129,9 @@ class Canvas(QGraphicsView):
         self._ocr_scan_dim: Optional[QGraphicsRectItem] = None
         self._ocr_scan_anim = None
         self._ocr_scan_fade = None
+        self._drag_start_pos: Optional[QPoint] = None
+        self._drag_temp_dirs: list[Path] = []
+        self._dragging_external = False
 
         self.tools = {
             "select": SelectionTool(self),
@@ -189,6 +209,55 @@ class Canvas(QGraphicsView):
         for qimg in images:
             self.imageDropped.emit(qimg)
         event.acceptProposedAction()
+
+    def _should_start_external_drag(self, event) -> bool:
+        if self._drag_start_pos is None or self._dragging_external:
+            return False
+        if not (self.scene.selectedItems() or self.pixmap_item):
+            return False
+        distance = (event.position().toPoint() - self._drag_start_pos).manhattanLength()
+        if distance < QApplication.startDragDistance():
+            return False
+        viewport_rect = self.viewport().rect()
+        top_left = self.viewport().mapToGlobal(viewport_rect.topLeft())
+        bottom_right = self.viewport().mapToGlobal(viewport_rect.bottomRight())
+        global_rect = QRect(top_left, bottom_right)
+        return not global_rect.contains(event.globalPosition().toPoint())
+
+    def _export_drag_image(self) -> Image.Image:
+        if self.scene.selectedItems():
+            return self.export_selection()
+        return self.export_image()
+
+    def _next_drag_filename(self) -> str:
+        win = self.window()
+        logic = getattr(win, "logic", None)
+        if logic and hasattr(logic, "next_snap_filename"):
+            return logic.next_snap_filename()
+        return "snap_01.png"
+
+    def _start_external_drag(self) -> None:
+        image = self._export_drag_image()
+        if image is None:
+            return
+        if self._move_snapshot:
+            for item, pos in self._move_snapshot.items():
+                item.setPos(pos)
+            self._move_snapshot = {}
+        filename = self._next_drag_filename()
+        drag_dir = Path(tempfile.mkdtemp(prefix="slipsnap_drag_"))
+        self._drag_temp_dirs.append(drag_dir)
+        target = drag_dir / filename
+        if image.mode != "RGBA":
+            image = image.convert("RGBA")
+        image.save(target, format="PNG")
+        mime = QMimeData()
+        mime.setUrls([QUrl.fromLocalFile(str(target))])
+        drag = QDrag(self.viewport())
+        drag.setMimeData(mime)
+        self._dragging_external = True
+        drag.exec(Qt.CopyAction)
+        self._dragging_external = False
 
     def _set_pixmap_items_interactive(self, enabled: bool):
         for it in self.scene.items():
@@ -587,6 +656,7 @@ class Canvas(QGraphicsView):
                 items = self.scene.selectedItems()
                 if items:
                     self._move_snapshot = {it: it.pos() for it in items}
+                self._drag_start_pos = event.position().toPoint()
             elif self._tool not in ("none", "select"):
                 pos = self.mapToScene(event.position().toPoint())
                 if self._tool == "text" and self._text_manager:
@@ -620,6 +690,11 @@ class Canvas(QGraphicsView):
                 self.ocr_overlay.update_drag(pos)
             event.accept()
             return
+        if (event.buttons() & Qt.LeftButton) and self._tool == "select":
+            if self._should_start_external_drag(event):
+                self._start_external_drag()
+                event.accept()
+                return
         if (event.buttons() & Qt.LeftButton) and self._tool not in ("none", "select", "text"):
             pos = self.mapToScene(event.position().toPoint())
             if self.active_tool:
@@ -653,6 +728,7 @@ class Canvas(QGraphicsView):
                 if moved:
                     self.undo_stack.push(MoveCommand(moved))
                 self._move_snapshot = {}
+            self._drag_start_pos = None
             elif self._tool not in ("none", "select", "text"):
                 pos = self.mapToScene(event.position().toPoint())
                 if self.active_tool:
