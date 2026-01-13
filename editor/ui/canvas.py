@@ -729,7 +729,7 @@ class Canvas(QGraphicsView):
                     self.undo_stack.push(MoveCommand(moved))
                 self._move_snapshot = {}
             self._drag_start_pos = None
-            elif self._tool not in ("none", "select", "text"):
+            if self._tool not in ("none", "select", "text"):
                 pos = self.mapToScene(event.position().toPoint())
                 if self.active_tool:
                     self.active_tool.release(pos)
