@@ -42,6 +42,9 @@ class EditorLogic:
         self._last_save_directory = Path(path).parent
         return Path(path).name
 
+    def next_snap_filename(self) -> str:
+        return self._next_snap_name(self._last_save_directory).name
+
     def _next_snap_name(self, directory: Path) -> Path:
         existing_numbers = []
         for ext in ("png", "jpg", "jpeg"):
