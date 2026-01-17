@@ -733,6 +733,9 @@ class Canvas(QGraphicsView):
             h_value = self.horizontalScrollBar().value()
             v_value = self.verticalScrollBar().value()
             super().mouseMoveEvent(event)
+            if self._tool == "select" and self.scene.selectedItems():
+                self.scene.invalidate(QRectF(), QGraphicsScene.ForegroundLayer)
+                self.viewport().update()
             if self.horizontalScrollBar().value() != h_value:
                 self.horizontalScrollBar().setValue(h_value)
             if self.verticalScrollBar().value() != v_value:
