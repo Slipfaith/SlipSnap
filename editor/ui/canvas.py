@@ -632,11 +632,37 @@ class Canvas(QGraphicsView):
                     self.undo_stack.redo()
                 event.accept()
                 return
+            if key == Qt.Key_A:
+                focus_item = self.scene.focusItem()
+                if (
+                    isinstance(focus_item, QGraphicsTextItem)
+                    and focus_item.textInteractionFlags() != Qt.NoTextInteraction
+                ):
+                    super().keyPressEvent(event)
+                    return
+                if self._tool != "select":
+                    self.set_tool("select")
+                self.select_all_items()
+                event.accept()
+                return
         if self._tool == "erase" and hasattr(self.active_tool, 'key_press'):
             self.active_tool.key_press(event.key())
             event.accept()
             return
         super().keyPressEvent(event)
+
+    def select_all_items(self) -> None:
+        selectable = []
+        for item in self.scene.items():
+            if not item.isVisible():
+                continue
+            if item.flags() & QGraphicsItem.ItemIsSelectable:
+                selectable.append(item)
+        if not selectable:
+            return
+        self.scene.clearSelection()
+        for item in selectable:
+            item.setSelected(True)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton and self._tool == "ocr":

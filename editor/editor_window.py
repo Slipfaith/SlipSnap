@@ -368,6 +368,7 @@ class EditorWindow(QMainWindow):
             "Ctrl+N — новый снимок\n"
             "Ctrl+Shift+N — коллаж\n"
             "Ctrl+K — история\n"
+            "Ctrl+A — выделить всё\n"
             "Ctrl+C — копировать\n"
             "Ctrl+S — сохранить\n"
             "Ctrl+Z — отмена\n"
