@@ -48,7 +48,7 @@ from icons import make_icon_capture, make_icon_shape, make_icon_close
 from pyqtkeybind import keybinder
 
 from editor.series_capture import SeriesCaptureController
-from ocr import warm_up_ocr
+from ocr import configure_tesseract, warm_up_ocr
 
 from design_tokens import (
     Palette,
@@ -572,6 +572,7 @@ class App(QObject):
         super().__init__()
         init_started = perf_counter()
         self.cfg = load_config()
+        configure_tesseract(self.cfg)
         warm_up_ocr()
         self.launcher = Launcher(self.cfg)
         self.launcher.start_capture.connect(self.capture_region)

@@ -30,6 +30,7 @@ DEFAULT_CONFIG = {
     "capture_hotkey": "Ctrl+Alt+S",
     "series_prefix": "Series",
     "series_folder": str(Path.home()),
+    "tesseract_path": "",
     "ocr_settings": {
         "preferred_languages": ["eng"],
         "last_language": "auto",

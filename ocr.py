@@ -9,22 +9,19 @@ from PySide6.QtGui import QImage
 import pytesseract
 from pytesseract import TesseractError, TesseractNotFoundError
 
-from logic import qimage_to_pil
+from logic import qimage_to_pil, save_config
 
-# === Fallback поиск Tesseract (добавлено) ===
 import os
+import shutil
 import threading
+from pathlib import Path
+from typing import Iterable
 
-_FALLBACK_PATHS = [
-    r"C:\Program Files\Tesseract-OCR\tesseract.exe",
-    r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
-]
+from PySide6.QtCore import QUrl
+from PySide6.QtGui import QDesktopServices
+from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox, QWidget
 
-for _p in _FALLBACK_PATHS:
-    if os.path.exists(_p):
-        pytesseract.pytesseract.tesseract_cmd = _p
-        break
-# === конец добавленного кода ===
+_TESSERACT_DOWNLOAD_URL = "https://github.com/UB-Mannheim/tesseract/wiki"
 
 
 # На Windows скрываем всплывающие консольные окна Tesseract
@@ -51,6 +48,7 @@ if os.name == "nt":
 _AVAILABLE_LANG_CACHE: Optional[List[str]] = None
 _WARMUP_LOCK = threading.Lock()
 _WARMUP_STARTED = False
+_TESSERACT_CONFIGURED = False
 
 
 LANGUAGE_DISPLAY_NAMES = {
@@ -79,6 +77,127 @@ def get_language_display_name(code: str) -> str:
     if not normalized:
         return ""
     return LANGUAGE_DISPLAY_NAMES.get(normalized, normalized)
+
+
+def _set_tesseract_cmd(path: str) -> None:
+    pytesseract.pytesseract.tesseract_cmd = path
+
+
+def _candidate_paths_from_roots(roots: Iterable[str]) -> List[str]:
+    candidates: List[str] = []
+    for root in roots:
+        root_path = Path(root)
+        if not root_path:
+            continue
+        candidates.append(str(root_path / "Tesseract-OCR" / "tesseract.exe"))
+        candidates.append(str(root_path / "Programs" / "Tesseract-OCR" / "tesseract.exe"))
+    return candidates
+
+
+def _find_tesseract_in_path() -> Optional[str]:
+    result = shutil.which("tesseract")
+    return result if result else None
+
+
+def _find_tesseract_in_standard_locations() -> Optional[str]:
+    if os.name != "nt":
+        return None
+    roots = [
+        os.environ.get("ProgramFiles"),
+        os.environ.get("ProgramFiles(x86)"),
+        os.environ.get("LOCALAPPDATA"),
+    ]
+    for candidate in _candidate_paths_from_roots([root for root in roots if root]):
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
+
+def _get_configured_path(cfg: Optional[dict]) -> Optional[str]:
+    if not isinstance(cfg, dict):
+        return None
+    path = cfg.get("tesseract_path")
+    if not isinstance(path, str) or not path.strip():
+        return None
+    normalized = str(Path(path))
+    if os.path.exists(normalized):
+        return normalized
+    return None
+
+
+def _prompt_for_tesseract(parent: Optional[QWidget]) -> Optional[str]:
+    dialog = QMessageBox(parent)
+    dialog.setWindowTitle("SlipSnap · OCR")
+    dialog.setIcon(QMessageBox.Warning)
+    dialog.setText("Tesseract OCR не найден.")
+    dialog.setInformativeText(
+        "Вы можете указать путь к tesseract.exe вручную или перейти к установке."
+    )
+    choose_btn = dialog.addButton("Указать путь", QMessageBox.ActionRole)
+    install_btn = dialog.addButton("Перейти к установке", QMessageBox.ActionRole)
+    dialog.addButton(QMessageBox.Cancel)
+    dialog.exec()
+
+    clicked = dialog.clickedButton()
+    if clicked is choose_btn:
+        file_path, _ = QFileDialog.getOpenFileName(
+            parent,
+            "Выберите tesseract.exe",
+            str(Path.home()),
+            "tesseract.exe (tesseract.exe);;Все файлы (*)",
+        )
+        if file_path and os.path.exists(file_path):
+            return file_path
+        if file_path:
+            QMessageBox.warning(
+                parent,
+                "SlipSnap · OCR",
+                "Указанный файл не найден. Проверьте путь к tesseract.exe.",
+            )
+    elif clicked is install_btn:
+        QDesktopServices.openUrl(QUrl(_TESSERACT_DOWNLOAD_URL))
+    return None
+
+
+def configure_tesseract(cfg: Optional[dict], parent: Optional[QWidget] = None) -> bool:
+    global _TESSERACT_CONFIGURED
+    if _TESSERACT_CONFIGURED:
+        return True
+
+    configured_path = _get_configured_path(cfg)
+    if configured_path:
+        _set_tesseract_cmd(configured_path)
+        _TESSERACT_CONFIGURED = True
+        return True
+
+    path_from_env = _find_tesseract_in_path()
+    if path_from_env:
+        _set_tesseract_cmd(path_from_env)
+        if isinstance(cfg, dict):
+            cfg["tesseract_path"] = path_from_env
+            save_config(cfg)
+        _TESSERACT_CONFIGURED = True
+        return True
+
+    path_from_default = _find_tesseract_in_standard_locations()
+    if path_from_default:
+        _set_tesseract_cmd(path_from_default)
+        if isinstance(cfg, dict):
+            cfg["tesseract_path"] = path_from_default
+            save_config(cfg)
+        _TESSERACT_CONFIGURED = True
+        return True
+
+    if parent is not None or QApplication.instance() is not None:
+        manual_path = _prompt_for_tesseract(parent)
+        if manual_path:
+            _set_tesseract_cmd(manual_path)
+            if isinstance(cfg, dict):
+                cfg["tesseract_path"] = manual_path
+                save_config(cfg)
+            _TESSERACT_CONFIGURED = True
+            return True
+    return False
 
 
 class OcrError(RuntimeError):
@@ -192,7 +311,7 @@ def get_available_languages() -> List[str]:
         langs = pytesseract.get_languages(config="")
     except TesseractNotFoundError as exc:
         raise OcrError(
-            "Tesseract не найден. Установите бинарник tesseract-ocr и добавьте его в PATH."
+            "Tesseract не найден. Укажите путь к tesseract.exe или установите Tesseract OCR."
         ) from exc
     except TesseractError:
         langs = []
@@ -240,7 +359,7 @@ def run_ocr(
         pytesseract.get_tesseract_version()
     except TesseractNotFoundError as exc:
         raise OcrError(
-            "Tesseract не найден. Установите tesseract-ocr и перезапустите приложение."
+            "Tesseract не найден. Укажите путь к tesseract.exe или установите Tesseract OCR."
         ) from exc
 
     def _perform(lang_value: Optional[str]) -> str:
