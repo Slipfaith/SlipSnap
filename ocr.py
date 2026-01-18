@@ -107,6 +107,9 @@ class OcrResult:
 class OcrSettings:
     preferred_languages: List[str] = field(default_factory=lambda: ["eng"])
     last_language: str = "auto"
+    auto_config: bool = True
+    psm: Optional[int] = None
+    oem: Optional[int] = None
 
     @classmethod
     def from_config(cls, cfg: dict) -> "OcrSettings":
@@ -122,12 +125,30 @@ class OcrSettings:
         last_language = data.get("last_language", "auto")
         if not isinstance(last_language, str) or not last_language.strip():
             last_language = "auto"
-        return cls(preferred_languages=preferred, last_language=last_language)
+        auto_config = data.get("auto_config", True)
+        if not isinstance(auto_config, bool):
+            auto_config = True
+        psm = data.get("psm")
+        if not isinstance(psm, int):
+            psm = None
+        oem = data.get("oem")
+        if not isinstance(oem, int):
+            oem = None
+        return cls(
+            preferred_languages=preferred,
+            last_language=last_language,
+            auto_config=auto_config,
+            psm=psm,
+            oem=oem,
+        )
 
     def to_dict(self) -> dict:
         return {
             "preferred_languages": list(self.preferred_languages),
             "last_language": self.last_language,
+            "auto_config": self.auto_config,
+            "psm": self.psm,
+            "oem": self.oem,
         }
 
     def remember_run(self, requested: str, languages_used: Sequence[str]) -> None:
@@ -153,6 +174,83 @@ def _ensure_pil_image(image: Union[Image.Image, QImage]) -> Image.Image:
     if isinstance(image, QImage):
         return qimage_to_pil(image)
     raise OcrError("Передано неподдерживаемое изображение для OCR")
+
+
+def _build_tesseract_config(psm: Optional[int], oem: Optional[int]) -> str:
+    parts: List[str] = []
+    if psm is not None:
+        parts.extend(["--psm", str(psm)])
+    if oem is not None:
+        parts.extend(["--oem", str(oem)])
+    return " ".join(parts)
+
+
+def _score_ocr_data(data: dict) -> float:
+    try:
+        confs = data.get("conf", [])
+    except AttributeError:
+        return 0.0
+    numeric_confs = []
+    for raw in confs:
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if value >= 0:
+            numeric_confs.append(value)
+    if not numeric_confs:
+        return 0.0
+    avg_conf = sum(numeric_confs) / len(numeric_confs)
+    word_count = sum(1 for raw in data.get("text", []) if str(raw).strip())
+    return avg_conf + min(20.0, word_count * 0.2)
+
+
+def _select_best_config(
+    pil_image: Image.Image,
+    lang_value: Optional[str],
+    settings: OcrSettings,
+) -> Tuple[str, Optional[dict]]:
+    if not settings.auto_config:
+        config = _build_tesseract_config(settings.psm, settings.oem)
+        try:
+            data = pytesseract.image_to_data(
+                pil_image,
+                lang=lang_value or None,
+                config=config or "",
+                output_type=pytesseract.Output.DICT,
+            )
+        except Exception:
+            data = None
+        return config, data
+
+    candidates = [
+        (3, 3),
+        (6, 3),
+        (7, 3),
+        (11, 3),
+    ]
+    best_config = ""
+    best_data = None
+    best_score = -1.0
+    for psm, oem in candidates:
+        config = _build_tesseract_config(psm, oem)
+        try:
+            data = pytesseract.image_to_data(
+                pil_image,
+                lang=lang_value or None,
+                config=config or "",
+                output_type=pytesseract.Output.DICT,
+            )
+        except Exception:
+            continue
+        score = _score_ocr_data(data)
+        if score > best_score:
+            best_score = score
+            best_config = config
+            best_data = data
+    if best_score < 0:
+        return "", None
+    return best_config, best_data
 
 
 def _normalize_languages(language_hint: LangHint, settings: OcrSettings, available: Sequence[str]) -> Tuple[Optional[str], List[str], List[str]]:
@@ -243,17 +341,25 @@ def run_ocr(
             "Tesseract не найден. Установите tesseract-ocr и перезапустите приложение."
         ) from exc
 
-    def _perform(lang_value: Optional[str]) -> str:
-        return pytesseract.image_to_string(pil_image, lang=lang_value or None)
+    def _perform(lang_value: Optional[str], config_value: str) -> str:
+        return pytesseract.image_to_string(
+            pil_image,
+            lang=lang_value or None,
+            config=config_value or "",
+        )
 
     warnings: List[str] = []
+    selected_config = ""
+    data = None
     try:
-        text = _perform(lang_string)
+        selected_config, data = _select_best_config(pil_image, lang_string, settings)
+        text = _perform(lang_string, selected_config)
         language_tag = lang_string or "auto"
     except TesseractError as exc:
         if missing:
             try:
-                text = _perform(None)
+                selected_config, data = _select_best_config(pil_image, None, settings)
+                text = _perform(None, selected_config)
                 warnings.append(
                     "Отсутствуют языковые пакеты: "
                     + ", ".join(missing)
@@ -267,11 +373,18 @@ def run_ocr(
         else:
             raise OcrError(f"Ошибка OCR: {exc}") from exc
 
+    if data is None:
+        try:
+            data = pytesseract.image_to_data(
+                pil_image,
+                lang=lang_string or None,
+                config=selected_config or "",
+                output_type=pytesseract.Output.DICT,
+            )
+        except Exception:
+            data = None
+
     word_data: List[OcrWord] = []
-    try:
-        data = pytesseract.image_to_data(pil_image, lang=lang_string or None, output_type=pytesseract.Output.DICT)
-    except Exception:
-        data = None
 
     if data and all(key in data for key in ("text", "left", "top", "width", "height", "block_num", "par_num", "line_num")):
         for i, raw_text in enumerate(data["text"]):
