@@ -398,8 +398,26 @@ class Canvas(QGraphicsView):
         img.fill(Qt.transparent)
         hidden = []
         if only_items is not None:
+            allowed_items = set()
+            for item in only_items:
+                if item in allowed_items:
+                    continue
+                allowed_items.add(item)
+                parent = item.parentItem()
+                while parent is not None:
+                    if parent in allowed_items:
+                        break
+                    allowed_items.add(parent)
+                    parent = parent.parentItem()
+                stack = list(item.childItems())
+                while stack:
+                    child = stack.pop()
+                    if child in allowed_items:
+                        continue
+                    allowed_items.add(child)
+                    stack.extend(child.childItems())
             for it in self.scene.items():
-                if it not in only_items:
+                if it not in allowed_items:
                     hidden.append((it, it.isVisible()))
                     it.setVisible(False)
         p = QPainter(img)
