@@ -253,6 +253,7 @@ class _OcrLanguageDownloadDialog(QDialog):
         self._available = set(available)
         self._known = sorted(set(known_languages) | set(available))
         self._selected_languages: set[str] = set()
+        self._list_item_connected = False
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -302,10 +303,9 @@ class _OcrLanguageDownloadDialog(QDialog):
         self._filter_languages("")
 
     def _filter_languages(self, query: str) -> None:
-        try:
+        if self._list_item_connected:
             self.list_widget.itemChanged.disconnect(self._on_list_item_changed)
-        except TypeError:
-            pass
+            self._list_item_connected = False
         self.list_widget.clear()
         normalized_query = query.strip().lower()
         for code in self._known:
@@ -327,6 +327,7 @@ class _OcrLanguageDownloadDialog(QDialog):
             placeholder.setFlags(Qt.NoItemFlags)
             self.list_widget.addItem(placeholder)
         self.list_widget.itemChanged.connect(self._on_list_item_changed)
+        self._list_item_connected = True
         self._update_summary()
 
     def _on_list_item_changed(self, item: QListWidgetItem) -> None:
@@ -758,7 +759,7 @@ class EditorWindow(QMainWindow):
             return not progress.wasCanceled()
 
         try:
-            result = download_tesseract_languages(codes, progress=_progress)
+            result = download_tesseract_languages(codes, progress=_progress, cfg=self.cfg)
         except OcrError as exc:
             progress.cancel()
             QMessageBox.warning(self, "SlipSnap · OCR", str(exc))

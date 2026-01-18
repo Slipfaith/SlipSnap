@@ -127,6 +127,17 @@ def _get_configured_path(cfg: Optional[dict]) -> Optional[str]:
     return None
 
 
+def _apply_tessdata_prefix(cfg: Optional[dict]) -> None:
+    if not isinstance(cfg, dict):
+        return
+    prefix = cfg.get("tessdata_prefix")
+    if not isinstance(prefix, str) or not prefix.strip():
+        return
+    prefix_path = Path(prefix).expanduser()
+    if prefix_path.exists():
+        os.environ["TESSDATA_PREFIX"] = str(prefix_path)
+
+
 def _prompt_for_tesseract(parent: Optional[QWidget]) -> Optional[str]:
     dialog = QMessageBox(parent)
     dialog.setWindowTitle("SlipSnap · OCR")
@@ -165,6 +176,8 @@ def configure_tesseract(cfg: Optional[dict], parent: Optional[QWidget] = None) -
     global _TESSERACT_CONFIGURED
     if _TESSERACT_CONFIGURED:
         return True
+
+    _apply_tessdata_prefix(cfg)
 
     configured_path = _get_configured_path(cfg)
     if configured_path:
@@ -559,6 +572,33 @@ def _get_tesseract_cmd() -> str:
     return cmd if cmd else "tesseract"
 
 
+def _get_fallback_tessdata_dir() -> Path:
+    base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
+    base_path = Path(base) if base else Path.home()
+    return base_path / "SlipSnap" / "tessdata"
+
+
+def _seed_fallback_tessdata(source: Path, destination: Path) -> None:
+    if not source.exists():
+        return
+    destination.mkdir(parents=True, exist_ok=True)
+    for trained in source.glob("*.traineddata"):
+        target = destination / trained.name
+        if target.exists():
+            continue
+        try:
+            shutil.copy2(trained, target)
+        except OSError:
+            continue
+
+
+def _persist_tessdata_prefix(cfg: Optional[dict], prefix: Path) -> None:
+    if not isinstance(cfg, dict):
+        return
+    cfg["tessdata_prefix"] = str(prefix)
+    save_config(cfg)
+
+
 def _get_tessdata_dir() -> Path:
     prefix = os.environ.get("TESSDATA_PREFIX")
     if prefix:
@@ -597,6 +637,7 @@ def download_tesseract_languages(
     languages: Sequence[str],
     *,
     progress: Optional[Callable[[int, int, str], bool]] = None,
+    cfg: Optional[dict] = None,
 ) -> OcrLanguageDownload:
     normalized = []
     seen = set()
@@ -615,6 +656,19 @@ def download_tesseract_languages(
 
     result = OcrLanguageDownload()
     total = len(normalized)
+    fallback_dir: Optional[Path] = None
+
+    def _activate_fallback_dir() -> Path:
+        nonlocal fallback_dir, tessdata_dir
+        if fallback_dir is not None:
+            return fallback_dir
+        fallback_dir = _get_fallback_tessdata_dir()
+        fallback_dir.mkdir(parents=True, exist_ok=True)
+        _seed_fallback_tessdata(tessdata_dir, fallback_dir)
+        os.environ["TESSDATA_PREFIX"] = str(fallback_dir)
+        _persist_tessdata_prefix(cfg, fallback_dir)
+        tessdata_dir = fallback_dir
+        return fallback_dir
 
     def _record_failure(code: str, reason: str) -> None:
         result.failed.append(code)
@@ -647,6 +701,16 @@ def download_tesseract_languages(
 
         try:
             target_path.write_bytes(data)
+        except PermissionError:
+            target_path = _activate_fallback_dir() / f"{code}.traineddata"
+            if target_path.exists():
+                result.skipped.append(code)
+                continue
+            try:
+                target_path.write_bytes(data)
+            except OSError as exc:
+                _record_failure(code, str(exc) or "Ошибка записи файла")
+                continue
         except OSError as exc:
             _record_failure(code, str(exc) or "Ошибка записи файла")
             continue
