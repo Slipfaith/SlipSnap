@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import List, Optional, Sequence, Tuple, Union
 
-from PIL import Image
+from PIL import Image, ImageEnhance, ImageFilter
 from PySide6.QtGui import QImage
 
 import pytesseract
@@ -287,6 +287,14 @@ class OcrSettings:
 LangHint = Optional[Union[str, Sequence[str]]]
 
 
+@dataclass
+class OcrPreprocessTransform:
+    scale: float
+    rotation: int
+    scaled_size: Tuple[int, int]
+    original_size: Tuple[int, int]
+
+
 def _ensure_pil_image(image: Union[Image.Image, QImage]) -> Image.Image:
     if isinstance(image, Image.Image):
         return image
@@ -302,6 +310,142 @@ def _build_tesseract_config(psm: Optional[int], oem: Optional[int]) -> str:
     if oem is not None:
         parts.extend(["--oem", str(oem)])
     return " ".join(parts)
+
+
+def _scale_for_ocr(image: Image.Image) -> Tuple[Image.Image, float]:
+    dpi_info = image.info.get("dpi")
+    scale = 1.0
+    if isinstance(dpi_info, (tuple, list)) and len(dpi_info) >= 2:
+        try:
+            dpi_x = float(dpi_info[0])
+            dpi_y = float(dpi_info[1])
+        except (TypeError, ValueError):
+            dpi_x = 0.0
+            dpi_y = 0.0
+        min_dpi = min(val for val in (dpi_x, dpi_y) if val > 0) if dpi_x and dpi_y else 0.0
+        if min_dpi:
+            scale = min(3.0, max(1.0, 300.0 / min_dpi))
+    else:
+        scale = 2.0
+
+    if scale <= 1.05:
+        return image, 1.0
+    new_size = (max(1, int(round(image.width * scale))), max(1, int(round(image.height * scale))))
+    return image.resize(new_size, Image.LANCZOS), scale
+
+
+def _otsu_threshold(image: Image.Image) -> Image.Image:
+    histogram = image.histogram()
+    if len(histogram) < 256:
+        return image
+    total = sum(histogram[:256])
+    if total == 0:
+        return image
+    sum_total = sum(i * histogram[i] for i in range(256))
+    sum_background = 0.0
+    weight_background = 0.0
+    max_variance = -1.0
+    threshold = 0
+    for i in range(256):
+        weight_background += histogram[i]
+        if weight_background == 0:
+            continue
+        weight_foreground = total - weight_background
+        if weight_foreground == 0:
+            break
+        sum_background += i * histogram[i]
+        mean_background = sum_background / weight_background
+        mean_foreground = (sum_total - sum_background) / weight_foreground
+        variance = weight_background * weight_foreground * (mean_background - mean_foreground) ** 2
+        if variance > max_variance:
+            max_variance = variance
+            threshold = i
+    return image.point(lambda x: 255 if x > threshold else 0, mode="L")
+
+
+def _deskew_with_tesseract(image: Image.Image) -> Tuple[Image.Image, int]:
+    try:
+        osd = pytesseract.image_to_osd(image)
+    except Exception:
+        return image, 0
+    rotation = 0
+    for line in osd.splitlines():
+        if "Rotate:" in line:
+            try:
+                rotation = int(line.split(":", 1)[1].strip())
+            except (TypeError, ValueError):
+                rotation = 0
+            break
+    rotation = rotation % 360
+    if rotation not in (0, 90, 180, 270):
+        return image, 0
+    applied = (360 - rotation) % 360
+    if applied == 0:
+        return image, 0
+    return image.rotate(applied, expand=True), applied
+
+
+def _preprocess_for_ocr(pil_image: Image.Image) -> Tuple[Image.Image, OcrPreprocessTransform]:
+    original_size = pil_image.size
+    image = pil_image.convert("L")
+    image, scale = _scale_for_ocr(image)
+    scaled_size = image.size
+    image = image.filter(ImageFilter.MedianFilter(size=3))
+    image = ImageEnhance.Contrast(image).enhance(1.5)
+    image = image.filter(ImageFilter.UnsharpMask(radius=1.5, percent=150, threshold=3))
+    image, rotation = _deskew_with_tesseract(image)
+    image = _otsu_threshold(image)
+    transform = OcrPreprocessTransform(
+        scale=scale,
+        rotation=rotation,
+        scaled_size=scaled_size,
+        original_size=original_size,
+    )
+    return image, transform
+
+
+def _inverse_rotate_point(x: float, y: float, rotation: int, size: Tuple[int, int]) -> Tuple[float, float]:
+    width, height = size
+    if rotation == 90:
+        return (width - 1) - y, x
+    if rotation == 180:
+        return (width - 1) - x, (height - 1) - y
+    if rotation == 270:
+        return y, (height - 1) - x
+    return x, y
+
+
+def _map_bbox_to_original(
+    bbox: Tuple[int, int, int, int],
+    transform: OcrPreprocessTransform,
+) -> Tuple[int, int, int, int]:
+    x, y, w, h = bbox
+    x1 = float(x)
+    y1 = float(y)
+    x2 = float(x + w)
+    y2 = float(y + h)
+    points = [(x1, y1), (x2, y1), (x1, y2), (x2, y2)]
+    if transform.rotation:
+        points = [
+            _inverse_rotate_point(px, py, transform.rotation, transform.scaled_size)
+            for px, py in points
+        ]
+    if transform.scale and transform.scale != 1.0:
+        points = [(px / transform.scale, py / transform.scale) for px, py in points]
+    xs = [px for px, _ in points]
+    ys = [py for _, py in points]
+    min_x = max(0.0, min(xs))
+    min_y = max(0.0, min(ys))
+    max_x = min(float(transform.original_size[0]), max(xs))
+    max_y = min(float(transform.original_size[1]), max(ys))
+    width = max(0.0, max_x - min_x)
+    height = max(0.0, max_y - min_y)
+    return (
+        int(round(min_x)),
+        int(round(min_y)),
+        int(round(width)),
+        int(round(height)),
+    )
 
 
 def _score_ocr_data(data: dict) -> float:
@@ -450,6 +594,7 @@ def run_ocr(
     language_hint: LangHint = None,
 ) -> OcrResult:
     pil_image = _ensure_pil_image(image)
+    processed_image, transform = _preprocess_for_ocr(pil_image)
     available = get_available_languages()
     lang_string, missing, usable_langs = _normalize_languages(language_hint, settings, available)
 
@@ -462,7 +607,7 @@ def run_ocr(
 
     def _perform(lang_value: Optional[str], config_value: str) -> str:
         return pytesseract.image_to_string(
-            pil_image,
+            processed_image,
             lang=lang_value or None,
             config=config_value or "",
         )
@@ -471,13 +616,13 @@ def run_ocr(
     selected_config = ""
     data = None
     try:
-        selected_config, data = _select_best_config(pil_image, lang_string, settings)
+        selected_config, data = _select_best_config(processed_image, lang_string, settings)
         text = _perform(lang_string, selected_config)
         language_tag = lang_string or "auto"
     except TesseractError as exc:
         if missing:
             try:
-                selected_config, data = _select_best_config(pil_image, None, settings)
+                selected_config, data = _select_best_config(processed_image, None, settings)
                 text = _perform(None, selected_config)
                 warnings.append(
                     "Отсутствуют языковые пакеты: "
@@ -495,7 +640,7 @@ def run_ocr(
     if data is None:
         try:
             data = pytesseract.image_to_data(
-                pil_image,
+                processed_image,
                 lang=lang_string or None,
                 config=selected_config or "",
                 output_type=pytesseract.Output.DICT,
@@ -517,6 +662,7 @@ def run_ocr(
                     int(data["width"][i]),
                     int(data["height"][i]),
                 )
+                bbox = _map_bbox_to_original(bbox, transform)
                 line_id = (
                     int(data.get("block_num", [0])[i]),
                     int(data.get("par_num", [0])[i]),
