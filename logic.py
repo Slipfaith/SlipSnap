@@ -31,6 +31,7 @@ DEFAULT_CONFIG = {
     "series_prefix": "Series",
     "series_folder": str(Path.home()),
     "tesseract_path": "",
+    "tessdata_prefix": "",
     "ocr_settings": {
         "preferred_languages": ["eng"],
         "last_language": "auto",
