@@ -20,6 +20,8 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMenu,
     QMessageBox,
+    QInputDialog,
+    QProgressDialog,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -38,6 +40,7 @@ from ocr import (
     get_language_display_name,
     run_ocr,
     get_available_languages,
+    download_tesseract_languages,
 )
 
 from editor.undo_commands import AddCommand, RemoveCommand, ScaleCommand
@@ -574,6 +577,23 @@ class EditorWindow(QMainWindow):
         summary.setText("Можно выбрать несколько языков")
         layout.addWidget(summary)
 
+        download_btn = QToolButton(container)
+        download_btn.setText("Скачать языки…")
+        download_btn.setStyleSheet(
+            "QToolButton {"
+            "  background: #eef2f7;"
+            "  border: 1px solid #d0d7de;"
+            "  border-radius: 8px;"
+            "  padding: 6px 10px;"
+            "}"
+            "QToolButton:hover {"
+            "  background: #e6f1ff;"
+            "  border-color: #4c8bf5;"
+            "}"
+        )
+        download_btn.clicked.connect(self._download_ocr_languages)
+        layout.addWidget(download_btn)
+
         wrapper = QWidgetAction(self._ocr_menu)
         wrapper.setDefaultWidget(container)
         self._ocr_menu.addAction(wrapper)
@@ -596,6 +616,49 @@ class EditorWindow(QMainWindow):
         self.ocr_settings.last_language = "+".join(normalized)
         self.cfg["ocr_settings"] = self.ocr_settings.to_dict()
         save_config(self.cfg)
+
+    def _download_ocr_languages(self) -> None:
+        hint = "Введите коды языков через запятую (например: rus, eng, ukr)"
+        text, ok = QInputDialog.getText(self, "SlipSnap · OCR", hint)
+        if not ok:
+            return
+        raw = text.strip()
+        if not raw:
+            QMessageBox.information(self, "SlipSnap · OCR", "Не указаны языки для загрузки.")
+            return
+
+        codes = [code.strip() for code in raw.replace("+", ",").split(",") if code.strip()]
+        progress = QProgressDialog("Загрузка языков OCR…", "Отмена", 0, len(codes), self)
+        progress.setWindowTitle("SlipSnap · OCR")
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(0)
+
+        def _progress(current: int, total: int, code: str) -> bool:
+            progress.setMaximum(total)
+            progress.setValue(current - 1)
+            progress.setLabelText(f"Загружается {code}.traineddata ({current}/{total})")
+            QApplication.processEvents()
+            return not progress.wasCanceled()
+
+        try:
+            result = download_tesseract_languages(codes, progress=_progress)
+        except OcrError as exc:
+            progress.cancel()
+            QMessageBox.warning(self, "SlipSnap · OCR", str(exc))
+            return
+        finally:
+            progress.setValue(progress.maximum())
+
+        summary_parts = []
+        if result.installed:
+            summary_parts.append("установлено: " + ", ".join(result.installed))
+        if result.skipped:
+            summary_parts.append("уже было: " + ", ".join(result.skipped))
+        if result.failed:
+            summary_parts.append("ошибка: " + ", ".join(result.failed))
+        summary_text = "\n".join(summary_parts) if summary_parts else "Нет данных."
+        QMessageBox.information(self, "SlipSnap · OCR", summary_text)
+        self._refresh_ocr_menu()
 
     def _current_ocr_capture(self) -> Optional[OcrCapture]:
         try:

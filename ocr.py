@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Sequence, Tuple, Union
+from typing import Callable, List, Optional, Sequence, Tuple, Union
 
 from PIL import Image, ImageEnhance, ImageFilter
 from PySide6.QtGui import QImage
@@ -14,6 +14,9 @@ from logic import qimage_to_pil, save_config
 import os
 import shutil
 import threading
+import urllib.request
+import urllib.error
+import subprocess
 from pathlib import Path
 from typing import Iterable
 
@@ -22,12 +25,11 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox, QWidget
 
 _TESSERACT_DOWNLOAD_URL = "https://github.com/UB-Mannheim/tesseract/wiki"
+_TESSDATA_FAST_URL = "https://github.com/tesseract-ocr/tessdata_fast/raw/main"
 
 
 # На Windows скрываем всплывающие консольные окна Tesseract
 if os.name == "nt":
-    import subprocess
-
     _existing_kwargs = getattr(pytesseract.pytesseract, "popen_kwargs", {})
     _popen_kwargs = dict(_existing_kwargs) if isinstance(_existing_kwargs, dict) else {}
 
@@ -282,6 +284,13 @@ class OcrSettings:
                     ordered.append(lang)
                     seen.add(lang)
             self.preferred_languages = ordered
+
+
+@dataclass
+class OcrLanguageDownload:
+    installed: List[str] = field(default_factory=list)
+    skipped: List[str] = field(default_factory=list)
+    failed: List[str] = field(default_factory=list)
 
 
 LangHint = Optional[Union[str, Sequence[str]]]
@@ -542,6 +551,103 @@ def _normalize_languages(language_hint: LangHint, settings: OcrSettings, availab
     usable = [lang for lang in normalized if not available or lang in available]
     lang_string = "+".join(usable) if usable else None
     return lang_string, missing, usable
+
+
+def _get_tesseract_cmd() -> str:
+    cmd = getattr(pytesseract.pytesseract, "tesseract_cmd", "") or ""
+    return cmd if cmd else "tesseract"
+
+
+def _get_tessdata_dir() -> Path:
+    prefix = os.environ.get("TESSDATA_PREFIX")
+    if prefix:
+        prefix_path = Path(prefix).expanduser()
+        if prefix_path.exists():
+            return prefix_path
+
+    cmd = _get_tesseract_cmd()
+    popen_kwargs = getattr(pytesseract.pytesseract, "popen_kwargs", {})
+    try:
+        result = subprocess.run(
+            [cmd, "--print-tessdata-dir"],
+            check=True,
+            capture_output=True,
+            text=True,
+            **(popen_kwargs if isinstance(popen_kwargs, dict) else {}),
+        )
+        output = (result.stdout or "").strip()
+        if output:
+            tessdata_dir = Path(output).expanduser()
+            if tessdata_dir.exists():
+                return tessdata_dir
+    except Exception:
+        pass
+
+    cmd_path = Path(cmd).expanduser()
+    if cmd_path.exists():
+        candidate = cmd_path.parent / "tessdata"
+        if candidate.exists():
+            return candidate
+
+    raise OcrError("Не удалось определить папку tessdata для Tesseract.")
+
+
+def download_tesseract_languages(
+    languages: Sequence[str],
+    *,
+    progress: Optional[Callable[[int, int, str], bool]] = None,
+) -> OcrLanguageDownload:
+    normalized = []
+    seen = set()
+    for lang in languages:
+        code = str(lang).strip()
+        if code and code not in seen:
+            normalized.append(code)
+            seen.add(code)
+
+    if not normalized:
+        raise OcrError("Не указаны языки для загрузки.")
+
+    tessdata_dir = _get_tessdata_dir()
+    if not tessdata_dir.exists():
+        raise OcrError("Папка tessdata не найдена. Проверьте установку Tesseract.")
+
+    result = OcrLanguageDownload()
+    total = len(normalized)
+
+    for index, code in enumerate(normalized, start=1):
+        if progress and not progress(index, total, code):
+            raise OcrError("Загрузка языков отменена.")
+        target_path = tessdata_dir / f"{code}.traineddata"
+        if target_path.exists():
+            result.skipped.append(code)
+            continue
+
+        url = f"{_TESSDATA_FAST_URL}/{code}.traineddata"
+        request = urllib.request.Request(url, headers={"User-Agent": "SlipSnap"})
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                data = response.read()
+        except urllib.error.HTTPError:
+            result.failed.append(code)
+            continue
+        except urllib.error.URLError:
+            result.failed.append(code)
+            continue
+
+        try:
+            target_path.write_bytes(data)
+        except OSError:
+            result.failed.append(code)
+            continue
+
+        result.installed.append(code)
+
+    if result.installed:
+        global _AVAILABLE_LANG_CACHE
+        _AVAILABLE_LANG_CACHE = None
+
+    return result
 
 
 def get_available_languages() -> List[str]:
