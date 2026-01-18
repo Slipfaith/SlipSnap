@@ -20,7 +20,6 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMenu,
     QMessageBox,
-    QInputDialog,
     QProgressDialog,
     QToolButton,
     QVBoxLayout,
@@ -41,6 +40,7 @@ from ocr import (
     run_ocr,
     get_available_languages,
     download_tesseract_languages,
+    LANGUAGE_DISPLAY_NAMES,
 )
 
 from editor.undo_commands import AddCommand, RemoveCommand, ScaleCommand
@@ -243,6 +243,119 @@ class _LanguagePickerDialog(QDialog):
         ordered = [code for code in self._priority_codes if code in self._selected_languages]
         ordered.extend(sorted(lang for lang in self._selected_languages if lang not in self._priority_codes))
         return "+".join(ordered)
+
+
+class _OcrLanguageDownloadDialog(QDialog):
+    def __init__(self, parent: QWidget, available: list[str], known_languages: list[str]):
+        super().__init__(parent)
+        self.setWindowTitle("Скачать языки OCR")
+        self.setFixedWidth(380)
+        self._available = set(available)
+        self._known = sorted(set(known_languages) | set(available))
+        self._selected_languages: set[str] = set()
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(10)
+
+        title = QLabel("Выберите языки для скачивания")
+        title.setStyleSheet("font-size: 16px; font-weight: 600;")
+        layout.addWidget(title)
+
+        info_text = "Установлено: " + (", ".join(sorted(self._available)) if self._available else "нет")
+        info = QLabel(info_text)
+        info.setWordWrap(True)
+        info.setStyleSheet("color: #6e7781;")
+        layout.addWidget(info)
+
+        self.search_edit = QLineEdit(self)
+        self.search_edit.setPlaceholderText("Поиск по названию или коду")
+        self.search_edit.textChanged.connect(self._filter_languages)
+        layout.addWidget(self.search_edit)
+
+        self.list_widget = QListWidget(self)
+        self.list_widget.setSelectionMode(QListWidget.NoSelection)
+        self.list_widget.setMinimumHeight(180)
+        layout.addWidget(self.list_widget)
+
+        add_row = QHBoxLayout()
+        self.custom_edit = QLineEdit(self)
+        self.custom_edit.setPlaceholderText("Добавить код вручную (например: ukr)")
+        add_btn = QToolButton(self)
+        add_btn.setText("Добавить")
+        add_btn.clicked.connect(self._add_custom_language)
+        add_row.addWidget(self.custom_edit)
+        add_row.addWidget(add_btn)
+        layout.addLayout(add_row)
+
+        self.summary = QLabel("Выбрано: 0")
+        self.summary.setStyleSheet("color: #6e7781;")
+        layout.addWidget(self.summary)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        self._filter_languages("")
+
+    def _filter_languages(self, query: str) -> None:
+        try:
+            self.list_widget.itemChanged.disconnect(self._on_list_item_changed)
+        except TypeError:
+            pass
+        self.list_widget.clear()
+        normalized_query = query.strip().lower()
+        for code in self._known:
+            display = get_language_display_name(code) or code
+            if normalized_query and normalized_query not in code.lower() and normalized_query not in display.lower():
+                continue
+            label = f"{display} ({code})"
+            if code in self._available:
+                label += " ✓"
+            item = QListWidgetItem(label)
+            item.setData(Qt.UserRole, code)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Checked if code in self._selected_languages else Qt.Unchecked)
+            if code in self._available:
+                item.setForeground(QColor("#6e7781"))
+            self.list_widget.addItem(item)
+        if self.list_widget.count() == 0:
+            placeholder = QListWidgetItem("Нет совпадений")
+            placeholder.setFlags(Qt.NoItemFlags)
+            self.list_widget.addItem(placeholder)
+        self.list_widget.itemChanged.connect(self._on_list_item_changed)
+        self._update_summary()
+
+    def _on_list_item_changed(self, item: QListWidgetItem) -> None:
+        code = item.data(Qt.UserRole)
+        if not code:
+            return
+        if item.checkState() == Qt.Checked:
+            self._selected_languages.add(code)
+        else:
+            self._selected_languages.discard(code)
+        self._update_summary()
+
+    def _add_custom_language(self) -> None:
+        text = self.custom_edit.text().strip()
+        if not text:
+            return
+        code = text
+        if code not in self._known:
+            self._known.append(code)
+            self._known.sort()
+        self._selected_languages.add(code)
+        self.custom_edit.clear()
+        self._filter_languages(self.search_edit.text())
+
+    def _update_summary(self) -> None:
+        self.summary.setText(f"Выбрано: {len(self._selected_languages)}")
+
+    def selected_languages(self) -> list[str]:
+        return sorted(self._selected_languages)
 
 
 class EditorWindow(QMainWindow):
@@ -618,16 +731,20 @@ class EditorWindow(QMainWindow):
         save_config(self.cfg)
 
     def _download_ocr_languages(self) -> None:
-        hint = "Введите коды языков через запятую (например: rus, eng, ukr)"
-        text, ok = QInputDialog.getText(self, "SlipSnap · OCR", hint)
-        if not ok:
+        try:
+            available = get_available_languages()
+        except OcrError as exc:
+            QMessageBox.warning(self, "SlipSnap · OCR", str(exc))
             return
-        raw = text.strip()
-        if not raw:
+        known_languages = sorted(set(LANGUAGE_DISPLAY_NAMES.keys()) | set(available))
+        dialog = _OcrLanguageDownloadDialog(self, available, known_languages)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        codes = dialog.selected_languages()
+        if not codes:
             QMessageBox.information(self, "SlipSnap · OCR", "Не указаны языки для загрузки.")
             return
 
-        codes = [code.strip() for code in raw.replace("+", ",").split(",") if code.strip()]
         progress = QProgressDialog("Загрузка языков OCR…", "Отмена", 0, len(codes), self)
         progress.setWindowTitle("SlipSnap · OCR")
         progress.setWindowModality(Qt.WindowModal)
@@ -656,8 +773,15 @@ class EditorWindow(QMainWindow):
             summary_parts.append("уже было: " + ", ".join(result.skipped))
         if result.failed:
             summary_parts.append("ошибка: " + ", ".join(result.failed))
-        summary_text = "\n".join(summary_parts) if summary_parts else "Нет данных."
-        QMessageBox.information(self, "SlipSnap · OCR", summary_text)
+        summary_text = "\n".join(summary_parts) if summary_parts else "Нет изменений."
+        message = QMessageBox(self)
+        message.setWindowTitle("SlipSnap · OCR")
+        message.setIcon(QMessageBox.Information)
+        message.setText(summary_text)
+        if result.failed_details:
+            details = "\n".join(f"{code}: {reason}" for code, reason in result.failed_details)
+            message.setDetailedText(details)
+        message.exec()
         self._refresh_ocr_menu()
 
     def _current_ocr_capture(self) -> Optional[OcrCapture]:

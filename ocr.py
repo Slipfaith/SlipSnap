@@ -291,6 +291,7 @@ class OcrLanguageDownload:
     installed: List[str] = field(default_factory=list)
     skipped: List[str] = field(default_factory=list)
     failed: List[str] = field(default_factory=list)
+    failed_details: List[Tuple[str, str]] = field(default_factory=list)
 
 
 LangHint = Optional[Union[str, Sequence[str]]]
@@ -615,6 +616,10 @@ def download_tesseract_languages(
     result = OcrLanguageDownload()
     total = len(normalized)
 
+    def _record_failure(code: str, reason: str) -> None:
+        result.failed.append(code)
+        result.failed_details.append((code, reason))
+
     for index, code in enumerate(normalized, start=1):
         if progress and not progress(index, total, code):
             raise OcrError("Загрузка языков отменена.")
@@ -628,17 +633,22 @@ def download_tesseract_languages(
         try:
             with urllib.request.urlopen(request, timeout=30) as response:
                 data = response.read()
-        except urllib.error.HTTPError:
-            result.failed.append(code)
+        except urllib.error.HTTPError as exc:
+            reason = f"HTTP {exc.code}: {exc.reason}" if exc.reason else f"HTTP {exc.code}"
+            _record_failure(code, reason)
             continue
-        except urllib.error.URLError:
-            result.failed.append(code)
+        except urllib.error.URLError as exc:
+            reason = str(exc.reason) if getattr(exc, "reason", None) else str(exc)
+            _record_failure(code, reason or "Ошибка сети")
+            continue
+        except Exception as exc:  # noqa: BLE001
+            _record_failure(code, str(exc) or "Не удалось скачать файл")
             continue
 
         try:
             target_path.write_bytes(data)
-        except OSError:
-            result.failed.append(code)
+        except OSError as exc:
+            _record_failure(code, str(exc) or "Ошибка записи файла")
             continue
 
         result.installed.append(code)
