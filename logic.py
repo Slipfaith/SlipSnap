@@ -34,6 +34,9 @@ DEFAULT_CONFIG = {
     "ocr_settings": {
         "preferred_languages": ["eng"],
         "last_language": "auto",
+        "auto_config": True,
+        "psm": None,
+        "oem": None,
     },
 }
 
