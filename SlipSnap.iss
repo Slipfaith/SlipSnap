@@ -1,6 +1,6 @@
 [Setup]
 AppName=SlipSnap
-AppVersion=2.0.0
+AppVersion=2.18.01.26
 AppPublisher=slipfaith
 DefaultDirName={pf}\SlipSnap
 DefaultGroupName=SlipSnap
