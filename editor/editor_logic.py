@@ -16,11 +16,6 @@ class EditorLogic:
         return self.canvas.export_image()
 
     def copy_to_clipboard(self):
-        if self.canvas.scene.selectedItems():
-            img = self.canvas.export_selection()
-            copy_pil_image_to_clipboard(img)
-            return "selection"
-
         img = self.export_image()
         copy_pil_image_to_clipboard(img)
         return "image"
