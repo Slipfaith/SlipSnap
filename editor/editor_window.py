@@ -539,12 +539,8 @@ class EditorWindow(QMainWindow):
             self.statusBar().showMessage("✓ Текст OCR скопирован", 2000)
             return
 
-        result = self.logic.copy_to_clipboard()
-        if result == "selection":
-            message = "✓ Фрагмент скриншота скопирован"
-        else:
-            message = "✓ Скриншот скопирован"
-        self.statusBar().showMessage(message, 2000)
+        self.logic.copy_to_clipboard()
+        self.statusBar().showMessage("✓ Скриншот скопирован", 2000)
 
     def save_image(self):
         name = self.logic.save_image(self)
