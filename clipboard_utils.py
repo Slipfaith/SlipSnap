@@ -64,7 +64,7 @@ def copy_pil_image_to_clipboard(img: Image.Image) -> QImage:
     return qimg
 
 
-def _copy_png_win32(png_data: bytes) -> None:
+def _copy_png_win32(png_data: bytes) -> bool:
     """Копирует PNG в буфер через Win32 API"""
 
     try:
@@ -178,12 +178,13 @@ def _copy_png_and_dibv5_win32(img: Image.Image, png_data: bytes) -> bool:
         wc.SetClipboardData(wc.CF_DIBV5, dibv5_data)
 
     except Exception:
-        _set_qt_clipboard_image(qimg)
+        return False
     finally:
         try:
             wc.CloseClipboard()
         except:
             pass
+    return True
 
 
 def copy_pil_image_to_clipboard_with_fallback(img: Image.Image) -> QImage:
