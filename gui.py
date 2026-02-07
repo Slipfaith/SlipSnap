@@ -1,12 +1,7 @@
 from typing import List, Tuple, Optional, TYPE_CHECKING, Type
 from pathlib import Path
 from time import perf_counter
-from PIL import Image, ImageFilter, ImageDraw, ImageQt
-
-try:
-    LANCZOS = Image.Resampling.LANCZOS  # Pillow >= 9.1.0
-except AttributeError:  # pragma: no cover - fallback for older Pillow
-    LANCZOS = Image.LANCZOS
+from PIL import Image, ImageFilter, ImageQt
 from PySide6.QtCore import (
     Qt,
     QRect,
@@ -164,42 +159,34 @@ class SelectionOverlayBase(QWidget):
         self.cancel_all.emit()
 
     def _create_selection_mask(self, width: int, height: int) -> Image.Image:
-        """Build a smooth alpha mask for the current selection shape."""
+        """Build a smooth alpha mask for the current selection shape.
 
+        Uses Qt's native antialiased rendering instead of PIL super-sampling,
+        avoiding large intermediate images (previously up to 8× the selection).
+        """
         width = max(1, int(width))
         height = max(1, int(height))
-        max_dim = max(width, height)
-        max_allowed = 16000  # keep memory usage under control for huge selections
-        base_scale = 8
-        scale = max(1, min(base_scale, max_allowed // max(1, max_dim)))
-        if max_dim * 4 <= max_allowed:
-            scale = max(scale, 4)
 
-        scaled_w = max(1, width * scale)
-        scaled_h = max(1, height * scale)
-        mask = Image.new("L", (scaled_w, scaled_h), 0)
-        draw = ImageDraw.Draw(mask)
+        mask_img = QImage(width, height, QImage.Format_Grayscale8)
+        mask_img.fill(0)
+
+        p = QPainter(mask_img)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(255, 255, 255))
 
         if self.shape == "ellipse":
-            draw.ellipse((0, 0, scaled_w, scaled_h), fill=255)
+            p.drawEllipse(QRectF(0, 0, width, height))
         else:
             base_radius = max(4.0, min(width, height) * 0.04)
-            scaled_radius = int(round(base_radius * scale))
-            scaled_radius = max(scaled_radius, scale)
-            max_radius = min(scaled_w, scaled_h) // 2
-            draw.rounded_rectangle(
-                (0, 0, scaled_w, scaled_h),
-                radius=min(scaled_radius, max_radius),
-                fill=255,
-            )
+            p.drawRoundedRect(QRectF(0, 0, width, height), base_radius, base_radius)
 
-        blur_radius = max(scale / 2.0, 0.8)
-        mask = mask.filter(ImageFilter.GaussianBlur(blur_radius))
+        p.end()
 
-        if scale != 1:
-            mask = mask.resize((width, height), LANCZOS)
-
-        return mask
+        # Convert QImage Grayscale8 → PIL "L"
+        stride = mask_img.bytesPerLine()
+        bits = bytes(mask_img.constBits())
+        return Image.frombytes("L", (width, height), bits, "raw", "L", stride, 1)
 
     def _norm(self, p1: QPoint, p2: QPoint) -> QRect:
         x1, y1 = p1.x(), p1.y()
