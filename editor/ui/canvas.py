@@ -122,6 +122,9 @@ class Canvas(QGraphicsView):
         self._pen.setJoinStyle(Qt.RoundJoin)
         self._apply_pen_mode()
         self.undo_stack = QUndoStack(self)
+        # Keep scene bounds in sync with geometry-affecting undo commands
+        # so scrollbars appear as soon as content grows beyond viewport.
+        self.undo_stack.indexChanged.connect(lambda _idx: self.update_scene_rect())
         self._move_snapshot: Dict[QGraphicsItem, QPointF] = {}
         self._text_manager: Optional[TextManager] = None
         self._zoom = 1.0
@@ -395,6 +398,7 @@ class Canvas(QGraphicsView):
         self._zoom = factor
         self.resetTransform()
         self.scale(factor, factor)
+        self.update_scene_rect()
 
     def _render_rect_to_qimage(self, rect: QRectF, only_items=None):
         dpr = getattr(self.window().windowHandle(), "devicePixelRatio", lambda: 1.0)()

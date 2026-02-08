@@ -11,7 +11,6 @@ from PySide6.QtWidgets import (
 )
 from PIL import Image
 
-from editor.ui.styles import ModernColors
 from ocr import OcrResult, OcrWord
 
 
@@ -28,6 +27,7 @@ class _LineVisual:
     background: QGraphicsPathItem  # фон строки
     selection: QGraphicsPathItem   # подсветка выбранных участков
     text_item: QGraphicsSimpleTextItem
+    white_text: QGraphicsSimpleTextItem  # белый текст поверх выделения (clip to selection)
 
 
 class OcrSelectionOverlay(QObject):
@@ -271,9 +271,17 @@ class OcrSelectionOverlay(QObject):
 
             selection = QGraphicsPathItem(background)
             selection.setZValue(1)
-            selection.setBrush(QColor(ModernColors.PRIMARY_LIGHT))
+            selection.setBrush(QColor("#0078D7"))
             selection.setPen(Qt.NoPen)
             selection.setVisible(False)
+            selection.setFlag(QGraphicsItem.ItemClipsChildrenToShape, True)
+
+            white_text = QGraphicsSimpleTextItem(text, selection)
+            white_text.setBrush(QColor(Qt.white))
+            white_text.setPen(Qt.NoPen)
+            white_text.setAcceptedMouseButtons(Qt.NoButton)
+            white_text.setAcceptHoverEvents(False)
+            white_text.setZValue(1)
 
             background.setBrush(Qt.transparent)
             background.setPen(Qt.NoPen)
@@ -287,7 +295,10 @@ class OcrSelectionOverlay(QObject):
             text_item.setZValue(2)
 
             self.scene.addItem(background)
-            self._line_visuals.append(_LineVisual(background=background, selection=selection, text_item=text_item))
+            self._line_visuals.append(_LineVisual(
+                background=background, selection=selection,
+                text_item=text_item, white_text=white_text,
+            ))
 
     def _create_rounded_rect_path(self, rect: QRectF, radius: float) -> QPainterPath:
         """Создает путь для прямоугольника со скругленными углами."""
@@ -340,18 +351,18 @@ class OcrSelectionOverlay(QObject):
             bg_width = max(rect.width(), text_rect.width() + 2 * padding)
             bg_height = max(rect.height(), text_rect.height() + 2 * padding)
 
-            radius = min(bg_height * 0.2, bg_width * 0.2, 5.0)
-            rounded_path = self._create_rounded_rect_path(
-                QRectF(0, 0, bg_width, bg_height),
-                radius
-            )
-            visual.background.setPath(rounded_path)
+            bg_path = QPainterPath()
+            bg_path.addRect(QRectF(0, 0, bg_width, bg_height))
+            visual.background.setPath(bg_path)
             visual.background.setPos(rect.left(), rect.top())
             visual.background.setVisible(self._active)
 
             text_x = max(padding, (bg_width - text_rect.width()) / 2)
             text_y = max(padding, (bg_height - text_rect.height()) / 2)
             visual.text_item.setPos(text_x, text_y)
+
+            visual.white_text.setFont(font)
+            visual.white_text.setPos(text_x, text_y)
 
             metrics = QFontMetrics(font)
             line_chars: List[Optional[QRectF]] = []
@@ -476,8 +487,7 @@ class OcrSelectionOverlay(QObject):
         if not self._line_visuals:
             return
 
-        selected_bg = QColor(ModernColors.PRIMARY_LIGHT)
-        selected_bg.setAlpha(210)
+        selected_bg = QColor("#0078D7")
         base_bg = Qt.transparent
         base_pen = QPen(Qt.NoPen)
 
@@ -529,7 +539,7 @@ class OcrSelectionOverlay(QObject):
                     max(1.0, right - left),
                     height,
                 )
-                path.addRoundedRect(highlight_rect, 3.0, 3.0)
+                path.addRect(highlight_rect)
 
             visual.selection.setPath(path)
             visual.selection.setBrush(selected_bg)

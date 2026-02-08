@@ -145,16 +145,19 @@ class SelectionOverlayBase(QWidget):
             self.selecting = True
             self.origin = e.globalPosition().toPoint()
             self.current = self.origin
+            self._update_hint_visibility()
             self.update()
 
     def mouseMoveEvent(self, e):
         if self.selecting:
             self.current = e.globalPosition().toPoint()
+            self._update_hint_visibility()
             self.update()
 
     def mouseReleaseEvent(self, e):
         if e.button() == Qt.LeftButton and self.selecting:
             self.selecting = False
+            self._update_hint_visibility()
             gr = self._norm(self.origin, self.current)
             if gr.width() > 5 and gr.height() > 5:
                 left, top, w, h = self._map_rect_to_image_coords(gr)
@@ -258,7 +261,24 @@ class SelectionOverlayBase(QWidget):
         help_geo = self.help.geometry()
         spacing = Metrics.OVERLAY_HINT_SPACING
         self.shape_hint.move(help_geo.x(), help_geo.bottom() + spacing)
-        self.shape_hint.show()
+        self._update_hint_visibility()
+
+    def _widget_global_rect(self, widget: QWidget) -> QRect:
+        top_left = widget.mapToGlobal(QPoint(0, 0))
+        return QRect(top_left, widget.size())
+
+    def _update_hint_visibility(self):
+        if not self.selecting:
+            self.help.show()
+            self.shape_hint.show()
+            return
+
+        selection_rect = self._norm(self.origin, self.current)
+        overlaps_help = selection_rect.intersects(self._widget_global_rect(self.help))
+        overlaps_shape = selection_rect.intersects(self._widget_global_rect(self.shape_hint))
+        visible = not (overlaps_help or overlaps_shape)
+        self.help.setVisible(visible)
+        self.shape_hint.setVisible(visible)
 
 
 class ScreenOverlay(SelectionOverlayBase):
@@ -908,35 +928,89 @@ class App(QObject):
         self._tray_icon.setToolTip("SlipSnap")
 
         menu = QMenu("SlipSnap")
-        self._tray_action_capture = menu.addAction("Сделать скриншот")
-        self._tray_action_capture.triggered.connect(self.capture_region)
+        title_action = menu.addAction("SlipSnap")
+        title_action.setEnabled(False)
+        menu.addSeparator()
         self._tray_action_show = menu.addAction("Открыть окно")
         self._tray_action_show.triggered.connect(self._show_launcher)
+        self._tray_action_capture = menu.addAction("Сделать скриншот")
+        self._tray_action_capture.triggered.connect(self.capture_region)
         menu.addSeparator()
         self._tray_action_exit = menu.addAction("Выход")
         self._tray_action_exit.triggered.connect(self._exit_from_tray)
 
         self._tray_menu = menu
+        self._tray_menu.aboutToShow.connect(self._on_tray_menu_about_to_show)
         self._tray_icon.setContextMenu(menu)
         self._tray_icon.activated.connect(self._on_tray_activated)
         self._tray_icon.show()
         self._update_tray_actions()
 
-    def _resolve_tray_icon(self) -> QIcon:
+    def _on_tray_menu_about_to_show(self):
+        if self._tray_menu is None:
+            return
+        self._tray_menu.setActiveAction(None)
+
+    @staticmethod
+    def _icon_has_visible_pixels(icon: QIcon) -> bool:
+        if icon.isNull():
+            return False
+
+        for size in (16, 20, 24, 32):
+            pm = icon.pixmap(size, size)
+            if pm.isNull():
+                continue
+            img = pm.toImage().convertToFormat(QImage.Format_ARGB32)
+            raw = bytes(img.constBits())
+            if any(raw[3::4]):
+                return True
+        return False
+
+    def _build_fallback_tray_icon(self) -> QIcon:
         icon = QIcon()
-        app = QApplication.instance()
-        if app is not None:
-            icon = app.windowIcon()
+        for size in (16, 20, 24, 32, 40):
+            pm = QPixmap(size, size)
+            pm.fill(Qt.transparent)
+            painter = QPainter(pm)
+            painter.setRenderHint(QPainter.Antialiasing, True)
 
-        if icon.isNull():
-            icon_path = Path(__file__).resolve().with_name("SlipSnap.ico")
-            if icon_path.exists():
-                icon = QIcon(str(icon_path))
+            bg = QColor(26, 32, 44, 230)
+            accent = QColor(88, 166, 255, 255)
+            pad = 1 if size <= 20 else 2
+            radius = max(3, int(round(size * 0.22)))
 
-        if icon.isNull():
-            icon = make_icon_capture(40)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(bg)
+            painter.drawRoundedRect(pad, pad, size - 2 * pad, size - 2 * pad, radius, radius)
+
+            pen_w = max(1, int(round(size * 0.1)))
+            inner = max(3, int(round(size * 0.28)))
+            span = max(1, size - 2 * inner)
+            center = size // 2
+            painter.setPen(QPen(accent, pen_w))
+            painter.drawRect(inner, inner, span, span)
+            painter.drawLine(center, inner + 1, center, size - inner - 1)
+            painter.drawLine(inner + 1, center, size - inner - 1, center)
+            painter.end()
+            icon.addPixmap(pm)
 
         return icon
+
+    def _resolve_tray_icon(self) -> QIcon:
+        app = QApplication.instance()
+        if app is not None and self._icon_has_visible_pixels(app.windowIcon()):
+            return app.windowIcon()
+
+        icon_path = Path(__file__).resolve().with_name("SlipSnap.ico")
+        if icon_path.exists():
+            file_icon = QIcon(str(icon_path))
+            if self._icon_has_visible_pixels(file_icon):
+                return file_icon
+
+        fallback = self._build_fallback_tray_icon()
+        if self._icon_has_visible_pixels(fallback):
+            return fallback
+        return make_icon_capture(40)
 
     def _show_launcher(self):
         if self.launcher.isHidden():
@@ -978,6 +1052,8 @@ class App(QObject):
         self._editor_window_cls = None
 
     def _on_tray_activated(self, reason):
+        if self._tray_menu is not None and self._tray_menu.isVisible():
+            return
         if reason in (QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick):
             if self._is_background or self.launcher.isHidden():
                 self._show_launcher()

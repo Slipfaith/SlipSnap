@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c:*)",
+      "Bash(findstr:*)",
+      "Bash(py -3 -m py_compile:*)",
+      "Bash(python -m py_compile:*)"
+    ]
+  }
+}
