@@ -236,9 +236,69 @@ class Canvas(QGraphicsView):
     def _next_drag_filename(self) -> str:
         win = self.window()
         logic = getattr(win, "logic", None)
+        target_dir = self._detect_external_drop_directory()
         if logic and hasattr(logic, "next_snap_filename"):
+            if target_dir is not None and hasattr(logic, "next_snap_filename_for_directory"):
+                try:
+                    return logic.next_snap_filename_for_directory(target_dir)
+                except Exception:
+                    pass
             return logic.next_snap_filename()
         return "snap_01.png"
+
+    def _detect_external_drop_directory(self) -> Optional[Path]:
+        """Best-effort detection of Explorer folder under cursor on Windows."""
+        try:
+            import win32con
+            import win32gui
+            import win32com.client
+            from win32com.shell import shell, shellcon
+        except Exception:
+            return None
+
+        try:
+            cursor_pos = win32gui.GetCursorPos()
+            hwnd = win32gui.WindowFromPoint(cursor_pos)
+            if not hwnd:
+                return None
+            root_hwnd = win32gui.GetAncestor(hwnd, win32con.GA_ROOT)
+            if not root_hwnd:
+                root_hwnd = hwnd
+        except Exception:
+            return None
+
+        try:
+            shell_app = win32com.client.Dispatch("Shell.Application")
+            for window in shell_app.Windows():
+                try:
+                    if int(window.HWND) != int(root_hwnd):
+                        continue
+                    folder = window.Document.Folder
+                    if folder is None:
+                        continue
+                    folder_path = str(folder.Self.Path or "").strip()
+                    if not folder_path or folder_path.startswith("::"):
+                        continue
+                    candidate = Path(folder_path)
+                    if candidate.is_dir():
+                        return candidate
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+        # Desktop icons can come from Progman/WorkerW and are not always listed.
+        try:
+            class_name = win32gui.GetClassName(root_hwnd)
+            if class_name in {"Progman", "WorkerW"}:
+                desktop = shell.SHGetFolderPath(0, shellcon.CSIDL_DESKTOPDIRECTORY, 0, 0)
+                candidate = Path(desktop)
+                if candidate.is_dir():
+                    return candidate
+        except Exception:
+            pass
+
+        return None
 
     def _start_external_drag(self) -> None:
         image = self._export_drag_image()

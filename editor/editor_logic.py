@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 from PIL import Image
 from PySide6.QtWidgets import QFileDialog
@@ -44,6 +45,13 @@ class EditorLogic:
     def next_snap_filename(self) -> str:
         return self._next_snap_name(self._last_save_directory).name
 
+    def next_snap_filename_for_directory(self, directory: Path | str | None) -> str:
+        if directory is None:
+            target_dir = self._last_save_directory
+        else:
+            target_dir = Path(directory)
+        return self._next_snap_png_name(target_dir).name
+
     def _next_snap_name(self, directory: Path) -> Path:
         if not directory.is_dir():
             directory = Path.home()
@@ -53,6 +61,25 @@ class EditorLogic:
                 suffix = file.stem.removeprefix("snap_")
                 if suffix.isdigit():
                     existing_numbers.append(int(suffix))
+
+        next_number = max(existing_numbers, default=0) + 1
+        return directory / f"snap_{next_number:02d}.png"
+
+    def _next_snap_png_name(self, directory: Path) -> Path:
+        if not directory.is_dir():
+            directory = Path.home()
+
+        # Accept snap_01.png, snap01.png, snap-01.png and choose next index.
+        snap_re = re.compile(r"^snap[_-]?(\d+)$", re.IGNORECASE)
+        existing_numbers = []
+        for file in directory.glob("*.png"):
+            match = snap_re.match(file.stem)
+            if not match:
+                continue
+            try:
+                existing_numbers.append(int(match.group(1)))
+            except ValueError:
+                continue
 
         next_number = max(existing_numbers, default=0) + 1
         return directory / f"snap_{next_number:02d}.png"
