@@ -4,13 +4,16 @@ from PIL import Image
 from PySide6.QtWidgets import QFileDialog
 
 from clipboard_utils import copy_pil_image_to_clipboard
-from logic import HISTORY_DIR
+from logic import HISTORY_DIR, save_config
 
 
 class EditorLogic:
-    def __init__(self, canvas):
+    def __init__(self, canvas, cfg: dict | None = None):
         self.canvas = canvas
-        self._last_save_directory = Path.home()
+        self._cfg = cfg
+        saved = (cfg or {}).get("last_save_directory", "")
+        directory = Path(saved) if saved else Path.home()
+        self._last_save_directory = directory if directory.is_dir() else Path.home()
 
     def export_image(self) -> Image.Image:
         return self.canvas.export_image()
@@ -35,12 +38,15 @@ class EditorLogic:
             img = img.convert("RGB")
         img.save(path)
         self._last_save_directory = Path(path).parent
+        self._persist_save_directory()
         return Path(path).name
 
     def next_snap_filename(self) -> str:
         return self._next_snap_name(self._last_save_directory).name
 
     def _next_snap_name(self, directory: Path) -> Path:
+        if not directory.is_dir():
+            directory = Path.home()
         existing_numbers = []
         for ext in ("png", "jpg", "jpeg"):
             for file in directory.glob(f"snap_*.{ext}"):
@@ -50,6 +56,11 @@ class EditorLogic:
 
         next_number = max(existing_numbers, default=0) + 1
         return directory / f"snap_{next_number:02d}.png"
+
+    def _persist_save_directory(self):
+        if self._cfg is not None:
+            self._cfg["last_save_directory"] = str(self._last_save_directory)
+            save_config(self._cfg)
 
     def collage_available(self):
         return any(HISTORY_DIR.glob("*.png")) or any(HISTORY_DIR.glob("*.jpg")) or any(

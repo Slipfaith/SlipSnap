@@ -1,6 +1,7 @@
 from typing import Optional, Dict, Tuple
 from pathlib import Path
 import tempfile
+import shutil
 import math
 
 from PySide6.QtCore import (
@@ -259,6 +260,15 @@ class Canvas(QGraphicsView):
         drag.exec(Qt.CopyAction)
         self._dragging_external = False
 
+    def _cleanup_temp_dirs(self) -> None:
+        """Remove accumulated drag-and-drop temp directories."""
+        for d in self._drag_temp_dirs:
+            try:
+                shutil.rmtree(d, ignore_errors=True)
+            except Exception:
+                pass
+        self._drag_temp_dirs.clear()
+
     def _set_pixmap_items_interactive(self, enabled: bool):
         for it in self.scene.items():
             if isinstance(it, QGraphicsPixmapItem) or it.data(0) == "blur":
@@ -278,6 +288,7 @@ class Canvas(QGraphicsView):
 
     def set_base_image(self, image: QImage):
         """Replace the main screenshot and clear existing items."""
+        self._cleanup_temp_dirs()
         self.scene.clear()
         self.ocr_overlay.clear()
         self.pixmap_item = HighQualityPixmapItem(image)

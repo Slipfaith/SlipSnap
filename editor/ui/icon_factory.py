@@ -544,19 +544,33 @@ def create_pencil_cursor() -> QCursor:
 
 
 def create_select_cursor() -> QCursor:
-    pm = QPixmap(24, 24)
+    pm = QPixmap(26, 26)
     pm.fill(Qt.transparent)
     p = QPainter(pm)
     p.setRenderHint(QPainter.Antialiasing)
-    p.setPen(QPen(QColor(ModernColors.TEXT_PRIMARY), 1.8))
-    p.setBrush(QBrush(QColor(ModernColors.TEXT_PRIMARY)))
-    points = [
-        QPointF(3, 3), QPointF(3, 17), QPointF(8, 13),
-        QPointF(12, 18), QPointF(15, 16), QPointF(10, 10), QPointF(18, 3)
-    ]
-    p.drawPolygon(points)
-    p.setPen(QPen(QColor(255, 255, 255, 180), 1))
-    p.setBrush(Qt.NoBrush)
-    p.drawPolygon(points)
+
+    arrow = QPainterPath()
+    arrow.moveTo(4, 1)
+    arrow.lineTo(4, 19)
+    arrow.lineTo(8.5, 15)
+    arrow.lineTo(11.5, 20)
+    arrow.lineTo(14, 18)
+    arrow.lineTo(11, 13)
+    arrow.lineTo(18, 7)
+    arrow.closeSubpath()
+
+    # Subtle shadow for depth
+    p.save()
+    p.translate(0.7, 0.7)
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor(0, 0, 0, 45))
+    p.drawPath(arrow)
+    p.restore()
+
+    # White fill + dark stroke with rounded joins
+    p.setPen(QPen(QColor("#1e293b"), 1.4, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+    p.setBrush(QColor(255, 255, 255))
+    p.drawPath(arrow)
+
     p.end()
-    return QCursor(pm, 3, 3)
+    return QCursor(pm, 4, 1)

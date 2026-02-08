@@ -14,6 +14,7 @@ from logic import qimage_to_pil, save_config
 import os
 import shutil
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import urllib.request
 import urllib.error
 import subprocess
@@ -491,6 +492,34 @@ def _score_ocr_data(data: dict) -> float:
     return avg_conf + min(20.0, word_count * 0.2)
 
 
+def _text_from_data(data: dict) -> str:
+    """Reconstruct readable text from image_to_data output dict."""
+    if not data or "text" not in data:
+        return ""
+    lines: dict = {}
+    for i, raw_text in enumerate(data["text"]):
+        word = str(raw_text).strip()
+        if not word:
+            continue
+        try:
+            key = (
+                int(data["block_num"][i]),
+                int(data["par_num"][i]),
+                int(data["line_num"][i]),
+            )
+        except (KeyError, IndexError, TypeError, ValueError):
+            key = (0, 0, 0)
+        lines.setdefault(key, []).append(word)
+    parts: List[str] = []
+    prev_block = -1
+    for key in sorted(lines):
+        if prev_block >= 0 and key[0] != prev_block:
+            parts.append("")
+        prev_block = key[0]
+        parts.append(" ".join(lines[key]))
+    return "\n".join(parts)
+
+
 def _select_best_config(
     pil_image: Image.Image,
     lang_value: Optional[str],
@@ -509,31 +538,32 @@ def _select_best_config(
             data = None
         return config, data
 
-    candidates = [
-        (3, 3),
-        (6, 3),
-        (7, 3),
-        (11, 3),
-    ]
-    best_config = ""
-    best_data = None
-    best_score = -1.0
-    for psm, oem in candidates:
-        config = _build_tesseract_config(psm, oem)
+    candidates = [(3, 3), (6, 3), (7, 3), (11, 3)]
+
+    def _try(psm: int, oem: int) -> Tuple[str, Optional[dict], float]:
+        cfg = _build_tesseract_config(psm, oem)
         try:
             data = pytesseract.image_to_data(
                 pil_image,
                 lang=lang_value or None,
-                config=config or "",
+                config=cfg or "",
                 output_type=pytesseract.Output.DICT,
             )
         except Exception:
-            continue
-        score = _score_ocr_data(data)
-        if score > best_score:
-            best_score = score
-            best_config = config
-            best_data = data
+            return cfg, None, -1.0
+        return cfg, data, _score_ocr_data(data)
+
+    best_config = ""
+    best_data = None
+    best_score = -1.0
+    with ThreadPoolExecutor(max_workers=len(candidates)) as pool:
+        futures = [pool.submit(_try, psm, oem) for psm, oem in candidates]
+        for future in as_completed(futures):
+            config, data, score = future.result()
+            if score > best_score:
+                best_score = score
+                best_config = config
+                best_data = data
     if best_score < 0:
         return "", None
     return best_config, best_data
@@ -785,25 +815,26 @@ def run_ocr(
             "Tesseract не найден. Укажите путь к tesseract.exe или установите Tesseract OCR."
         ) from exc
 
-    def _perform(lang_value: Optional[str], config_value: str) -> str:
-        return pytesseract.image_to_string(
-            processed_image,
-            lang=lang_value or None,
-            config=config_value or "",
-        )
-
     warnings: List[str] = []
     selected_config = ""
     data = None
     try:
         selected_config, data = _select_best_config(processed_image, lang_string, settings)
-        text = _perform(lang_string, selected_config)
+        text = _text_from_data(data) if data else ""
+        if not text.strip():
+            text = pytesseract.image_to_string(
+                processed_image, lang=lang_string or None, config=selected_config or "",
+            )
         language_tag = lang_string or "auto"
     except TesseractError as exc:
         if missing:
             try:
                 selected_config, data = _select_best_config(processed_image, None, settings)
-                text = _perform(None, selected_config)
+                text = _text_from_data(data) if data else ""
+                if not text.strip():
+                    text = pytesseract.image_to_string(
+                        processed_image, lang=None, config=selected_config or "",
+                    )
                 warnings.append(
                     "Отсутствуют языковые пакеты: "
                     + ", ".join(missing)
@@ -816,17 +847,6 @@ def run_ocr(
                 ) from exc
         else:
             raise OcrError(f"Ошибка OCR: {exc}") from exc
-
-    if data is None:
-        try:
-            data = pytesseract.image_to_data(
-                processed_image,
-                lang=lang_string or None,
-                config=selected_config or "",
-                output_type=pytesseract.Output.DICT,
-            )
-        except Exception:
-            data = None
 
     word_data: List[OcrWord] = []
 

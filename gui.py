@@ -1,7 +1,7 @@
 from typing import List, Tuple, Optional, TYPE_CHECKING, Type
 from pathlib import Path
 from time import perf_counter
-from PIL import Image, ImageFilter, ImageQt
+from PIL import Image, ImageQt
 from PySide6.QtCore import (
     Qt,
     QRect,
@@ -80,12 +80,10 @@ class SelectionOverlayBase(QWidget):
         self.shape = cfg.get("shape", "rect")
 
         self.base_img = base_img.convert("RGBA")
-        blur_r = cfg.get("blur_radius", 2)
-        self.blurred = self.base_img.filter(ImageFilter.GaussianBlur(radius=blur_r))
-        self._bg_blurred = QPixmap.fromImage(ImageQt.ImageQt(self.blurred))
+        self._blur_factor = max(1, cfg.get("blur_radius", 2) * 2)
         self._bg_original = QPixmap.fromImage(ImageQt.ImageQt(self.base_img))
-        self._bg_blurred_scaled = self._bg_blurred.scaled(self.size(), Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
         self._bg_original_scaled = self._bg_original.scaled(self.size(), Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+        self._bg_blurred_scaled = self._blur_pixmap(self._bg_original_scaled)
 
         self.origin = QPoint()
         self.current = QPoint()
@@ -104,6 +102,18 @@ class SelectionOverlayBase(QWidget):
         self.shape_hint.hide()
         self._update_shape_hint()
 
+    def _blur_pixmap(self, pixmap: QPixmap) -> QPixmap:
+        """Fast blur via downsample + upsample (no PIL dependency)."""
+        w, h = pixmap.width(), pixmap.height()
+        f = self._blur_factor
+        if w < 2 or h < 2 or f < 2:
+            return pixmap
+        small = pixmap.scaled(
+            max(1, w // f), max(1, h // f),
+            Qt.IgnoreAspectRatio, Qt.SmoothTransformation,
+        )
+        return small.scaled(w, h, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+
     def set_shape(self, shape: str):
         self.shape = shape
         self._update_shape_hint()
@@ -116,8 +126,8 @@ class SelectionOverlayBase(QWidget):
         self.grabKeyboard()
 
     def resizeEvent(self, e):
-        self._bg_blurred_scaled = self._bg_blurred.scaled(self.size(), Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
         self._bg_original_scaled = self._bg_original.scaled(self.size(), Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+        self._bg_blurred_scaled = self._blur_pixmap(self._bg_original_scaled)
         super().resizeEvent(e)
 
     def keyPressEvent(self, e):
@@ -151,8 +161,8 @@ class SelectionOverlayBase(QWidget):
                 if w > 0 and h > 0:
                     crop = self.base_img.crop((left, top, left + w, top + h))
                     mask = self._create_selection_mask(w, h)
-                    result = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-                    result.paste(crop, (0, 0), mask)
+                    result = crop.copy()
+                    result.putalpha(mask)
                     qimg = copy_pil_image_to_clipboard(result)
                     self.captured.emit(qimg)
         self.releaseKeyboard()
@@ -175,11 +185,16 @@ class SelectionOverlayBase(QWidget):
         p.setPen(Qt.NoPen)
         p.setBrush(QColor(255, 255, 255))
 
+        # Extend shape 1px beyond image bounds so straight edges are
+        # fully opaque; only the rounded corners keep antialiased falloff.
+        m = 1.0
+        rect = QRectF(-m, -m, width + 2 * m, height + 2 * m)
+
         if self.shape == "ellipse":
-            p.drawEllipse(QRectF(0, 0, width, height))
+            p.drawEllipse(rect)
         else:
             base_radius = max(4.0, min(width, height) * 0.04)
-            p.drawRoundedRect(QRectF(0, 0, width, height), base_radius, base_radius)
+            p.drawRoundedRect(rect, base_radius, base_radius)
 
         p.end()
 
@@ -351,26 +366,24 @@ class OverlayManager(QObject):
         mons = sct.monitors[1:]
         if not mons:
             return []
+        # O(1) lookup for exact geometry matches
+        by_key = {(m["left"], m["top"], m["width"], m["height"]): m for m in mons}
         out: List[Tuple[object, dict]] = []
         for s in QGuiApplication.screens():
-            sx, sy, sw, sh = self._screen_phys_rect(s)
-            exact = None
-            for m in mons:
-                if m["left"] == sx and m["top"] == sy and m["width"] == sw and m["height"] == sh:
-                    exact = m
-                    break
+            key = self._screen_phys_rect(s)
+            exact = by_key.get(key)
             if exact:
                 out.append((s, exact))
                 continue
+            # Fallback: single pass to find best intersection
+            sx, sy, sw, sh = key
             best = None
             best_area = -1
             for m in mons:
-                mx, my, mw, mh = m["left"], m["top"], m["width"], m["height"]
-                ix = max(sx, mx)
-                iy = max(sy, my)
-                ex = min(sx + sw, mx + mw)
-                ey = min(sy + sh, my + mh)
-                area = max(0, ex - ix) * max(0, ey - iy)
+                ix = max(sx, m["left"])
+                iy = max(sy, m["top"])
+                area = max(0, min(sx + sw, m["left"] + m["width"]) - ix) * \
+                       max(0, min(sy + sh, m["top"] + m["height"]) - iy)
                 if area > best_area:
                     best_area = area
                     best = m

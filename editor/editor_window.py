@@ -372,7 +372,7 @@ class EditorWindow(QMainWindow):
         self.canvas = Canvas(qimg)
         self.text_manager = TextManager(self.canvas)
         self.canvas.set_text_manager(self.text_manager)
-        self.logic = EditorLogic(self.canvas)
+        self.logic = EditorLogic(self.canvas, self.cfg)
         self.ocr_settings = OcrSettings.from_config(self.cfg)
         self._last_ocr_capture: Optional[OcrCapture] = None
         self._last_ocr_language_hint: str = ""
@@ -1129,4 +1129,6 @@ class EditorWindow(QMainWindow):
                 )
 
     def closeEvent(self, event):
+        if hasattr(self, "canvas"):
+            self.canvas._cleanup_temp_dirs()
         super().closeEvent(event)

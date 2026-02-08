@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from PySide6.QtCore import Qt, QSize, Signal
+from PySide6.QtCore import Qt, QSize, Signal, QTimer
 from PIL import Image
 from PySide6.QtGui import QIcon, QPixmap, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
@@ -98,17 +98,48 @@ class MemesDialog(QWidget):
         copy_shortcut.activated.connect(self._copy_selected_to_clipboard)
         self._copy_shortcut = copy_shortcut
 
+    _THUMB_BATCH = 6  # thumbnails to load per event-loop tick
+
     def refresh(self) -> None:
         self._list.clear()
+        self._thumb_idx = 0
         paths = list_memes()
+        extra_w, extra_h = Metrics.MEME_ITEM_EXTRA_SIZE
+        icon_size = Metrics.MEME_LIST_ICON
+        placeholder_size = QSize(icon_size + extra_w, icon_size + extra_h)
+
         for path in paths:
+            item = QListWidgetItem("")
+            item.setData(Qt.UserRole, path)
+            item.setSizeHint(placeholder_size)
+            self._list.addItem(item)
+
+        self._empty_label.setVisible(self._list.count() == 0)
+        self._list.setVisible(self._list.count() > 0)
+        self._update_remove_state()
+
+        if self._list.count() > 0:
+            QTimer.singleShot(0, self._load_thumb_batch)
+
+    def _load_thumb_batch(self) -> None:
+        """Load a small batch of thumbnails per event-loop tick."""
+        end = min(self._thumb_idx + self._THUMB_BATCH, self._list.count())
+        max_dimension = Metrics.MEME_LIST_ICON
+        extra_w, extra_h = Metrics.MEME_ITEM_EXTRA_SIZE
+
+        for i in range(self._thumb_idx, end):
+            item = self._list.item(i)
+            if item is None:
+                continue
+            path = item.data(Qt.UserRole)
+            if not isinstance(path, Path):
+                continue
+
             pixmap = QPixmap(str(path))
             if pixmap.isNull():
                 continue
 
             original_size = pixmap.size()
-            max_dimension = Metrics.MEME_LIST_ICON
-
             if original_size.width() > original_size.height():
                 new_width = max_dimension
                 new_height = int(original_size.height() * max_dimension / original_size.width())
@@ -117,15 +148,12 @@ class MemesDialog(QWidget):
                 new_width = int(original_size.width() * max_dimension / original_size.height())
 
             scaled = pixmap.scaled(new_width, new_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            item = QListWidgetItem(QIcon(scaled), "")
-            extra_w, extra_h = Metrics.MEME_ITEM_EXTRA_SIZE
+            item.setIcon(QIcon(scaled))
             item.setSizeHint(QSize(new_width + extra_w, new_height + extra_h))
-            item.setData(Qt.UserRole, path)
-            self._list.addItem(item)
 
-        self._empty_label.setVisible(self._list.count() == 0)
-        self._list.setVisible(self._list.count() > 0)
-        self._update_remove_state()
+        self._thumb_idx = end
+        if self._thumb_idx < self._list.count():
+            QTimer.singleShot(0, self._load_thumb_batch)
 
     def refresh_if_visible(self) -> None:
         if self.isVisible():
