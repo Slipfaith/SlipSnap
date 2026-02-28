@@ -28,6 +28,7 @@ from PySide6.QtGui import (
     QBrush,
     QPainterPath,
     QDrag,
+    QTransform,
 )
 from PySide6.QtWidgets import (
     QGraphicsView,
@@ -49,7 +50,7 @@ from .styles import ModernColors
 from .high_quality_pixmap_item import HighQualityPixmapItem
 from .icon_factory import create_pencil_cursor, create_select_cursor
 from logic import qimage_to_pil
-from editor.text_tools import TextManager
+from editor.text_tools import EditableTextItem, TextManager
 from editor.ocr_overlay import OcrSelectionOverlay, OcrCapture
 from editor.tools.selection_tool import SelectionTool
 from editor.tools.pencil_tool import PencilTool
@@ -57,7 +58,7 @@ from editor.tools.shape_tools import RectangleTool, EllipseTool
 from editor.tools.blur_tool import BlurTool
 from editor.tools.eraser_tool import EraserTool
 from editor.tools.line_arrow_tool import LineTool, ArrowTool
-from editor.undo_commands import AddCommand, MoveCommand, ScaleCommand, ZValueCommand, RemoveCommand
+from editor.undo_commands import AddCommand, MoveCommand, ResizeCommand, ScaleCommand, ZValueCommand, RemoveCommand, RotateCommand
 from editor.image_utils import images_from_mime
 from meme_library import save_meme_image
 
@@ -73,6 +74,7 @@ class Canvas(QGraphicsView):
 
     imageDropped = Signal(QImage)
     toolChanged = Signal(str)
+    zoomChanged = Signal(float)  # emitted when zoom changes (factor 0.1–4.0)
 
     def __init__(self, image: QImage):
         super().__init__()
@@ -122,9 +124,6 @@ class Canvas(QGraphicsView):
         self._pen.setJoinStyle(Qt.RoundJoin)
         self._apply_pen_mode()
         self.undo_stack = QUndoStack(self)
-        # Keep scene bounds in sync with geometry-affecting undo commands
-        # so scrollbars appear as soon as content grows beyond viewport.
-        self.undo_stack.indexChanged.connect(lambda _idx: self.update_scene_rect())
         self._move_snapshot: Dict[QGraphicsItem, QPointF] = {}
         self._text_manager: Optional[TextManager] = None
         self._zoom = 1.0
@@ -153,6 +152,13 @@ class Canvas(QGraphicsView):
         self._select_cursor = create_select_cursor()
         self._apply_lock_state()
         self.update_scene_rect()
+        if self.pixmap_item:
+            self.centerOn(self.pixmap_item)
+
+        # Corner-handle resize state
+        self._corner_resize: Optional[dict] = None
+        # Rotation drag state
+        self._rotation_drag: Optional[dict] = None
 
     def drawForeground(self, painter: QPainter, rect: QRectF) -> None:  # type: ignore[override]
         super().drawForeground(painter, rect)
@@ -161,33 +167,63 @@ class Canvas(QGraphicsView):
             return
 
         painter.save()
-        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setRenderHint(QPainter.Antialiasing, False)  # crisp lines
 
-        stroke = QColor(ModernColors.PRIMARY)
-        stroke.setAlpha(220)
-        fill = QColor(ModernColors.PRIMARY)
-        fill.setAlpha(50)
         scale = abs(self.transform().m11()) or 1.0
         scale = max(scale, 1e-3)
 
+        border = QColor(ModernColors.PRIMARY)
+        border.setAlpha(190)
+
+        handle_border = QColor(ModernColors.PRIMARY)
+        handle_border.setAlpha(210)
+        handle_fill = QColor(255, 255, 255, 245)
+
         for item in selected:
-            padding = 4.0 / scale
-            scene_rect = item.sceneBoundingRect().adjusted(-padding, -padding, padding, padding)
-            view_rect = self.mapFromScene(scene_rect).boundingRect()
-            side = min(view_rect.width(), view_rect.height())
-            radius = min(12.0, max(4.0, side * 0.25))
-            radius_scene = radius / scale
+            # While the user is typing inside a text item Qt already draws its
+            # own selection highlight — skip our overlay to avoid confusion.
+            if isinstance(item, EditableTextItem) and getattr(item, '_is_editing', False):
+                continue
 
-            path = QPainterPath()
-            path.addRoundedRect(scene_rect, radius_scene, radius_scene)
+            padding = 3.0 / scale
+            sr = item.sceneBoundingRect().adjusted(-padding, -padding, padding, padding)
 
-            painter.fillPath(path, QBrush(fill))
-            pen = QPen(stroke, 2.2)
+            # Thin solid border, no fill
+            pen = QPen(border, 1.0)
             pen.setCosmetic(True)
-            pen.setCapStyle(Qt.RoundCap)
-            pen.setJoinStyle(Qt.RoundJoin)
             painter.setPen(pen)
-            painter.drawPath(path)
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRect(sr)
+
+            # Small square handles at four corners
+            h = 4.0 / scale
+            pen2 = QPen(handle_border, 1.0)
+            pen2.setCosmetic(True)
+            painter.setPen(pen2)
+            painter.setBrush(QBrush(handle_fill))
+            for corner in (sr.topLeft(), sr.topRight(),
+                           sr.bottomLeft(), sr.bottomRight()):
+                painter.drawRect(QRectF(corner.x() - h, corner.y() - h, h * 2, h * 2))
+
+            # Rotation handle — circle above top-centre connected by a stem line
+            rot_offset = 28.0 / scale   # gap in scene units
+            rot_r = 5.0 / scale         # circle radius in scene units
+            top_center = QPointF(sr.center().x(), sr.top())
+            rot_pt = QPointF(top_center.x(), top_center.y() - rot_offset)
+
+            stem_pen = QPen(border, 1.0)
+            stem_pen.setCosmetic(True)
+            painter.setPen(stem_pen)
+            painter.setBrush(Qt.NoBrush)
+            painter.setRenderHint(QPainter.Antialiasing, True)
+            painter.drawLine(top_center, rot_pt)
+
+            rot_pen = QPen(handle_border, 1.5)
+            rot_pen.setCosmetic(True)
+            painter.setPen(rot_pen)
+            painter.setBrush(QBrush(handle_fill))
+            painter.drawEllipse(rot_pt, rot_r, rot_r)
+            painter.setRenderHint(QPainter.Antialiasing, False)
 
         painter.restore()
 
@@ -368,13 +404,18 @@ class Canvas(QGraphicsView):
             self._text_manager.finish_current_editing()
         self._apply_lock_state()
         self.hide_ocr_scanner()
+        # Reset the scene rect so update_scene_rect starts fresh (not expanded
+        # from a previous, possibly much larger, session rect).
+        self.scene.setSceneRect(QRectF())
         self.update_scene_rect()
+        # Centre on the new screenshot exactly once at load time.
+        if self.pixmap_item:
+            self.centerOn(self.pixmap_item)
 
     def handle_item_removed(self, item: QGraphicsItem) -> None:
         if item is self.pixmap_item or item.data(1) == "base":
             self.pixmap_item = None
             self.pil_image = None
-        self.update_scene_rect()
 
     def handle_item_restored(self, item: QGraphicsItem) -> None:
         if isinstance(item, QGraphicsPixmapItem) and item.data(1) == "base":
@@ -384,7 +425,6 @@ class Canvas(QGraphicsView):
                 self.pil_image = qimage_to_pil(qimg)
             if isinstance(item, HighQualityPixmapItem):
                 item.reset_scale_tracking()
-        self.update_scene_rect()
 
     def set_tool(self, tool: str):
         if self._text_manager:
@@ -417,13 +457,19 @@ class Canvas(QGraphicsView):
         self._apply_lock_state()
 
     # ---- scene management ----
-    def update_scene_rect(self, padding: float = 48.0) -> None:
-        """Update the scrollable area to fit all items with padding."""
+    def update_scene_rect(self) -> None:
+        """Set a generous scene rect around the current content.
+
+        Called once when a screenshot is loaded.  Never called during editing
+        so the viewport is never moved by this method.
+        """
         rect = self.scene.itemsBoundingRect()
         if rect.isNull():
             rect = QRectF(0, 0, 0, 0)
-        margins = QMarginsF(padding, padding, padding, padding)
-        self.scene.setSceneRect(rect.marginsAdded(margins))
+        # Give plenty of room on every side so the user can freely place items
+        # and pan without needing further scene-rect updates.
+        pad = max(rect.width(), rect.height(), 800.0)
+        self.scene.setSceneRect(rect.marginsAdded(QMarginsF(pad, pad, pad, pad)))
 
     def set_text_manager(self, text_manager: TextManager):
         self._text_manager = text_manager
@@ -454,11 +500,68 @@ class Canvas(QGraphicsView):
         self._pen.setColor(color)
 
     def set_zoom(self, factor: float):
-        """Set the zoom level of the canvas."""
+        """Set the zoom level of the canvas (called by the slider)."""
+        center = self.mapToScene(self.viewport().rect().center())
         self._zoom = factor
-        self.resetTransform()
-        self.scale(factor, factor)
-        self.update_scene_rect()
+        t = QTransform()
+        t.scale(factor, factor)
+        self.setTransform(t)
+        self.centerOn(center)
+
+    # ---- corner-handle resize ----
+    def _find_corner_handle(self, viewport_pos: QPoint):
+        """Return (item, corner_key, anchor_scene_pos) or None.
+
+        corner_key is one of 'tl', 'tr', 'bl', 'br'.
+        anchor_scene_pos is the *opposite* corner that stays fixed.
+        """
+        if self._tool != "select":
+            return None
+        hit_r = 10  # hit radius in viewport pixels
+        zoom = abs(self.transform().m11()) or 1.0
+        padding = 3.0 / zoom
+
+        for item in self.scene.selectedItems():
+            if not item.isVisible():
+                continue
+            if isinstance(item, EditableTextItem) and item._is_editing:
+                continue
+            sr = item.sceneBoundingRect().adjusted(-padding, -padding, padding, padding)
+            corners = {
+                'tl': (sr.topLeft(),     sr.bottomRight()),
+                'tr': (sr.topRight(),    sr.bottomLeft()),
+                'bl': (sr.bottomLeft(),  sr.topRight()),
+                'br': (sr.bottomRight(), sr.topLeft()),
+            }
+            for key, (corner, anchor) in corners.items():
+                cvp = self.mapFromScene(corner)
+                if (abs(viewport_pos.x() - cvp.x()) <= hit_r and
+                        abs(viewport_pos.y() - cvp.y()) <= hit_r):
+                    return item, key, anchor
+        return None
+
+    def _find_rotation_handle(self, viewport_pos: QPoint):
+        """Return item if viewport_pos is near its rotation handle, else None."""
+        if self._tool != "select":
+            return None
+        hit_r = 10
+        zoom = abs(self.transform().m11()) or 1.0
+        padding = 3.0 / zoom
+        rot_offset_vp = 28  # viewport pixels — must match drawForeground
+
+        for item in self.scene.selectedItems():
+            if not item.isVisible():
+                continue
+            if isinstance(item, EditableTextItem) and item._is_editing:
+                continue
+            sr = item.sceneBoundingRect().adjusted(-padding, -padding, padding, padding)
+            top_center_scene = QPointF(sr.center().x(), sr.top())
+            top_center_vp = self.mapFromScene(top_center_scene)
+            handle_vp = QPoint(top_center_vp.x(), top_center_vp.y() - rot_offset_vp)
+            if (abs(viewport_pos.x() - handle_vp.x()) <= hit_r and
+                    abs(viewport_pos.y() - handle_vp.y()) <= hit_r):
+                return item
+        return None
 
     def _render_rect_to_qimage(self, rect: QRectF, only_items=None):
         dpr = getattr(self.window().windowHandle(), "devicePixelRatio", lambda: 1.0)()
@@ -710,7 +813,33 @@ class Canvas(QGraphicsView):
                     )
                 event.accept()
                 return
-        super().wheelEvent(event)
+
+        # Plain scroll wheel = zoom (same as the zoom slider, but anchored to mouse)
+        delta = event.angleDelta().y()
+        if delta == 0:
+            event.accept()
+            return
+
+        step = 1.12 if delta > 0 else 1 / 1.12
+        new_zoom = max(0.1, min(4.0, self._zoom * step))
+
+        # Remember scene position under the mouse cursor before zoom
+        mouse_vp = event.position().toPoint()
+        scene_under_mouse = self.mapToScene(mouse_vp)
+
+        # Apply new zoom transform (AnchorViewCenter keeps old viewport centre stable)
+        self._zoom = new_zoom
+        t = QTransform()
+        t.scale(new_zoom, new_zoom)
+        self.setTransform(t)
+
+        # Re-anchor: place scene_under_mouse exactly at the mouse viewport pixel
+        vp_center = QPointF(self.viewport().rect().center())
+        offset_scene = (QPointF(mouse_vp) - vp_center) / new_zoom
+        self.centerOn(scene_under_mouse - offset_scene)
+
+        self.zoomChanged.emit(new_zoom)
+        event.accept()
 
     def keyPressEvent(self, event):
         if event.modifiers() & Qt.ControlModifier:
@@ -772,6 +901,49 @@ class Canvas(QGraphicsView):
             return
         if event.button() == Qt.LeftButton:
             if self._tool == "select":
+                # Rotation handle takes priority over resize and move
+                rot_item = self._find_rotation_handle(event.position().toPoint())
+                if rot_item:
+                    local_center = rot_item.boundingRect().center()
+                    rot_item.setTransformOriginPoint(local_center)
+                    center_scene = rot_item.mapToScene(local_center)
+                    mouse_scene = self.mapToScene(event.position().toPoint())
+                    start_angle = math.degrees(math.atan2(
+                        mouse_scene.y() - center_scene.y(),
+                        mouse_scene.x() - center_scene.x(),
+                    ))
+                    self._rotation_drag = {
+                        'item': rot_item,
+                        'center_scene': center_scene,
+                        'start_angle': start_angle,
+                        'start_rotation': rot_item.rotation(),
+                        'origin': QPointF(local_center),
+                    }
+                    self.viewport().setCursor(Qt.ClosedHandCursor)
+                    event.accept()
+                    return
+
+                # Corner-handle resize takes priority over item move
+                handle = self._find_corner_handle(event.position().toPoint())
+                if handle:
+                    item, key, anchor_scene = handle
+                    start_scale = item.scale() or 1.0
+                    start_pos = QPointF(item.pos())
+                    start_mouse = self.mapToScene(event.position().toPoint())
+                    diff = start_mouse - anchor_scene
+                    start_dist = math.sqrt(diff.x() ** 2 + diff.y() ** 2)
+                    if start_dist > 1e-3:
+                        anchor_in_item = (anchor_scene - start_pos) / start_scale
+                        self._corner_resize = {
+                            'item': item,
+                            'anchor_scene': anchor_scene,
+                            'anchor_in_item': anchor_in_item,
+                            'start_scale': start_scale,
+                            'start_pos': start_pos,
+                            'start_dist': start_dist,
+                        }
+                        event.accept()
+                        return
                 items = self.scene.selectedItems()
                 if items:
                     self._move_snapshot = {it: it.pos() for it in items}
@@ -803,6 +975,47 @@ class Canvas(QGraphicsView):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
+        # Rotation drag
+        if self._rotation_drag and (event.buttons() & Qt.LeftButton):
+            rd = self._rotation_drag
+            mouse_scene = self.mapToScene(event.position().toPoint())
+            cur_angle = math.degrees(math.atan2(
+                mouse_scene.y() - rd['center_scene'].y(),
+                mouse_scene.x() - rd['center_scene'].x(),
+            ))
+            delta = cur_angle - rd['start_angle']
+            rd['item'].setRotation(rd['start_rotation'] + delta)
+            self.scene.invalidate(QRectF(), QGraphicsScene.ForegroundLayer)
+            event.accept()
+            return
+
+        # Corner resize drag
+        if self._corner_resize and (event.buttons() & Qt.LeftButton):
+            cr = self._corner_resize
+            mouse_scene = self.mapToScene(event.position().toPoint())
+            diff = mouse_scene - cr['anchor_scene']
+            dist = math.sqrt(diff.x() ** 2 + diff.y() ** 2)
+            if dist > 1e-3:
+                factor = dist / cr['start_dist']
+                new_scale = max(0.05, min(20.0, cr['start_scale'] * factor))
+                item = cr['item']
+                item.setScale(new_scale)
+                new_pos = cr['anchor_scene'] - cr['anchor_in_item'] * new_scale
+                item.setPos(new_pos)
+                self.scene.invalidate(QRectF(), QGraphicsScene.ForegroundLayer)
+            event.accept()
+            return
+
+        # Cursor hint for rotation / corner handles (no button held, select mode)
+        if not event.buttons() and self._tool == "select":
+            vp = event.position().toPoint()
+            if self._find_rotation_handle(vp):
+                self.viewport().setCursor(Qt.OpenHandCursor)
+            elif self._find_corner_handle(vp):
+                self.viewport().setCursor(Qt.SizeFDiagCursor)
+            else:
+                self.viewport().setCursor(self._select_cursor)
+
         if (event.buttons() & Qt.LeftButton) and self._tool == "ocr":
             pos = self.mapToScene(event.position().toPoint())
             if self.ocr_overlay:
@@ -839,6 +1052,29 @@ class Canvas(QGraphicsView):
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton:
+            # Finish rotation drag
+            if self._rotation_drag:
+                rd = self._rotation_drag
+                self._rotation_drag = None
+                self.viewport().setCursor(self._select_cursor)
+                old_r = rd['start_rotation']
+                new_r = rd['item'].rotation()
+                if abs(old_r - new_r) > 1e-4:
+                    self.undo_stack.push(RotateCommand(rd['item'], rd['origin'], old_r, new_r))
+                event.accept()
+                return
+
+            # Finish corner resize
+            if self._corner_resize:
+                cr = self._corner_resize
+                self._corner_resize = None
+                item = cr['item']
+                old_s, new_s = cr['start_scale'], item.scale()
+                old_p, new_p = cr['start_pos'], item.pos()
+                if abs(old_s - new_s) > 1e-4:
+                    self.undo_stack.push(ResizeCommand(item, old_s, new_s, old_p, new_p))
+                event.accept()
+                return
             if self._tool == "ocr":
                 event.accept()
                 return

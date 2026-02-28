@@ -459,6 +459,16 @@ def create_actions_toolbar(window, canvas):
     zoom_slider.valueChanged.connect(lambda v: (canvas.set_zoom(v / 100), zoom_label.setText(f"{v}%")))
     tb.addWidget(zoom_slider)
     tb.addWidget(zoom_label)
+
+    # Sync slider when zoom is changed via scroll wheel (without re-triggering set_zoom)
+    def _on_canvas_zoom_changed(factor: float) -> None:
+        pct = int(round(factor * 100))
+        zoom_slider.blockSignals(True)
+        zoom_slider.setValue(pct)
+        zoom_slider.blockSignals(False)
+        zoom_label.setText(f"{pct}%")
+
+    canvas.zoomChanged.connect(_on_canvas_zoom_changed)
     tb.addSeparator()
 
     add_action("new", "Новый снимок", window.new_screenshot, sc="Ctrl+N", icon=make_icon_new(), show_text=False)

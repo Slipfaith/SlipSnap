@@ -81,6 +81,27 @@ class ScaleCommand(QUndoCommand):
             item.setScale(new)
 
 
+class ResizeCommand(QUndoCommand):
+    """Command to scale an item while keeping an anchor corner fixed."""
+
+    def __init__(self, item, old_scale: float, new_scale: float, old_pos, new_pos):
+        from PySide6.QtCore import QPointF  # local import to avoid circular
+        super().__init__("Изменить размер")
+        self.item = item
+        self.old_scale = old_scale
+        self.new_scale = new_scale
+        self.old_pos = old_pos
+        self.new_pos = new_pos
+
+    def undo(self):
+        self.item.setScale(self.old_scale)
+        self.item.setPos(self.old_pos)
+
+    def redo(self):
+        self.item.setScale(self.new_scale)
+        self.item.setPos(self.new_pos)
+
+
 class ZValueCommand(QUndoCommand):
     """Command to change Z-order of items."""
 
@@ -96,3 +117,23 @@ class ZValueCommand(QUndoCommand):
     def redo(self):
         for item, (old, new) in self.items_z.items():
             item.setZValue(new)
+
+
+class RotateCommand(QUndoCommand):
+    """Command to rotate an item around its centre."""
+
+    def __init__(self, item, origin, old_rotation: float, new_rotation: float):
+        from PySide6.QtCore import QPointF
+        super().__init__("Повернуть")
+        self.item = item
+        self.origin = QPointF(origin)
+        self.old_rotation = old_rotation
+        self.new_rotation = new_rotation
+
+    def undo(self):
+        self.item.setTransformOriginPoint(self.origin)
+        self.item.setRotation(self.old_rotation)
+
+    def redo(self):
+        self.item.setTransformOriginPoint(self.origin)
+        self.item.setRotation(self.new_rotation)
