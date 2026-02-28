@@ -1,0 +1,58 @@
+from __future__ import annotations
+
+from PySide6.QtCore import QRectF, Qt
+from PySide6.QtGui import QColor, QBrush, QPen
+from PySide6.QtWidgets import QGraphicsEllipseItem, QGraphicsItem
+
+
+def _clamp_radius(value: float) -> int:
+    return max(60, min(260, int(round(value))))
+
+
+def _clamp_factor(value: float) -> float:
+    return max(1.2, min(8.0, float(value)))
+
+
+class ZoomLensItem(QGraphicsEllipseItem):
+    """Scene object that stores zoom-lens geometry and per-item settings."""
+
+    def __init__(self, radius_px: int = 90, zoom_factor: float = 2.0):
+        self._radius_px = _clamp_radius(radius_px)
+        self._zoom_factor = _clamp_factor(zoom_factor)
+        super().__init__()
+
+        self.setRect(QRectF(-self._radius_px, -self._radius_px, self._radius_px * 2, self._radius_px * 2))
+        # Keep item almost transparent: visible lens is rendered by Canvas overlay.
+        self.setPen(QPen(Qt.NoPen))
+        self.setBrush(QBrush(QColor(255, 255, 255, 1)))
+        self.setFlag(QGraphicsItem.ItemIsMovable, True)
+        self.setFlag(QGraphicsItem.ItemIsSelectable, True)
+        self.setFlag(QGraphicsItem.ItemIsFocusable, True)
+        self.setZValue(20)
+        self.setData(0, "zoom_lens")
+        self.setData(1, "zoom_lens")
+
+    def radius_px(self) -> int:
+        return int(self._radius_px)
+
+    def set_radius_px(self, radius_px: int) -> bool:
+        clamped = _clamp_radius(radius_px)
+        if clamped == self._radius_px:
+            return False
+        self._radius_px = clamped
+        self.setRect(QRectF(-self._radius_px, -self._radius_px, self._radius_px * 2, self._radius_px * 2))
+        return True
+
+    def zoom_factor(self) -> float:
+        return float(self._zoom_factor)
+
+    def set_zoom_factor(self, factor: float) -> bool:
+        clamped = _clamp_factor(factor)
+        if abs(clamped - self._zoom_factor) < 1e-6:
+            return False
+        self._zoom_factor = clamped
+        return True
+
+    def effective_radius_scene(self) -> float:
+        return float(self._radius_px) * max(0.001, abs(float(self.scale())))
+

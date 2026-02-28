@@ -50,7 +50,8 @@ from PIL import Image, ImageSequence
 from .styles import ModernColors
 from .high_quality_pixmap_item import HighQualityPixmapItem
 from .icon_factory import create_pencil_cursor, create_select_cursor
-from logic import qimage_to_pil
+from .zoom_lens_item import ZoomLensItem
+from logic import qimage_to_pil, save_config
 from editor.text_tools import EditableTextItem, TextManager
 from editor.ocr_overlay import OcrSelectionOverlay, OcrCapture
 from editor.tools.selection_tool import SelectionTool
@@ -136,6 +137,11 @@ class Canvas(QGraphicsView):
         self._drag_start_pos: Optional[QPoint] = None
         self._drag_temp_dirs: list[Path] = []
         self._dragging_external = False
+        self._zoom_lens_cursor_vp: Optional[QPoint] = None
+        self._zoom_lens_radius_px: int = 90
+        self._zoom_lens_factor: float = 2.0
+        self.setMouseTracking(True)
+        self.viewport().setMouseTracking(True)
 
         self.tools = {
             "select": SelectionTool(self),
@@ -164,69 +170,280 @@ class Canvas(QGraphicsView):
     def drawForeground(self, painter: QPainter, rect: QRectF) -> None:  # type: ignore[override]
         super().drawForeground(painter, rect)
         selected = [it for it in self.scene.selectedItems() if it.isVisible()]
-        if not selected:
+        if selected:
+            painter.save()
+            painter.setRenderHint(QPainter.Antialiasing, False)  # crisp lines
+
+        if selected:
+            scale = abs(self.transform().m11()) or 1.0
+            scale = max(scale, 1e-3)
+
+            border = QColor(ModernColors.PRIMARY)
+            border.setAlpha(190)
+
+            handle_border = QColor(ModernColors.PRIMARY)
+            handle_border.setAlpha(210)
+            handle_fill = QColor(255, 255, 255, 245)
+
+            for item in selected:
+                # While the user is typing inside a text item Qt already draws its
+                # own selection highlight - skip our overlay to avoid confusion.
+                if isinstance(item, EditableTextItem) and getattr(item, "_is_editing", False):
+                    continue
+
+                padding = 3.0 / scale
+                sr = item.sceneBoundingRect().adjusted(-padding, -padding, padding, padding)
+
+                # Thin solid border, no fill
+                pen = QPen(border, 1.0)
+                pen.setCosmetic(True)
+                painter.setPen(pen)
+                painter.setBrush(Qt.NoBrush)
+                painter.drawRect(sr)
+
+                # Small square handles at four corners
+                h = 4.0 / scale
+                pen2 = QPen(handle_border, 1.0)
+                pen2.setCosmetic(True)
+                painter.setPen(pen2)
+                painter.setBrush(QBrush(handle_fill))
+                for corner in (sr.topLeft(), sr.topRight(), sr.bottomLeft(), sr.bottomRight()):
+                    painter.drawRect(QRectF(corner.x() - h, corner.y() - h, h * 2, h * 2))
+
+                # Rotation handle - circle above top-center connected by a stem line
+                rot_offset = 28.0 / scale
+                rot_r = 5.0 / scale
+                top_center = QPointF(sr.center().x(), sr.top())
+                rot_pt = QPointF(top_center.x(), top_center.y() - rot_offset)
+
+                stem_pen = QPen(border, 1.0)
+                stem_pen.setCosmetic(True)
+                painter.setPen(stem_pen)
+                painter.setBrush(Qt.NoBrush)
+                painter.setRenderHint(QPainter.Antialiasing, True)
+                painter.drawLine(top_center, rot_pt)
+
+                rot_pen = QPen(handle_border, 1.5)
+                rot_pen.setCosmetic(True)
+                painter.setPen(rot_pen)
+                painter.setBrush(QBrush(handle_fill))
+                painter.drawEllipse(rot_pt, rot_r, rot_r)
+                painter.setRenderHint(QPainter.Antialiasing, False)
+
+            painter.restore()
+
+        self._draw_zoom_lens_overlay(painter)
+
+    def _zoom_lens_items(self, only_items=None) -> list[ZoomLensItem]:
+        allowed = self._expanded_item_set(only_items) if only_items is not None else None
+        items: list[ZoomLensItem] = []
+        for item in self.scene.items():
+            if not isinstance(item, ZoomLensItem):
+                continue
+            if not item.isVisible():
+                continue
+            if allowed is not None and item not in allowed:
+                continue
+            items.append(item)
+        items.sort(key=lambda it: (it.zValue(), id(it)))
+        return items
+
+    def _selected_zoom_lens_items(self) -> list[ZoomLensItem]:
+        selected: list[ZoomLensItem] = []
+        for item in self.scene.selectedItems():
+            if isinstance(item, ZoomLensItem):
+                selected.append(item)
+        return selected
+
+    def _zoom_lens_item_at(self, scene_pos: QPointF) -> Optional[ZoomLensItem]:
+        for item in self.scene.items(scene_pos):
+            if isinstance(item, ZoomLensItem):
+                return item
+        return None
+
+    def _draw_single_zoom_lens_overlay(
+        self,
+        painter: QPainter,
+        source_img: QImage,
+        center_px: QPointF,
+        radius_px: float,
+        zoom_factor: float,
+    ) -> None:
+        radius = max(2.0, float(radius_px))
+        lens_zoom = max(1.2, float(zoom_factor))
+        lens_rect = QRectF(center_px.x() - radius, center_px.y() - radius, radius * 2.0, radius * 2.0)
+        if lens_rect.width() < 2 or lens_rect.height() < 2:
             return
 
+        src_half = max(1.0, radius / lens_zoom)
+        src_rect = QRectF(center_px.x() - src_half, center_px.y() - src_half, src_half * 2.0, src_half * 2.0)
+
+        clip = QPainterPath()
+        clip.addEllipse(lens_rect)
         painter.save()
-        painter.setRenderHint(QPainter.Antialiasing, False)  # crisp lines
+        painter.setClipPath(clip)
+        painter.drawImage(lens_rect, source_img, src_rect)
+        painter.setClipping(False)
 
-        scale = abs(self.transform().m11()) or 1.0
-        scale = max(scale, 1e-3)
+        outer_ring = QPen(QColor(25, 30, 38, 210), 3)
+        outer_ring.setCosmetic(True)
+        painter.setPen(outer_ring)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(lens_rect)
 
-        border = QColor(ModernColors.PRIMARY)
-        border.setAlpha(190)
+        inner_ring = QPen(QColor(255, 255, 255, 220), 1.5)
+        inner_ring.setCosmetic(True)
+        painter.setPen(inner_ring)
+        painter.drawEllipse(lens_rect.adjusted(2, 2, -2, -2))
 
-        handle_border = QColor(ModernColors.PRIMARY)
-        handle_border.setAlpha(210)
-        handle_fill = QColor(255, 255, 255, 245)
+        cross_pen = QPen(QColor(255, 255, 255, 180), 1)
+        cross_pen.setCosmetic(True)
+        painter.setPen(cross_pen)
+        painter.drawLine(
+            QPointF(center_px.x() - 8, center_px.y()),
+            QPointF(center_px.x() + 8, center_px.y()),
+        )
+        painter.drawLine(
+            QPointF(center_px.x(), center_px.y() - 8),
+            QPointF(center_px.x(), center_px.y() + 8),
+        )
 
-        for item in selected:
-            # While the user is typing inside a text item Qt already draws its
-            # own selection highlight — skip our overlay to avoid confusion.
-            if isinstance(item, EditableTextItem) and getattr(item, '_is_editing', False):
-                continue
-
-            padding = 3.0 / scale
-            sr = item.sceneBoundingRect().adjusted(-padding, -padding, padding, padding)
-
-            # Thin solid border, no fill
-            pen = QPen(border, 1.0)
-            pen.setCosmetic(True)
-            painter.setPen(pen)
-            painter.setBrush(Qt.NoBrush)
-            painter.drawRect(sr)
-
-            # Small square handles at four corners
-            h = 4.0 / scale
-            pen2 = QPen(handle_border, 1.0)
-            pen2.setCosmetic(True)
-            painter.setPen(pen2)
-            painter.setBrush(QBrush(handle_fill))
-            for corner in (sr.topLeft(), sr.topRight(),
-                           sr.bottomLeft(), sr.bottomRight()):
-                painter.drawRect(QRectF(corner.x() - h, corner.y() - h, h * 2, h * 2))
-
-            # Rotation handle — circle above top-centre connected by a stem line
-            rot_offset = 28.0 / scale   # gap in scene units
-            rot_r = 5.0 / scale         # circle radius in scene units
-            top_center = QPointF(sr.center().x(), sr.top())
-            rot_pt = QPointF(top_center.x(), top_center.y() - rot_offset)
-
-            stem_pen = QPen(border, 1.0)
-            stem_pen.setCosmetic(True)
-            painter.setPen(stem_pen)
-            painter.setBrush(Qt.NoBrush)
-            painter.setRenderHint(QPainter.Antialiasing, True)
-            painter.drawLine(top_center, rot_pt)
-
-            rot_pen = QPen(handle_border, 1.5)
-            rot_pen.setCosmetic(True)
-            painter.setPen(rot_pen)
-            painter.setBrush(QBrush(handle_fill))
-            painter.drawEllipse(rot_pt, rot_r, rot_r)
-            painter.setRenderHint(QPainter.Antialiasing, False)
-
+        label = f"{lens_zoom:.1f}x"
+        label_rect = QRectF(lens_rect.left() + 8, lens_rect.bottom() - 24, 44, 16)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(15, 23, 42, 170))
+        painter.drawRoundedRect(label_rect, 5, 5)
+        painter.setPen(QColor(255, 255, 255, 235))
+        painter.drawText(label_rect, Qt.AlignCenter, label)
         painter.restore()
+
+    def _draw_zoom_lens_overlay(self, painter: QPainter) -> None:
+        lens_items = self._zoom_lens_items()
+        show_preview = self._tool == "zoom_lens" and self._zoom_lens_cursor_vp is not None
+        if not lens_items and not show_preview:
+            return
+
+        viewport_rect = QRectF(self.viewport().rect())
+        if viewport_rect.width() <= 1 or viewport_rect.height() <= 1:
+            return
+
+        source_scene = self.mapToScene(self.viewport().rect()).boundingRect()
+        source_img = QImage(
+            int(max(1, viewport_rect.width())),
+            int(max(1, viewport_rect.height())),
+            QImage.Format_ARGB32_Premultiplied,
+        )
+        source_img.fill(Qt.transparent)
+        source_painter = QPainter(source_img)
+        source_painter.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
+        self.scene.render(
+            source_painter,
+            QRectF(0, 0, source_img.width(), source_img.height()),
+            source_scene,
+            Qt.IgnoreAspectRatio,
+        )
+        source_painter.end()
+
+        view_zoom = max(abs(self.transform().m11()), 1e-3)
+        painter.save()
+        painter.resetTransform()  # draw in viewport pixels, independent from scene zoom
+        for lens in lens_items:
+            center_scene = lens.mapToScene(lens.boundingRect().center())
+            center_vp_i = self.mapFromScene(center_scene)
+            center_vp = QPointF(float(center_vp_i.x()), float(center_vp_i.y()))
+            radius_vp = float(lens.effective_radius_scene()) * view_zoom
+            self._draw_single_zoom_lens_overlay(
+                painter,
+                source_img,
+                center_vp,
+                radius_vp,
+                lens.zoom_factor(),
+            )
+
+        if show_preview and self._zoom_lens_cursor_vp is not None:
+            center_vp = QPointF(float(self._zoom_lens_cursor_vp.x()), float(self._zoom_lens_cursor_vp.y()))
+            radius_vp = float(self._zoom_lens_radius_px) * view_zoom
+            self._draw_single_zoom_lens_overlay(
+                painter,
+                source_img,
+                center_vp,
+                radius_vp,
+                self._zoom_lens_factor,
+            )
+        painter.restore()
+
+    def _apply_zoom_lenses_to_image(self, image: QImage, rect: QRectF, dpr: float, only_items=None) -> None:
+        lens_items = self._zoom_lens_items(only_items=only_items)
+        if not lens_items:
+            return
+        source_img = image.copy()
+        painter = QPainter(image)
+        painter.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
+        for lens in lens_items:
+            center_scene = lens.mapToScene(lens.boundingRect().center())
+            center_px = QPointF(
+                (center_scene.x() - rect.left()) * dpr,
+                (center_scene.y() - rect.top()) * dpr,
+            )
+            radius_px = float(lens.effective_radius_scene()) * dpr
+            self._draw_single_zoom_lens_overlay(
+                painter,
+                source_img,
+                center_px,
+                radius_px,
+                lens.zoom_factor(),
+            )
+        painter.end()
+
+    def _persist_zoom_lens_settings(self) -> None:
+        win = self.window()
+        cfg = getattr(win, "cfg", None)
+        if not isinstance(cfg, dict):
+            return
+        cfg["zoom_lens_size"] = int(self._zoom_lens_radius_px)
+        cfg["zoom_lens_factor"] = round(float(self._zoom_lens_factor), 2)
+        try:
+            save_config(cfg)
+        except Exception:
+            pass
+
+    def _show_zoom_lens_context_menu(self, global_pos: QPoint, lens: Optional[ZoomLensItem] = None) -> None:
+        menu = QMenu(self)
+        zoom_actions: dict = {}
+        current_factor = lens.zoom_factor() if lens is not None else float(self._zoom_lens_factor)
+        for factor in (1.5, 2.0, 2.5, 3.0, 4.0, 6.0):
+            act = menu.addAction(f"{factor:.1f}x")
+            act.setCheckable(True)
+            act.setChecked(abs(current_factor - factor) < 0.05)
+            zoom_actions[act] = factor
+        chosen = menu.exec(global_pos)
+        if chosen in zoom_actions:
+            new_factor = max(1.2, min(8.0, float(zoom_actions[chosen])))
+            self._zoom_lens_factor = new_factor
+            if lens is not None:
+                lens.set_zoom_factor(new_factor)
+            self._persist_zoom_lens_settings()
+            self.viewport().update()
+
+    def add_zoom_lens_item(
+        self,
+        scene_pos: QPointF,
+        *,
+        radius_px: Optional[int] = None,
+        zoom_factor: Optional[float] = None,
+    ) -> ZoomLensItem:
+        lens = ZoomLensItem(
+            radius_px=self._zoom_lens_radius_px if radius_px is None else int(radius_px),
+            zoom_factor=self._zoom_lens_factor if zoom_factor is None else float(zoom_factor),
+        )
+        lens.setPos(scene_pos)
+        self.scene.addItem(lens)
+        self.undo_stack.push(AddCommand(self.scene, lens))
+        self.bring_to_front(lens, record=False)
+        self.scene.clearSelection()
+        lens.setSelected(True)
+        self.viewport().update()
+        return lens
 
     # ---- drag & drop ----
     def dragEnterEvent(self, event):
@@ -456,6 +673,7 @@ class Canvas(QGraphicsView):
         if self._text_manager:
             self._text_manager.finish_current_editing()
 
+        previous_tool = self._tool
         self._tool = tool
         self.active_tool = self.tools.get(tool)
 
@@ -474,11 +692,20 @@ class Canvas(QGraphicsView):
             self.viewport().setCursor(Qt.IBeamCursor)
         elif tool == "ocr":
             self.viewport().setCursor(Qt.IBeamCursor)
+        elif tool == "zoom_lens":
+            self.viewport().setCursor(Qt.CrossCursor)
         else:
             self.viewport().setCursor(Qt.ArrowCursor)
 
         if hasattr(self, "ocr_overlay"):
             self.ocr_overlay.set_active(tool == "ocr")
+        if tool == "zoom_lens":
+            if self._zoom_lens_cursor_vp is None:
+                self._zoom_lens_cursor_vp = self.viewport().rect().center()
+        else:
+            self._zoom_lens_cursor_vp = None
+        if tool == "zoom_lens" or previous_tool == "zoom_lens":
+            self.viewport().update()
         self.toolChanged.emit(tool)
         self._apply_lock_state()
 
@@ -533,6 +760,48 @@ class Canvas(QGraphicsView):
         t.scale(factor, factor)
         self.setTransform(t)
         self.centerOn(center)
+
+    def zoom_lens_radius(self) -> int:
+        selected = self._selected_zoom_lens_items()
+        if len(selected) == 1:
+            return int(selected[0].radius_px())
+        return int(self._zoom_lens_radius_px)
+
+    def set_zoom_lens_radius(self, radius_px: int) -> None:
+        clamped = max(60, min(260, int(radius_px)))
+        selected = self._selected_zoom_lens_items()
+        changed = False
+        if clamped != self._zoom_lens_radius_px:
+            self._zoom_lens_radius_px = clamped
+            changed = True
+        for lens in selected:
+            if lens.set_radius_px(clamped):
+                changed = True
+        if not changed:
+            return
+        if self._tool == "zoom_lens" or selected:
+            self.viewport().update()
+
+    def zoom_lens_factor(self) -> float:
+        selected = self._selected_zoom_lens_items()
+        if len(selected) == 1:
+            return float(selected[0].zoom_factor())
+        return float(self._zoom_lens_factor)
+
+    def set_zoom_lens_factor(self, factor: float) -> None:
+        clamped = max(1.2, min(8.0, float(factor)))
+        selected = self._selected_zoom_lens_items()
+        changed = False
+        if abs(clamped - self._zoom_lens_factor) >= 1e-6:
+            self._zoom_lens_factor = clamped
+            changed = True
+        for lens in selected:
+            if lens.set_zoom_factor(clamped):
+                changed = True
+        if not changed:
+            return
+        if self._tool == "zoom_lens" or selected:
+            self.viewport().update()
 
     # ---- corner-handle resize ----
     def _find_corner_handle(self, viewport_pos: QPoint):
@@ -847,6 +1116,7 @@ class Canvas(QGraphicsView):
         p.scale(dpr, dpr)
         self.scene.render(p, QRectF(0, 0, rect.width(), rect.height()), rect)
         p.end()
+        self._apply_zoom_lenses_to_image(img, rect, dpr, only_items=only_items)
         for it, vis in hidden:
             it.setVisible(vis)
         return img, rect, dpr
@@ -1115,6 +1385,11 @@ class Canvas(QGraphicsView):
             self.active_tool.key_press(event.key())
             event.accept()
             return
+        if self._tool == "zoom_lens" and event.key() == Qt.Key_Escape:
+            self._zoom_lens_cursor_vp = None
+            self.viewport().update()
+            event.accept()
+            return
         super().keyPressEvent(event)
 
     def select_all_items(self) -> None:
@@ -1131,6 +1406,24 @@ class Canvas(QGraphicsView):
             item.setSelected(True)
 
     def mousePressEvent(self, event):
+        if self._tool == "zoom_lens":
+            vp = event.position().toPoint()
+            self._zoom_lens_cursor_vp = vp
+            scene_pos = self.mapToScene(vp)
+            if event.button() == Qt.RightButton:
+                lens = self._zoom_lens_item_at(scene_pos)
+                self._show_zoom_lens_context_menu(self.viewport().mapToGlobal(vp), lens=lens)
+                self.viewport().update()
+                event.accept()
+                return
+            if event.button() == Qt.LeftButton:
+                self.add_zoom_lens_item(scene_pos)
+                self.viewport().update()
+                event.accept()
+                return
+            self.viewport().update()
+            event.accept()
+            return
         if event.button() == Qt.LeftButton and self._tool == "ocr":
             pos = self.mapToScene(event.position().toPoint())
             if self.ocr_overlay:
@@ -1219,6 +1512,13 @@ class Canvas(QGraphicsView):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
+        if self._tool == "zoom_lens":
+            vp = event.position().toPoint()
+            self._zoom_lens_cursor_vp = vp
+            self.viewport().setCursor(Qt.CrossCursor)
+            self.viewport().update()
+            event.accept()
+            return
         # Rotation drag
         if self._rotation_drag and (event.buttons() & Qt.LeftButton):
             rd = self._rotation_drag
@@ -1295,6 +1595,10 @@ class Canvas(QGraphicsView):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
+        if self._tool == "zoom_lens":
+            self.viewport().update()
+            event.accept()
+            return
         if event.button() == Qt.LeftButton:
             # Finish rotation drag
             if self._rotation_drag:
@@ -1338,6 +1642,12 @@ class Canvas(QGraphicsView):
                 event.accept()
                 return
         super().mouseReleaseEvent(event)
+
+    def leaveEvent(self, event):
+        if self._tool == "zoom_lens":
+            self._zoom_lens_cursor_vp = None
+            self.viewport().update()
+        super().leaveEvent(event)
 
     def bring_to_front(self, item: QGraphicsItem, *, record: bool = True):
         items = self.scene.items()

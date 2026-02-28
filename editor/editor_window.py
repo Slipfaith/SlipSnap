@@ -552,6 +552,7 @@ class EditorWindow(QMainWindow):
             "Ctrl+Z — отмена\n"
             "Ctrl+X — вернуть отменённое\n"
             "Delete — удалить\n"
+            "G — лупа\n"
             "Ctrl+Plus/Minus — масштаб"
         )
         msg = QMessageBox(self)

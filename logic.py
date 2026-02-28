@@ -40,6 +40,8 @@ DEFAULT_CONFIG = {
     "tessdata_prefix": "",
     "meme_dialog_width": Metrics.MEME_DIALOG_MIN_WIDTH,
     "meme_dialog_height": Metrics.MEME_DIALOG_MIN_HEIGHT,
+    "zoom_lens_size": 90,
+    "zoom_lens_factor": 2.0,
     "ocr_settings": {
         "preferred_languages": ["eng"],
         "last_language": "auto",
@@ -55,6 +57,14 @@ def _clamp_int(value, default: int, min_value: int, max_value: int) -> int:
         number = int(value)
     except Exception:
         number = int(default)
+    return max(min_value, min(max_value, number))
+
+
+def _clamp_float(value, default: float, min_value: float, max_value: float) -> float:
+    try:
+        number = float(value)
+    except Exception:
+        number = float(default)
     return max(min_value, min(max_value, number))
 
 
@@ -94,6 +104,8 @@ def _normalize_video_config(cfg: dict) -> None:
         Metrics.MEME_DIALOG_MIN_HEIGHT,
         1600,
     )
+    cfg["zoom_lens_size"] = _clamp_int(cfg.get("zoom_lens_size"), 90, 60, 260)
+    cfg["zoom_lens_factor"] = _clamp_float(cfg.get("zoom_lens_factor"), 2.0, 1.2, 8.0)
 
 def load_config() -> dict:
     cfg = copy.deepcopy(DEFAULT_CONFIG)

@@ -283,6 +283,31 @@ def make_icon_select() -> QIcon:
     p.end()
     return QIcon(pm)
 
+def make_icon_zoom_lens() -> QIcon:
+    pm = _base_pixmap()
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+
+    # Lens body
+    lens_rect = QRectF(7, 7, 20, 20)
+    fill = QColor(ModernColors.PRIMARY)
+    fill.setAlpha(35)
+    p.setBrush(fill)
+    p.setPen(QPen(QColor(ModernColors.TEXT_SECONDARY), 2.5))
+    p.drawEllipse(lens_rect)
+
+    # Highlight ring
+    p.setBrush(Qt.NoBrush)
+    p.setPen(QPen(QColor(ModernColors.PRIMARY), 1.8))
+    p.drawEllipse(QRectF(10, 10, 14, 14))
+
+    # Handle
+    p.setPen(QPen(QColor(ModernColors.TEXT_SECONDARY), 3, Qt.SolidLine, Qt.RoundCap))
+    p.drawLine(24, 24, 33, 33)
+
+    p.end()
+    return QIcon(pm)
+
 def make_icon_memes() -> QIcon:
     pm = _base_pixmap()
     p = QPainter(pm)

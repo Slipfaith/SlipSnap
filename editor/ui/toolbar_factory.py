@@ -2,7 +2,7 @@ from typing import Dict
 
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QAction, QKeySequence, QColor, QActionGroup
-from PySide6.QtWidgets import QToolBar, QToolButton, QMenu, QSlider, QLabel
+from PySide6.QtWidgets import QToolBar, QToolButton, QMenu, QSlider, QLabel, QSpinBox, QDoubleSpinBox
 
 from logic import save_config
 from icons import make_icon_video
@@ -26,6 +26,7 @@ from .icon_factory import (
     make_icon_blur,
     make_icon_eraser,
     make_icon_select,
+    make_icon_zoom_lens,
     make_icon_memes,
     # New icons for top toolbar
     make_icon_new,
@@ -310,6 +311,7 @@ def create_tools_toolbar(window, canvas):
         return btn
 
     add_tool("select", make_icon_select(), "Выделение", "V")
+    add_tool("zoom_lens", make_icon_zoom_lens(), "Лупа", "G")
     shape_btn = QToolButton()
     shape_btn.setIcon(make_icon_rect())
     shape_btn.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
@@ -470,6 +472,116 @@ def create_actions_toolbar(window, canvas):
         zoom_label.setText(f"{pct}%")
 
     canvas.zoomChanged.connect(_on_canvas_zoom_changed)
+
+    # Zoom lens controls (active only for the zoom_lens tool)
+    lens_size_label = QLabel("Лупа")
+    lens_size_label.setToolTip("Размер лупы")
+    lens_size_spin = QSpinBox()
+    lens_size_spin.setRange(60, 260)
+    lens_size_spin.setSingleStep(10)
+    lens_size_spin.setSuffix(" px")
+    lens_size_spin.setFixedWidth(82)
+    lens_size_spin.setToolTip("Диаметр лупы")
+
+    lens_factor_label = QLabel("x")
+    lens_factor_label.setToolTip("Кратность увеличения")
+    lens_factor_spin = QDoubleSpinBox()
+    lens_factor_spin.setDecimals(1)
+    lens_factor_spin.setRange(1.2, 8.0)
+    lens_factor_spin.setSingleStep(0.2)
+    lens_factor_spin.setSuffix("x")
+    lens_factor_spin.setFixedWidth(72)
+    lens_factor_spin.setToolTip("Увеличение лупы")
+
+    initial_size = canvas.zoom_lens_radius()
+    initial_factor = canvas.zoom_lens_factor()
+    if hasattr(window, "cfg") and isinstance(window.cfg, dict):
+        try:
+            initial_size = int(window.cfg.get("zoom_lens_size", initial_size))
+        except Exception:
+            initial_size = canvas.zoom_lens_radius()
+        try:
+            initial_factor = float(window.cfg.get("zoom_lens_factor", initial_factor))
+        except Exception:
+            initial_factor = canvas.zoom_lens_factor()
+
+    canvas.set_zoom_lens_radius(initial_size)
+    canvas.set_zoom_lens_factor(initial_factor)
+    lens_size_spin.setValue(canvas.zoom_lens_radius())
+    lens_factor_spin.setValue(canvas.zoom_lens_factor())
+
+    def _persist_lens_value(key: str, value) -> None:
+        cfg = getattr(window, "cfg", None)
+        if not isinstance(cfg, dict):
+            return
+        cfg[key] = value
+        save_config(cfg)
+
+    def _on_lens_size_changed(value: int) -> None:
+        canvas.set_zoom_lens_radius(value)
+        _persist_lens_value("zoom_lens_size", canvas.zoom_lens_radius())
+
+    def _on_lens_factor_changed(value: float) -> None:
+        canvas.set_zoom_lens_factor(value)
+        _persist_lens_value("zoom_lens_factor", round(canvas.zoom_lens_factor(), 2))
+
+    lens_size_spin.valueChanged.connect(_on_lens_size_changed)
+    lens_factor_spin.valueChanged.connect(_on_lens_factor_changed)
+
+    lens_widgets = [lens_size_label, lens_size_spin, lens_factor_label, lens_factor_spin]
+    for widget in lens_widgets:
+        tb.addWidget(widget)
+
+    def _first_selected_lens():
+        scene = getattr(canvas, "scene", None)
+        if scene is None:
+            return None
+        try:
+            selected_items = list(scene.selectedItems())
+        except RuntimeError:
+            return None
+        for item in selected_items:
+            try:
+                if str(item.data(0)).lower() == "zoom_lens":
+                    return item
+            except RuntimeError:
+                continue
+        return None
+
+    def _sync_lens_values() -> None:
+        selected_lens = _first_selected_lens()
+        if selected_lens is not None and hasattr(selected_lens, "radius_px") and hasattr(selected_lens, "zoom_factor"):
+            try:
+                size = int(selected_lens.radius_px())
+            except Exception:
+                size = canvas.zoom_lens_radius()
+            try:
+                factor = float(selected_lens.zoom_factor())
+            except Exception:
+                factor = canvas.zoom_lens_factor()
+        else:
+            size = canvas.zoom_lens_radius()
+            factor = canvas.zoom_lens_factor()
+
+        lens_size_spin.blockSignals(True)
+        lens_factor_spin.blockSignals(True)
+        lens_size_spin.setValue(size)
+        lens_factor_spin.setValue(factor)
+        lens_size_spin.blockSignals(False)
+        lens_factor_spin.blockSignals(False)
+
+    def _sync_lens_controls(*_args) -> None:
+        try:
+            visible = getattr(canvas, "_tool", "select") == "zoom_lens" or _first_selected_lens() is not None
+            for widget in lens_widgets:
+                widget.setVisible(visible)
+            _sync_lens_values()
+        except RuntimeError:
+            return
+
+    canvas.toolChanged.connect(_sync_lens_controls)
+    canvas.scene.selectionChanged.connect(_sync_lens_controls)
+    _sync_lens_controls()
     tb.addSeparator()
 
     add_action("new", "Новый снимок", window.new_screenshot, sc="Ctrl+N", icon=make_icon_new(), show_text=False)
