@@ -5,7 +5,7 @@ AppPublisher=slipfaith
 DefaultDirName={pf}\SlipSnap
 DefaultGroupName=SlipSnap
 UninstallDisplayIcon={app}\SlipSnap.exe
-OutputDir=E:\PythonProjects\SlipSnap\installer
+OutputDir={#SourcePath}\installer
 OutputBaseFilename=SlipSnap_Setup
 Compression=lzma
 SolidCompression=yes
@@ -18,10 +18,10 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
 ; Файлы программы SlipSnap
-Source: "E:\PythonProjects\SlipSnap\dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SourcePath}\dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; Инсталлятор Tesseract (лежит рядом с этим .iss)
-Source: "tesseract-ocr-w64-setup-5.5.0.2024.exe"; DestDir: "{tmp}"
+Source: "{#SourcePath}\tesseract-ocr-w64-setup-5.5.0.2024.exe"; DestDir: "{tmp}"
 
 [Icons]
 Name: "{autoprograms}\SlipSnap"; Filename: "{app}\SlipSnap.exe"; IconFilename: "{app}\SlipSnap.ico"

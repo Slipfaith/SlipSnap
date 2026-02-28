@@ -130,3 +130,33 @@ def make_icon_series(size: int = Metrics.ICON_SMALL) -> QIcon:
     p.drawLine(size // 2 - 3, size - m - 2, size // 2 + 4, size - m - 2)
     p.end()
     return QIcon(pm)
+
+
+def make_icon_video(size: int = Metrics.ICON_SMALL) -> QIcon:
+    """Камера — «Записать видео»."""
+    pm = _pm(size)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+    body = QColor(*Palette.ICON_BASE)
+    accent = QColor(*Palette.ICON_POSITIVE)
+    m = Metrics.ICON_MARGIN_SMALL
+    body_w = size - (2 * m) - 6
+    body_h = max(8, size - (2 * m) - 4)
+    body_y = (size - body_h) // 2
+    p.setPen(QPen(body, 2))
+    p.drawRoundedRect(m, body_y, body_w, body_h, 4, 4)
+    # "Lens" triangle
+    lens_x = m + body_w + 1
+    p.setPen(QPen(body, 2))
+    p.drawLine(lens_x, body_y + 3, size - m, body_y + 1)
+    p.drawLine(lens_x, body_y + body_h - 3, size - m, body_y + body_h - 1)
+    p.drawLine(size - m, body_y + 1, size - m, body_y + body_h - 1)
+    # Recording dot
+    dot_r = 2
+    dot_x = m + body_w // 2 - dot_r
+    dot_y = body_y + body_h // 2 - dot_r
+    p.setPen(Qt.NoPen)
+    p.setBrush(accent)
+    p.drawEllipse(dot_x, dot_y, dot_r * 2 + 1, dot_r * 2 + 1)
+    p.end()
+    return QIcon(pm)

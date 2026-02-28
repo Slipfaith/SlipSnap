@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import shutil
+import time
 import uuid
 from pathlib import Path
 from typing import Iterable, List, Optional
@@ -16,6 +18,8 @@ except AttributeError:  # pragma: no cover - fallback for older Pillow
     _RESAMPLE = Image.LANCZOS  # type: ignore[attr-defined]
 
 MAX_MEME_SIZE = 512
+STATIC_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+MEME_EXTENSIONS = STATIC_IMAGE_EXTENSIONS | {".gif"}
 
 
 def ensure_meme_dir() -> Path:
@@ -51,6 +55,16 @@ def _prepare_image(image: Image.Image) -> Image.Image:
     return image
 
 
+def _unique_target(stem: str, extension: str) -> Path:
+    normalized_ext = extension if extension.startswith(".") else f".{extension}"
+    candidate = MEME_DIR / f"{stem}{normalized_ext}"
+    counter = 1
+    while candidate.exists():
+        candidate = MEME_DIR / f"{stem}_{counter}{normalized_ext}"
+        counter += 1
+    return candidate
+
+
 def save_meme_image(image: Image.Image, *, stem: Optional[str] = None) -> Path:
     """Save ``image`` into the meme directory, ensuring constraints."""
 
@@ -58,13 +72,36 @@ def save_meme_image(image: Image.Image, *, stem: Optional[str] = None) -> Path:
     prepared = _prepare_image(image)
 
     base_name = _normalize_name(stem) or f"meme_{uuid.uuid4().hex}"
-    candidate = MEME_DIR / f"{base_name}.png"
-    counter = 1
-    while candidate.exists():
-        candidate = MEME_DIR / f"{base_name}_{counter}.png"
-        counter += 1
+    candidate = _unique_target(base_name, ".png")
 
     prepared.save(candidate, format="PNG")
+    return candidate
+
+
+def save_meme_gif(path: Path, *, stem: Optional[str] = None) -> Path:
+    """Copy GIF to meme library without re-encoding to keep animation."""
+
+    ensure_meme_dir()
+    source = Path(path)
+    if not source.exists():
+        raise RuntimeError(f"GIF файл не найден: {source}")
+    if source.suffix.lower() != ".gif":
+        raise RuntimeError(f"Ожидался GIF файл, получено: {source.suffix}")
+
+    # Validate that file is an actual GIF before copying.
+    try:
+        with Image.open(source) as img:
+            if str(getattr(img, "format", "")).upper() != "GIF":
+                raise RuntimeError("Файл имеет расширение .gif, но формат не GIF.")
+    except Exception as exc:
+        raise RuntimeError(f"Не удалось прочитать GIF '{source}': {exc}") from exc
+
+    base_name = _normalize_name(stem) or f"meme_{uuid.uuid4().hex}"
+    candidate = _unique_target(base_name, ".gif")
+    try:
+        shutil.copy2(source, candidate)
+    except Exception as exc:
+        raise RuntimeError(f"Не удалось сохранить GIF в библиотеку: {exc}") from exc
     return candidate
 
 
@@ -73,6 +110,15 @@ def add_memes_from_paths(paths: Iterable[Path]) -> List[Path]:
 
     saved: List[Path] = []
     for path in paths:
+        suffix = path.suffix.lower()
+        if suffix == ".gif":
+            try:
+                saved.append(save_meme_gif(path, stem=path.stem))
+            except Exception as exc:
+                raise RuntimeError(f"Не удалось добавить GIF '{path}': {exc}") from exc
+            continue
+        if suffix not in STATIC_IMAGE_EXTENSIONS:
+            raise RuntimeError(f"Неподдерживаемый формат файла: '{path.suffix}'")
         try:
             with Image.open(path) as img:
                 saved.append(save_meme_image(img, stem=path.stem))
@@ -85,18 +131,37 @@ def list_memes() -> List[Path]:
     """Return meme files sorted by modification time (newest first)."""
 
     ensure_meme_dir()
-    files = sorted(MEME_DIR.glob("*.png"), key=lambda p: p.stat().st_mtime, reverse=True)
+    files = sorted(
+        [p for p in MEME_DIR.iterdir() if p.is_file() and p.suffix.lower() in MEME_EXTENSIONS],
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
     return files
 
 
 def delete_memes(paths: Iterable[Path]) -> None:
     """Remove provided meme files from the stash."""
 
-    for path in paths:
-        if path.parent != MEME_DIR:
-            continue
-        try:
-            path.unlink(missing_ok=True)
-        except Exception:
-            pass
+    try:
+        meme_dir_resolved = MEME_DIR.resolve()
+    except Exception:
+        meme_dir_resolved = MEME_DIR
 
+    for path in paths:
+        candidate = Path(path)
+        try:
+            parent_resolved = candidate.resolve().parent
+        except Exception:
+            parent_resolved = candidate.parent
+        if parent_resolved != meme_dir_resolved and candidate.parent != MEME_DIR:
+            continue
+        for attempt in range(3):
+            try:
+                candidate.unlink(missing_ok=True)
+                break
+            except PermissionError:
+                if attempt >= 2:
+                    break
+                time.sleep(0.04)
+            except Exception:
+                break

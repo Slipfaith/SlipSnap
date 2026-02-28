@@ -23,6 +23,7 @@ from PySide6.QtGui import (
     QPen,
     QColor,
     QImage,
+    QMovie,
     QUndoStack,
     QLinearGradient,
     QBrush,
@@ -44,7 +45,7 @@ from PySide6.QtWidgets import (
     QGraphicsDropShadowEffect,
     QApplication,
 )
-from PIL import Image
+from PIL import Image, ImageSequence
 
 from .styles import ModernColors
 from .high_quality_pixmap_item import HighQualityPixmapItem
@@ -269,18 +270,33 @@ class Canvas(QGraphicsView):
             return self.export_selection()
         return self.export_image()
 
+    def has_gif_content(self) -> bool:
+        for item in self.scene.items():
+            if str(item.data(1)).lower() == "gif":
+                return True
+        return False
+
+    def _effective_drag_extension(self) -> str:
+        return ".gif" if self.has_gif_content() else ".png"
+
     def _next_drag_filename(self) -> str:
         win = self.window()
         logic = getattr(win, "logic", None)
         target_dir = self._detect_external_drop_directory()
+        extension = self._effective_drag_extension()
         if logic and hasattr(logic, "next_snap_filename"):
             if target_dir is not None and hasattr(logic, "next_snap_filename_for_directory"):
                 try:
+                    return logic.next_snap_filename_for_directory(target_dir, extension=extension)
+                except TypeError:
                     return logic.next_snap_filename_for_directory(target_dir)
                 except Exception:
                     pass
-            return logic.next_snap_filename()
-        return "snap_01.png"
+            try:
+                return logic.next_snap_filename(extension=extension)
+            except TypeError:
+                return logic.next_snap_filename()
+        return f"snap_01{extension}"
 
     def _detect_external_drop_directory(self) -> Optional[Path]:
         """Best-effort detection of Explorer folder under cursor on Windows."""
@@ -337,9 +353,6 @@ class Canvas(QGraphicsView):
         return None
 
     def _start_external_drag(self) -> None:
-        image = self._export_drag_image()
-        if image is None:
-            return
         if self._move_snapshot:
             for item, pos in self._move_snapshot.items():
                 item.setPos(pos)
@@ -347,10 +360,23 @@ class Canvas(QGraphicsView):
         filename = self._next_drag_filename()
         drag_dir = Path(tempfile.mkdtemp(prefix="slipsnap_drag_"))
         self._drag_temp_dirs.append(drag_dir)
+        use_gif = self._effective_drag_extension() == ".gif"
         target = drag_dir / filename
-        if image.mode != "RGBA":
-            image = image.convert("RGBA")
-        image.save(target, format="PNG")
+        target = target.with_suffix(".gif" if use_gif else ".png")
+        if use_gif:
+            saved = self.save_animated_gif(target, selected_only=bool(self.scene.selectedItems()))
+            if not saved:
+                image = self._export_drag_image()
+                if image is None:
+                    return
+                image.save(target, format="GIF")
+        else:
+            image = self._export_drag_image()
+            if image is None:
+                return
+            if image.mode != "RGBA":
+                image = image.convert("RGBA")
+            image.save(target, format="PNG")
         mime = QMimeData()
         mime.setUrls([QUrl.fromLocalFile(str(target))])
         drag = QDrag(self.viewport())
@@ -563,6 +589,241 @@ class Canvas(QGraphicsView):
                 return item
         return None
 
+    def _expanded_item_set(self, items) -> set[QGraphicsItem]:
+        allowed_items: set[QGraphicsItem] = set()
+        for item in items:
+            if item in allowed_items:
+                continue
+            allowed_items.add(item)
+            parent = item.parentItem()
+            while parent is not None:
+                if parent in allowed_items:
+                    break
+                allowed_items.add(parent)
+                parent = parent.parentItem()
+            stack = list(item.childItems())
+            while stack:
+                child = stack.pop()
+                if child in allowed_items:
+                    continue
+                allowed_items.add(child)
+                stack.extend(child.childItems())
+        return allowed_items
+
+    def _resolve_export_rect(self, selected_only: bool = False) -> tuple[QRectF, Optional[list[QGraphicsItem]]]:
+        if selected_only:
+            selected = [it for it in self.scene.selectedItems()]
+            if selected:
+                rect = selected[0].sceneBoundingRect()
+                for it in selected[1:]:
+                    rect = rect.united(it.sceneBoundingRect())
+                return rect, selected
+        return self.scene.itemsBoundingRect(), None
+
+    def _gif_source_path(self, item: QGraphicsItem) -> Optional[Path]:
+        getter = getattr(item, "source_path", None)
+        if callable(getter):
+            try:
+                source = getter()
+                if source:
+                    return Path(source)
+            except Exception:
+                pass
+        raw_path = item.data(2)
+        if raw_path:
+            try:
+                return Path(str(raw_path))
+            except Exception:
+                return None
+        return None
+
+    def _load_gif_durations_ms(self, path: Path) -> list[int]:
+        durations: list[int] = []
+        try:
+            with Image.open(path) as gif:
+                global_duration = gif.info.get("duration", 100)
+                for frame in ImageSequence.Iterator(gif):
+                    raw = frame.info.get("duration", global_duration)
+                    try:
+                        value = int(raw)
+                    except Exception:
+                        value = 100
+                    if value <= 0:
+                        value = 100
+                    durations.append(max(20, value))
+        except Exception:
+            pass
+        if not durations:
+            durations = [100]
+        return durations
+
+    def _relevant_gif_sources(self, only_items=None) -> list[dict]:
+        allowed = self._expanded_item_set(only_items) if only_items is not None else None
+        sources: list[dict] = []
+        for item in self.scene.items():
+            if str(item.data(1)).lower() != "gif":
+                continue
+            if allowed is not None and item not in allowed:
+                continue
+            if not item.isVisible():
+                continue
+            movie = getattr(item, "_movie", None)
+            if movie is None:
+                continue
+            source_path = self._gif_source_path(item)
+            if source_path is not None and source_path.is_file():
+                durations = self._load_gif_durations_ms(source_path)
+            else:
+                durations = [100]
+            cumulative: list[int] = []
+            total = 0
+            for delay in durations:
+                total += int(delay)
+                cumulative.append(total)
+            if not cumulative:
+                cumulative = [100]
+                total = 100
+            sources.append(
+                {
+                    "item": item,
+                    "movie": movie,
+                    "durations_ms": durations,
+                    "cumulative_ms": cumulative,
+                    "cycle_ms": max(1, total),
+                }
+            )
+        return sources
+
+    def _frame_index_for_time(self, source: dict, time_ms: int) -> int:
+        cumulative = source["cumulative_ms"]
+        if len(cumulative) <= 1:
+            return 0
+        cycle_ms = max(1, int(source["cycle_ms"]))
+        t_mod = int(time_ms) % cycle_ms
+        for idx, edge in enumerate(cumulative):
+            if t_mod < edge:
+                return idx
+        return len(cumulative) - 1
+
+    def _build_animation_schedule(self, sources: list[dict], max_frames: int = 180) -> tuple[list[int], list[int]]:
+        if not sources:
+            return [0], [100]
+        output_ms = max(int(src["cycle_ms"]) for src in sources)
+        output_ms = max(100, output_ms)
+        boundaries = {0, output_ms}
+        for src in sources:
+            durations = [int(v) for v in src["durations_ms"]]
+            if not durations:
+                continue
+            elapsed = 0
+            while elapsed < output_ms:
+                for delay in durations:
+                    elapsed += max(20, delay)
+                    if elapsed >= output_ms:
+                        boundaries.add(output_ms)
+                        break
+                    boundaries.add(elapsed)
+                if elapsed >= output_ms:
+                    break
+
+        marks = sorted(boundaries)
+        if len(marks) < 2:
+            marks = [0, output_ms]
+        if len(marks) - 1 > max_frames:
+            step = float(output_ms) / float(max_frames)
+            sampled = {0, output_ms}
+            for i in range(1, max_frames):
+                sampled.add(int(round(i * step)))
+            marks = sorted(sampled)
+
+        start_times: list[int] = []
+        durations: list[int] = []
+        for left, right in zip(marks[:-1], marks[1:]):
+            if right <= left:
+                continue
+            start_times.append(left)
+            durations.append(max(20, right - left))
+        if not start_times:
+            start_times = [0]
+            durations = [100]
+        return start_times, durations
+
+    def save_animated_gif(self, target_path: Path | str, selected_only: bool = False) -> bool:
+        target = Path(target_path).with_suffix(".gif")
+        rect, only_items = self._resolve_export_rect(selected_only=selected_only)
+        sources = self._relevant_gif_sources(only_items)
+        if not sources:
+            return False
+
+        selected = [it for it in self.scene.selectedItems()]
+        focus_item = self.scene.focusItem()
+        for it in selected:
+            it.setSelected(False)
+
+        movie_states = []
+        frames: list[Image.Image] = []
+        try:
+            for source in sources:
+                movie = source["movie"]
+                state = movie.state()
+                frame_no = movie.currentFrameNumber()
+                movie_states.append((movie, state, frame_no))
+                try:
+                    movie.setPaused(True)
+                except Exception:
+                    pass
+
+            start_times, frame_delays = self._build_animation_schedule(sources)
+            for time_ms in start_times:
+                for source in sources:
+                    movie = source["movie"]
+                    frame_idx = self._frame_index_for_time(source, time_ms)
+                    try:
+                        movie.jumpToFrame(frame_idx)
+                    except Exception:
+                        pass
+                qimg, _, _ = self._render_rect_to_qimage(rect, only_items)
+                frame = qimage_to_pil(qimg)
+                if frame.mode != "RGBA":
+                    frame = frame.convert("RGBA")
+                frames.append(frame)
+
+            if not frames:
+                return False
+            target.parent.mkdir(parents=True, exist_ok=True)
+            frames[0].save(
+                target,
+                format="GIF",
+                save_all=True,
+                append_images=frames[1:],
+                duration=frame_delays,
+                loop=0,
+                disposal=2,
+            )
+            return True
+        except Exception:
+            return False
+        finally:
+            for movie, state, frame_no in movie_states:
+                try:
+                    if frame_no >= 0:
+                        movie.jumpToFrame(frame_no)
+                except Exception:
+                    pass
+                try:
+                    if state == QMovie.Running:
+                        movie.setPaused(False)
+                    elif state == QMovie.Paused:
+                        movie.setPaused(True)
+                    else:
+                        movie.stop()
+                except Exception:
+                    pass
+            for it in selected:
+                it.setSelected(True)
+            if focus_item:
+                focus_item.setFocus()
+
     def _render_rect_to_qimage(self, rect: QRectF, only_items=None):
         dpr = getattr(self.window().windowHandle(), "devicePixelRatio", lambda: 1.0)()
         try:
@@ -576,24 +837,7 @@ class Canvas(QGraphicsView):
         img.fill(Qt.transparent)
         hidden = []
         if only_items is not None:
-            allowed_items = set()
-            for item in only_items:
-                if item in allowed_items:
-                    continue
-                allowed_items.add(item)
-                parent = item.parentItem()
-                while parent is not None:
-                    if parent in allowed_items:
-                        break
-                    allowed_items.add(parent)
-                    parent = parent.parentItem()
-                stack = list(item.childItems())
-                while stack:
-                    child = stack.pop()
-                    if child in allowed_items:
-                        continue
-                    allowed_items.add(child)
-                    stack.extend(child.childItems())
+            allowed_items = self._expanded_item_set(only_items)
             for it in self.scene.items():
                 if it not in allowed_items:
                     hidden.append((it, it.isVisible()))

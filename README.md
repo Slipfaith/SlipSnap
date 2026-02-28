@@ -11,6 +11,7 @@
 - **История снимков** — до 10 последних скриншотов с функцией создания коллажей
 - **Настройка** — кастомные горячие клавиши и автосохранение параметров
 - **Серийная съёмка** — автоматическое сохранение последовательных кадров в выбранную папку
+- **Видео-захват 5-10 сек** — запись выбранной области с экспортом в MP4 или GIF
 - **Библиотека мемов** — быстрый доступ к заготовленным наклейкам и их вставка в редактор
 - **Мониторинг ресурсов** — фоновый сбор статистики CPU/GPU/памяти и сохранение отчётов
 
@@ -19,6 +20,7 @@
 ### Требования
 - Python 3.8+
 - PySide6
+- FFmpeg (должен быть доступен в `PATH` для видео-захвата MP4/GIF)
 
 ### Установка
 ```bash
@@ -46,8 +48,9 @@ python main.py
 
 ### Рабочий процесс
 
-1. **Лончер** — плавающее окно поверх всех приложений с четырьмя кнопками:
+1. **Лончер** — плавающее окно поверх всех приложений с кнопками:
    - «Снимок» — запуск захвата экрана
+   - «Видео» — запись короткого клипа 5-10 секунд
    - «Квадрат/Круг» — переключение формы выделения
    - Настройка горячей клавиши
    - «Закрыть» — выход из приложения
@@ -62,6 +65,16 @@ python main.py
    - Экспорт и история
 
 4. **История** — автоматическое сохранение во временную папку. Команда «История» (`Ctrl+K`) позволяет выбрать несколько снимков и объединить их в коллаж.
+
+### Видео-захват (5-10 сек)
+
+1. Нажмите кнопку **«Видео»** в лончере.
+2. Выделите область экрана.
+3. Приложение записывает клип длительностью `video_duration_sec` (по умолчанию 6 сек, диапазон 5-10).
+4. Нажмите `Esc`, чтобы отменить запись во время процесса.
+5. После записи выберите формат сохранения: `MP4` или `GIF`.
+
+Если FFmpeg недоступен, приложение покажет сообщение с предложением повторить проверку после установки.
 
 ### Серийная съёмка
 
@@ -132,6 +145,8 @@ slipsnap/
 ├── main.py              # Точка входа
 ├── gui.py               # Интерфейс (лончер, оверлеи)
 ├── logic.py             # Конфигурация, история, захват
+├── video_capture.py     # Контроллер видео-захвата области
+├── video_encoding.py    # Кодирование MP4/GIF через ffmpeg
 ├── clipboard_utils.py   # Работа с буфером обмена
 └── editor/              # Модуль редактора
     ├── editor_window.py # Главное окно редактора
@@ -157,7 +172,17 @@ slipsnap/
 - `Launcher` — компактное окно управления
 - `OverlayManager` — координация оверлеев для разных мониторов
 - `ScreenOverlay` / `VirtualOverlay` — затемнение и выделение области
-- `App` — главный контроллер с регистрацией горячих клавиш
+- `App` — главный контроллер с регистрацией горячих клавиш и запуском видео-захвата
+
+**video_capture.py**
+- Выбор области под запись
+- Захват кадров 5-10 секунд с отменой по `Esc`
+- Диалог сохранения и экспорт в `MP4`/`GIF`
+
+**video_encoding.py**
+- Проверка доступности `ffmpeg`
+- Потоковая запись временного `MP4`
+- Конвертация `MP4 -> GIF`
 
 **clipboard_utils.py**
 - Конвертация в PNG/DIB
@@ -177,6 +202,11 @@ slipsnap/
 - **Горячая клавиша** — строка формата Qt (настраивается через лончер)
 - **Толщина пера** — сохраняется между сеансами
 - **Размер шрифта** — запоминается автоматически
+- **Видео (новое)**:
+  - `video_duration_sec` — длительность записи (жестко 5..10)
+  - `video_fps` — FPS записи (10..24)
+  - `video_default_format` — формат по умолчанию (`mp4`/`gif`)
+  - `video_last_save_directory` — последняя папка сохранения видео
 
 ### Хранение данных
 
@@ -191,3 +221,38 @@ slipsnap/
 - mss — захват экрана
 - Pillow — обработка изображений
 - pyqtkeybind — глобальные горячие клавиши
+
+## Build With Bundled FFmpeg
+
+1. Put `ffmpeg.exe` into one of these locations in the repo root:
+   - `ffmpeg.exe`
+   - `ffmpeg/ffmpeg.exe`
+   - `bin/ffmpeg.exe`
+2. Build the executable:
+   - `pyinstaller SlipSnap.spec`
+3. Build the installer (Inno Setup):
+   - `ISCC SlipSnap.iss`
+
+Notes:
+- `SlipSnap.spec` auto-detects `ffmpeg.exe` and bundles it into `SlipSnap.exe`.
+- `SlipSnap.iss` packs `dist\*` from the current project folder (relative paths).
+- Runtime FFmpeg discovery checks bundled locations first (`sys._MEIPASS` / рядом с `.exe`) and then `PATH`.
+
+## GIF Workflow Notes (2026-02-28)
+
+- Video save dialog now includes format choice (`MP4` / `GIF`) and GIF-only option "Add to meme library".
+- No delayed post-save popup is shown after GIF export; the library decision is made at save time.
+- Copying a GIF from meme library writes multiple clipboard formats:
+  - `application/x-slipsnap-meme` with GIF path metadata,
+  - `text/uri-list` with local file URL,
+  - `image/gif` raw bytes (when available).
+- Paste pipeline in editor is GIF-first:
+  - It checks GIF MIME/custom MIME first and inserts animated GIF item.
+  - It falls back to static image insertion only when GIF payload is not available.
+- Meme library UI:
+  - GIF thumbnails are animated.
+  - GIF cards include a `GIF` badge.
+  - Broken GIF files show a visible fallback preview.
+- Current export behavior:
+  - Saving editor canvas to image remains static; GIF items are rendered as their current frame in exported image.
+- Manual QA сценарии: `gif_manual_test_checklist.md`.

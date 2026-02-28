@@ -5,6 +5,7 @@ from PySide6.QtGui import QAction, QKeySequence, QColor, QActionGroup
 from PySide6.QtWidgets import QToolBar, QToolButton, QMenu, QSlider, QLabel
 
 from logic import save_config
+from icons import make_icon_video
 
 from design_tokens import Metrics
 
@@ -474,6 +475,8 @@ def create_actions_toolbar(window, canvas):
     add_action("new", "Новый снимок", window.new_screenshot, sc="Ctrl+N", icon=make_icon_new(), show_text=False)
     if hasattr(window, "request_series_capture"):
         add_action("series", "Серия скриншотов", window.request_series_capture, icon=make_icon_series(), show_text=False)
+    if hasattr(window, "request_video_capture"):
+        add_action("video", "Записать видео", window.request_video_capture, icon=make_icon_video(), show_text=False)
     add_action("collage", "История", window.open_collage, sc="Ctrl+K", icon=make_icon_collage(), show_text=False)
     add_action(
         "ocr",

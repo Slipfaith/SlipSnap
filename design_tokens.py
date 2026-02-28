@@ -72,23 +72,23 @@ class Palette:
     ICON_SERIES_COUNTER: Tuple[int, int, int] = (255, 255, 255)
 
     # Meme dialog palette
-    MEME_BACKGROUND: str = "#ffffff"
-    MEME_FOREGROUND: str = "#1a1a1a"
-    MEME_LIST_BORDER: str = "#e5e5e5"
-    MEME_LIST_BACKGROUND: str = "#fafafa"
-    MEME_ITEM_BORDER: str = "#f0f0f0"
-    MEME_ITEM_HOVER: str = "#f5f5f5"
-    MEME_ITEM_SELECTED_BG: str = "#e3f2fd"
-    MEME_ITEM_SELECTED_BORDER: str = "#2196f3"
-    MEME_BUTTON_PRIMARY: str = "#2196f3"
-    MEME_BUTTON_PRIMARY_HOVER: str = "#1976d2"
-    MEME_BUTTON_PRIMARY_PRESSED: str = "#1565c0"
-    MEME_BUTTON_DISABLED_BG: str = "#e0e0e0"
-    MEME_BUTTON_DISABLED_TEXT: str = "#9e9e9e"
-    MEME_BUTTON_REMOVE: str = "#f44336"
-    MEME_BUTTON_REMOVE_HOVER: str = "#d32f2f"
-    MEME_BUTTON_REMOVE_PRESSED: str = "#c62828"
-    MEME_EMPTY_TEXT: str = "#757575"
+    MEME_BACKGROUND: str = "#0f141a"
+    MEME_FOREGROUND: str = "#e6edf4"
+    MEME_LIST_BORDER: str = "#27313d"
+    MEME_LIST_BACKGROUND: str = "#131a22"
+    MEME_ITEM_BORDER: str = "#2a3542"
+    MEME_ITEM_HOVER: str = "#1b2530"
+    MEME_ITEM_SELECTED_BG: str = "#223243"
+    MEME_ITEM_SELECTED_BORDER: str = "#7f9bb8"
+    MEME_BUTTON_PRIMARY: str = "#3b4e63"
+    MEME_BUTTON_PRIMARY_HOVER: str = "#465c73"
+    MEME_BUTTON_PRIMARY_PRESSED: str = "#324558"
+    MEME_BUTTON_DISABLED_BG: str = "#202b36"
+    MEME_BUTTON_DISABLED_TEXT: str = "#6f7f90"
+    MEME_BUTTON_REMOVE: str = "#7b4a53"
+    MEME_BUTTON_REMOVE_HOVER: str = "#8f5862"
+    MEME_BUTTON_REMOVE_PRESSED: str = "#6f424b"
+    MEME_EMPTY_TEXT: str = "#8ea1b3"
 
 
 @dataclass(frozen=True)
@@ -133,7 +133,7 @@ class Metrics:
     ICON_MARGIN_SERIES: int = 6
     ICON_SERIES_OFFSET: int = 4
 
-    LAUNCHER_WIDTH: int = 260
+    LAUNCHER_WIDTH: int = 330
     LAUNCHER_HEIGHT: int = 85
     LAUNCHER_ICON: int = 20
     LAUNCHER_MARGIN: Tuple[int, int, int, int] = (16, 12, 16, 14)
@@ -150,14 +150,14 @@ class Metrics:
     PENCIL_WIDTH: int = 3
     MARKER_WIDTH: int = 15
 
-    MEME_DIALOG_MIN_WIDTH: int = 420
-    MEME_DIALOG_MIN_HEIGHT: int = 480
+    MEME_DIALOG_MIN_WIDTH: int = 520
+    MEME_DIALOG_MIN_HEIGHT: int = 560
     MEME_DIALOG_MARGIN: int = 16
     MEME_DIALOG_SPACING: int = 12
-    MEME_LIST_ICON: int = 80
-    MEME_LIST_GRID: Tuple[int, int] = (96, 106)
+    MEME_LIST_ICON: int = 92
+    MEME_LIST_GRID: Tuple[int, int] = (112, 126)
     MEME_LIST_SPACING: int = 8
-    MEME_BUTTON_SIZE: int = 36
+    MEME_BUTTON_SIZE: int = 34
     MEME_EMPTY_PADDING: Tuple[int, int] = (30, 20)
     MEME_ITEM_EXTRA_SIZE: Tuple[int, int] = (16, 26)
     TEXT_RESIZE_HANDLE: int = 16
@@ -456,16 +456,54 @@ def meme_dialog_stylesheet() -> str:
             color: {Palette.MEME_FOREGROUND};
         }}
 
+        QLabel#titleLabel {{
+            font-size: 20px;
+            font-weight: 700;
+            color: {Palette.MEME_FOREGROUND};
+            letter-spacing: 0.3px;
+        }}
+
+        QLabel#subtitleLabel {{
+            color: {Palette.MEME_EMPTY_TEXT};
+            font-size: 12px;
+            margin-top: 1px;
+        }}
+
+        QLabel#statsLabel {{
+            color: {Palette.MEME_EMPTY_TEXT};
+            font-size: 13px;
+            font-weight: 600;
+            padding: 6px 10px;
+            border: 1px solid {Palette.MEME_LIST_BORDER};
+            border-radius: 10px;
+            background: {Palette.MEME_LIST_BACKGROUND};
+            min-width: 62px;
+        }}
+
+        QLineEdit#searchEdit {{
+            border: 1px solid {Palette.MEME_LIST_BORDER};
+            border-radius: 10px;
+            padding: 8px 12px;
+            font-size: 13px;
+            background: {Palette.MEME_LIST_BACKGROUND};
+            color: {Palette.MEME_FOREGROUND};
+            selection-background-color: {Palette.MEME_ITEM_SELECTED_BORDER};
+        }}
+
+        QLineEdit#searchEdit:focus {{
+            border: 1px solid {Palette.MEME_ITEM_SELECTED_BORDER};
+        }}
+
         QListWidget {{
             border: 1px solid {Palette.MEME_LIST_BORDER};
-            border-radius: 8px;
+            border-radius: 12px;
             padding: 12px;
             background: {Palette.MEME_LIST_BACKGROUND};
             outline: none;
         }}
 
         QListWidget::item {{
-            border-radius: 8px;
+            border-radius: 10px;
             margin: 2px;
             padding: 6px;
             background: {Palette.MEME_BACKGROUND};
@@ -482,12 +520,35 @@ def meme_dialog_stylesheet() -> str:
             border: 1px solid {Palette.MEME_ITEM_SELECTED_BORDER};
         }}
 
+        QScrollBar:vertical {{
+            width: 12px;
+            margin: 4px;
+            background: transparent;
+        }}
+
+        QScrollBar::handle:vertical {{
+            background: {Palette.MEME_ITEM_BORDER};
+            min-height: 26px;
+            border-radius: 6px;
+        }}
+
+        QScrollBar::handle:vertical:hover {{
+            background: {Palette.MEME_ITEM_SELECTED_BORDER};
+        }}
+
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+            height: 0px;
+        }}
+
         QPushButton {{
             background: {Palette.MEME_BUTTON_PRIMARY};
             color: {Palette.OVERLAY_LABEL_TEXT};
             border: none;
-            border-radius: 6px;
-            font-size: {Typography.BUTTON_SIZE}px;
+            border-radius: 10px;
+            font-size: {Typography.SMALL_SIZE}px;
+            font-weight: 600;
+            padding: 5px 10px;
+            min-height: 30px;
         }}
 
         QPushButton:hover {{
@@ -503,8 +564,13 @@ def meme_dialog_stylesheet() -> str:
             color: {Palette.MEME_BUTTON_DISABLED_TEXT};
         }}
 
+        QPushButton#addButton {{
+            min-width: 84px;
+        }}
+
         QPushButton#removeButton {{
             background: {Palette.MEME_BUTTON_REMOVE};
+            min-width: 84px;
         }}
 
         QPushButton#removeButton:hover {{
@@ -520,9 +586,17 @@ def meme_dialog_stylesheet() -> str:
             color: {Palette.MEME_BUTTON_DISABLED_TEXT};
         }}
 
+        QPushButton#insertButton {{
+            min-width: 84px;
+        }}
+
+        QPushButton#openFolderButton {{
+            min-width: 84px;
+        }}
+
         QLabel#emptyLabel {{
             color: {Palette.MEME_EMPTY_TEXT};
-            font-size: 14px;
+            font-size: 15px;
             padding: {Metrics.MEME_EMPTY_PADDING[0]}px {Metrics.MEME_EMPTY_PADDING[1]}px;
         }}
     """

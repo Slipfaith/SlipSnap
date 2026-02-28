@@ -5,9 +5,12 @@ Qt добавляет слишком много лишних форматов - 
 from __future__ import annotations
 
 from io import BytesIO
+import json
+from pathlib import Path
 import sys
 
 from PIL import Image
+from PySide6.QtCore import QMimeData, QUrl
 from PySide6.QtGui import QImage, QGuiApplication
 
 try:
@@ -15,6 +18,8 @@ try:
     HAS_WIN32 = True
 except ImportError:
     HAS_WIN32 = False
+
+SLIPSNAP_MEME_MIME = "application/x-slipsnap-meme"
 
 
 def _set_qt_clipboard_image(qimg: QImage) -> bool:
@@ -62,6 +67,37 @@ def copy_pil_image_to_clipboard(img: Image.Image) -> QImage:
 
     _set_qt_clipboard_image(qimg)
     return qimg
+
+
+def copy_gif_file_to_clipboard(path: Path) -> bool:
+    """Copy GIF to clipboard preserving GIF payload for paste workflows."""
+
+    app = QGuiApplication.instance()
+    if app is None:
+        return False
+    clipboard = QGuiApplication.clipboard()
+    if clipboard is None:
+        return False
+
+    gif_path = Path(path)
+    if not gif_path.exists() or gif_path.suffix.lower() != ".gif":
+        return False
+
+    mime = QMimeData()
+    payload = {
+        "kind": "gif",
+        "path": str(gif_path),
+    }
+    mime.setData(SLIPSNAP_MEME_MIME, json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+    mime.setUrls([QUrl.fromLocalFile(str(gif_path))])
+    try:
+        gif_bytes = gif_path.read_bytes()
+        if gif_bytes:
+            mime.setData("image/gif", gif_bytes)
+    except Exception:
+        pass
+    clipboard.setMimeData(mime)
+    return True
 
 
 def _copy_png_win32(png_data: bytes) -> bool:
