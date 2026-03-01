@@ -359,8 +359,53 @@ def create_tools_toolbar(window, canvas):
     act_o.triggered.connect(lambda: _set_shape("ellipse"))
     window.addAction(act_o)
 
-    add_tool("line", make_icon_line(), "Линия", "L")
-    add_tool("arrow", make_icon_arrow(), "Стрелка", "A")
+    current_line_tool = "line"
+    line_btn = QToolButton()
+    line_btn.setIcon(make_icon_line())
+    line_btn.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
+    line_btn.setToolTip("Линия / Стрелка (L/A)")
+    line_btn.setCheckable(True)
+    line_btn.setAutoExclusive(True)
+    line_btn.setFixedSize(Metrics.TOOL_BUTTON, Metrics.TOOL_BUTTON)
+    line_btn.clicked.connect(lambda checked: canvas.set_tool(current_line_tool))
+    tools_tb.addWidget(line_btn)
+    tool_buttons.append(line_btn)
+
+    line_menu = QMenu(line_btn)
+    line_grp = QActionGroup(line_menu)
+    act_line = line_menu.addAction("Линия")
+    act_arrow = line_menu.addAction("Стрелка")
+    for act in (act_line, act_arrow):
+        act.setCheckable(True)
+        line_grp.addAction(act)
+    act_line.setChecked(True)
+
+    def _set_line_tool(tool: str):
+        nonlocal current_line_tool
+        current_line_tool = tool
+        canvas.set_tool(tool)
+        line_btn.setChecked(True)
+        line_btn.setIcon(make_icon_line() if tool == "line" else make_icon_arrow())
+        act_line.setChecked(tool == "line")
+        act_arrow.setChecked(tool == "arrow")
+
+    act_line.triggered.connect(lambda: _set_line_tool("line"))
+    act_arrow.triggered.connect(lambda: _set_line_tool("arrow"))
+
+    line_btn.setContextMenuPolicy(Qt.CustomContextMenu)
+    line_btn.customContextMenuRequested.connect(lambda pos: line_menu.exec(line_btn.mapToGlobal(pos)))
+
+    act_l = QAction(window)
+    act_l.setShortcut(QKeySequence("L"))
+    act_l.setShortcutContext(Qt.WindowShortcut)
+    act_l.triggered.connect(lambda: _set_line_tool("line"))
+    window.addAction(act_l)
+
+    act_a = QAction(window)
+    act_a.setShortcut(QKeySequence("A"))
+    act_a.setShortcutContext(Qt.WindowShortcut)
+    act_a.triggered.connect(lambda: _set_line_tool("arrow"))
+    window.addAction(act_a)
     free_btn = add_tool("free", make_icon_pencil(), "Карандаш", "P")
 
     menu = QMenu(free_btn)
@@ -529,10 +574,11 @@ def create_actions_toolbar(window, canvas):
     lens_factor_spin.valueChanged.connect(_on_lens_factor_changed)
 
     lens_widgets = [lens_size_label, lens_size_spin, lens_factor_label, lens_factor_spin]
+    lens_widget_actions = []
     for widget in lens_widgets:
-        tb.addWidget(widget)
+        lens_widget_actions.append(tb.addWidget(widget))
 
-    def _first_selected_lens():
+    def _single_selected_lens():
         scene = getattr(canvas, "scene", None)
         if scene is None:
             return None
@@ -540,16 +586,19 @@ def create_actions_toolbar(window, canvas):
             selected_items = list(scene.selectedItems())
         except RuntimeError:
             return None
+        lens_items = []
         for item in selected_items:
             try:
                 if str(item.data(0)).lower() == "zoom_lens":
-                    return item
+                    lens_items.append(item)
             except RuntimeError:
                 continue
+        if len(selected_items) == 1 and len(lens_items) == 1:
+            return lens_items[0]
         return None
 
     def _sync_lens_values() -> None:
-        selected_lens = _first_selected_lens()
+        selected_lens = _single_selected_lens()
         if selected_lens is not None and hasattr(selected_lens, "radius_px") and hasattr(selected_lens, "zoom_factor"):
             try:
                 size = int(selected_lens.radius_px())
@@ -572,9 +621,11 @@ def create_actions_toolbar(window, canvas):
 
     def _sync_lens_controls(*_args) -> None:
         try:
-            visible = getattr(canvas, "_tool", "select") == "zoom_lens" or _first_selected_lens() is not None
+            visible = getattr(canvas, "_tool", "select") == "zoom_lens" or _single_selected_lens() is not None
             for widget in lens_widgets:
                 widget.setVisible(visible)
+            for action in lens_widget_actions:
+                action.setVisible(visible)
             _sync_lens_values()
         except RuntimeError:
             return

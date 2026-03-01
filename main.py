@@ -24,7 +24,7 @@ def main():
             "SlipSnap уже запущен",
             "Нельзя запустить вторую копию приложения, так как SlipSnap уже работает.",
         )
-        returnсто
+        return
 
     global _LOCK_FILE
     _LOCK_FILE = lock_file

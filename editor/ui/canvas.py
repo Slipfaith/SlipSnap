@@ -17,6 +17,9 @@ from PySide6.QtCore import (
     QAbstractAnimation,
     QMimeData,
     QUrl,
+    QLineF,
+    QTimer,
+    QElapsedTimer,
 )
 from PySide6.QtGui import (
     QPainter,
@@ -37,6 +40,8 @@ from PySide6.QtWidgets import (
     QGraphicsPixmapItem,
     QGraphicsItem,
     QGraphicsTextItem,
+    QGraphicsLineItem,
+    QGraphicsItemGroup,
     QMenu,
     QMessageBox,
     QFrame,
@@ -69,6 +74,17 @@ from design_tokens import Metrics
 MARKER_ALPHA = Metrics.MARKER_ALPHA
 PENCIL_WIDTH = Metrics.PENCIL_WIDTH
 MARKER_WIDTH = Metrics.MARKER_WIDTH
+
+ITEM_ANIMATION_ROLE = 9
+ANIMATION_NONE = "none"
+ANIMATION_DRAW = "draw"
+ANIMATION_PULSE = "pulse"
+ANIMATION_DRAW_ACTIVE_MS = 1200
+ANIMATION_DRAW_HOLD_MS = 1500
+ANIMATION_DRAW_CYCLE_MS = ANIMATION_DRAW_ACTIVE_MS + ANIMATION_DRAW_HOLD_MS
+ANIMATION_PULSE_CYCLE_MS = 1000
+ANIMATION_PULSE_MAX_DIMENSION = 220.0
+ANIMATION_PULSE_MAX_AREA = 24000.0
 
 
 class Canvas(QGraphicsView):
@@ -166,6 +182,13 @@ class Canvas(QGraphicsView):
         self._corner_resize: Optional[dict] = None
         # Rotation drag state
         self._rotation_drag: Optional[dict] = None
+        # Live preview state for item animations in editor viewport.
+        self._live_item_animations: list[dict] = []
+        self._suspend_live_item_animation = False
+        self._item_animation_elapsed = QElapsedTimer()
+        self._item_animation_timer = QTimer(self)
+        self._item_animation_timer.setInterval(33)
+        self._item_animation_timer.timeout.connect(self._on_item_animation_tick)
 
     def drawForeground(self, painter: QPainter, rect: QRectF) -> None:  # type: ignore[override]
         super().drawForeground(painter, rect)
@@ -308,13 +331,6 @@ class Canvas(QGraphicsView):
             QPointF(center_px.x(), center_px.y() + 8),
         )
 
-        label = f"{lens_zoom:.1f}x"
-        label_rect = QRectF(lens_rect.left() + 8, lens_rect.bottom() - 24, 44, 16)
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(15, 23, 42, 170))
-        painter.drawRoundedRect(label_rect, 5, 5)
-        painter.setPen(QColor(255, 255, 255, 235))
-        painter.drawText(label_rect, Qt.AlignCenter, label)
         painter.restore()
 
     def _draw_zoom_lens_overlay(self, painter: QPainter) -> None:
@@ -487,11 +503,239 @@ class Canvas(QGraphicsView):
             return self.export_selection()
         return self.export_image()
 
+    def _normalized_animation_kind(self, kind) -> str:
+        raw = str(kind or "").strip().lower()
+        if raw in {ANIMATION_DRAW, ANIMATION_PULSE}:
+            return raw
+        return ANIMATION_NONE
+
+    def _item_animation_kind(self, item: QGraphicsItem) -> str:
+        try:
+            return self._normalized_animation_kind(item.data(ITEM_ANIMATION_ROLE))
+        except Exception:
+            return ANIMATION_NONE
+
+    def _set_item_animation_kind(self, item: QGraphicsItem, kind: str) -> bool:
+        normalized = self._normalized_animation_kind(kind)
+        if self._item_animation_kind(item) == normalized:
+            return False
+        item.setData(ITEM_ANIMATION_ROLE, normalized)
+        self._refresh_live_item_animation_state()
+        return True
+
+    def _stop_live_item_animation(self) -> None:
+        if self._item_animation_timer.isActive():
+            self._item_animation_timer.stop()
+        if self._live_item_animations:
+            self._restore_item_animations(self._live_item_animations)
+            self._live_item_animations = []
+            self.viewport().update()
+
+    def _refresh_live_item_animation_state(self) -> None:
+        if self._suspend_live_item_animation:
+            return
+        has_live = bool(self._relevant_item_animations())
+        if has_live:
+            if not self._item_animation_elapsed.isValid():
+                self._item_animation_elapsed.start()
+            if not self._item_animation_timer.isActive():
+                self._item_animation_timer.start()
+        else:
+            self._stop_live_item_animation()
+
+    def _on_item_animation_tick(self) -> None:
+        if self._suspend_live_item_animation:
+            return
+        if QApplication.mouseButtons() != Qt.NoButton:
+            # Do not animate while the user drags/resizes items.
+            if self._live_item_animations:
+                self._restore_item_animations(self._live_item_animations)
+                self._live_item_animations = []
+                self.viewport().update()
+            return
+
+        if self._live_item_animations:
+            self._restore_item_animations(self._live_item_animations)
+            self._live_item_animations = []
+
+        states = self._relevant_item_animations()
+        if not states:
+            self._stop_live_item_animation()
+            return
+
+        if not self._item_animation_elapsed.isValid():
+            self._item_animation_elapsed.start()
+        time_ms = int(self._item_animation_elapsed.elapsed())
+        self._apply_item_animations_at(states, time_ms)
+        self._live_item_animations = states
+        self.viewport().update()
+
+    def _can_animate_item(self, item: QGraphicsItem) -> bool:
+        if item is None or item.scene() != self.scene:
+            return False
+        if isinstance(item, ZoomLensItem):
+            return False
+        if item.data(1) == "base":
+            return False
+        if not item.isVisible():
+            return False
+        if not bool(item.flags() & QGraphicsItem.ItemIsSelectable):
+            return False
+        return True
+
+    def _is_pulse_eligible(self, item: QGraphicsItem) -> bool:
+        if not self._can_animate_item(item):
+            return False
+        rect = item.sceneBoundingRect()
+        if rect.isNull():
+            return False
+        width = max(0.0, float(rect.width()))
+        height = max(0.0, float(rect.height()))
+        if max(width, height) > ANIMATION_PULSE_MAX_DIMENSION:
+            return False
+        if (width * height) > ANIMATION_PULSE_MAX_AREA:
+            return False
+        return True
+
+    def _draw_animation_segments(self, item: QGraphicsItem) -> list[dict]:
+        segments: list[dict] = []
+        if isinstance(item, QGraphicsLineItem):
+            line = QLineF(item.line())
+            segments.append(
+                {
+                    "item": item,
+                    "line": line,
+                    "length": max(0.0, line.length()),
+                    "opacity": float(item.opacity()),
+                }
+            )
+            return segments
+
+        if isinstance(item, QGraphicsItemGroup):
+            for child in item.childItems():
+                if isinstance(child, QGraphicsLineItem):
+                    line = QLineF(child.line())
+                    segments.append(
+                        {
+                            "item": child,
+                            "line": line,
+                            "length": max(0.0, line.length()),
+                            "opacity": float(child.opacity()),
+                        }
+                    )
+        return segments
+
+    def _relevant_item_animations(self, only_items=None) -> list[dict]:
+        allowed = self._expanded_item_set(only_items) if only_items is not None else None
+        animations: list[dict] = []
+        for item in self.scene.items():
+            if allowed is not None and item not in allowed:
+                continue
+            if not self._can_animate_item(item):
+                continue
+            kind = self._item_animation_kind(item)
+            if kind == ANIMATION_NONE:
+                continue
+            state = {
+                "item": item,
+                "kind": kind,
+                "base_scale": float(item.scale()),
+                "base_opacity": float(item.opacity()),
+            }
+            if kind == ANIMATION_DRAW:
+                state["cycle_ms"] = ANIMATION_DRAW_CYCLE_MS
+                state["draw_active_ms"] = ANIMATION_DRAW_ACTIVE_MS
+                segments = self._draw_animation_segments(item)
+                total_len = sum(seg["length"] for seg in segments)
+                if total_len > 1e-3:
+                    state["mode"] = "segments"
+                    state["segments"] = segments
+                    state["total_len"] = total_len
+                else:
+                    state["mode"] = "fade"
+            elif kind == ANIMATION_PULSE:
+                if not self._is_pulse_eligible(item):
+                    continue
+                state["cycle_ms"] = ANIMATION_PULSE_CYCLE_MS
+                state["mode"] = "pulse"
+            animations.append(state)
+        return animations
+
+    def _apply_item_animations_at(self, animations: list[dict], time_ms: int) -> None:
+        for state in animations:
+            item = state["item"]
+            mode = state.get("mode")
+            cycle_ms = max(1, int(state.get("cycle_ms", ANIMATION_PULSE_CYCLE_MS)))
+            t_mod = int(time_ms) % cycle_ms
+            phase = t_mod / float(cycle_ms)
+            draw_active_ms = max(1, int(state.get("draw_active_ms", ANIMATION_DRAW_ACTIVE_MS)))
+            draw_progress = 1.0 if t_mod >= draw_active_ms else (t_mod / float(draw_active_ms))
+
+            if mode == "pulse":
+                base_scale = float(state["base_scale"])
+                pulse = 1.0 + 0.05 * math.sin(math.pi * phase)
+                item.setScale(base_scale * pulse)
+                item.setOpacity(float(state["base_opacity"]))
+                continue
+
+            if mode == "segments":
+                total = max(1e-6, float(state.get("total_len", 0.0)))
+                remaining = total * draw_progress
+                for seg in state.get("segments", []):
+                    seg_item = seg["item"]
+                    base_line: QLineF = seg["line"]
+                    seg_len = max(0.0, float(seg["length"]))
+                    start = base_line.p1()
+                    end = base_line.p2()
+                    if remaining <= 0.0:
+                        seg_item.setLine(QLineF(start, start))
+                    elif remaining >= seg_len:
+                        seg_item.setLine(QLineF(start, end))
+                    else:
+                        ratio = remaining / max(seg_len, 1e-6)
+                        current = QPointF(
+                            start.x() + (end.x() - start.x()) * ratio,
+                            start.y() + (end.y() - start.y()) * ratio,
+                        )
+                        seg_item.setLine(QLineF(start, current))
+                    seg_item.setOpacity(float(seg["opacity"]))
+                    remaining -= seg_len
+                item.setScale(float(state["base_scale"]))
+                item.setOpacity(float(state["base_opacity"]))
+                continue
+
+            # Generic draw fallback for non-line items: fade-in.
+            if state.get("kind") == ANIMATION_DRAW:
+                item.setOpacity(max(0.0, min(1.0, float(state["base_opacity"]) * draw_progress)))
+                item.setScale(float(state["base_scale"]))
+            else:
+                item.setOpacity(float(state["base_opacity"]))
+                item.setScale(float(state["base_scale"]))
+
+    def _restore_item_animations(self, animations: list[dict]) -> None:
+        for state in animations:
+            item = state["item"]
+            try:
+                item.setScale(float(state["base_scale"]))
+                item.setOpacity(float(state["base_opacity"]))
+            except Exception:
+                pass
+            for seg in state.get("segments", []):
+                seg_item = seg["item"]
+                try:
+                    seg_item.setLine(QLineF(seg["line"]))
+                    seg_item.setOpacity(float(seg["opacity"]))
+                except Exception:
+                    pass
+
+    def _has_item_animations(self) -> bool:
+        return bool(self._relevant_item_animations())
+
     def has_gif_content(self) -> bool:
         for item in self.scene.items():
             if str(item.data(1)).lower() == "gif":
                 return True
-        return False
+        return self._has_item_animations()
 
     def _effective_drag_extension(self) -> str:
         return ".gif" if self.has_gif_content() else ".png"
@@ -631,6 +875,7 @@ class Canvas(QGraphicsView):
     def set_base_image(self, image: QImage):
         """Replace the main screenshot and clear existing items."""
         self._cleanup_temp_dirs()
+        self._stop_live_item_animation()
         self.scene.clear()
         self.ocr_overlay.clear()
         self.pixmap_item = HighQualityPixmapItem(image)
@@ -659,6 +904,7 @@ class Canvas(QGraphicsView):
         if item is self.pixmap_item or item.data(1) == "base":
             self.pixmap_item = None
             self.pil_image = None
+        self._refresh_live_item_animation_state()
 
     def handle_item_restored(self, item: QGraphicsItem) -> None:
         if isinstance(item, QGraphicsPixmapItem) and item.data(1) == "base":
@@ -668,6 +914,7 @@ class Canvas(QGraphicsView):
                 self.pil_image = qimage_to_pil(qimg)
             if isinstance(item, HighQualityPixmapItem):
                 item.reset_scale_tracking()
+        self._refresh_live_item_animation_state()
 
     def set_tool(self, tool: str):
         if self._text_manager:
@@ -974,10 +1221,19 @@ class Canvas(QGraphicsView):
                 return idx
         return len(cumulative) - 1
 
-    def _build_animation_schedule(self, sources: list[dict], max_frames: int = 180) -> tuple[list[int], list[int]]:
-        if not sources:
+    def _build_animation_schedule(
+        self,
+        sources: list[dict],
+        item_animations: list[dict],
+        max_frames: int = 180,
+    ) -> tuple[list[int], list[int]]:
+        if not sources and not item_animations:
             return [0], [100]
-        output_ms = max(int(src["cycle_ms"]) for src in sources)
+
+        cycle_candidates = [100]
+        cycle_candidates.extend(int(src.get("cycle_ms", 100)) for src in sources)
+        cycle_candidates.extend(int(anim.get("cycle_ms", 100)) for anim in item_animations)
+        output_ms = max(cycle_candidates)
         output_ms = max(100, output_ms)
         boundaries = {0, output_ms}
         for src in sources:
@@ -994,6 +1250,14 @@ class Canvas(QGraphicsView):
                     boundaries.add(elapsed)
                 if elapsed >= output_ms:
                     break
+
+        for anim in item_animations:
+            cycle = max(1, int(anim.get("cycle_ms", 100)))
+            step = max(40, min(100, cycle // 16))
+            elapsed = step
+            while elapsed < output_ms:
+                boundaries.add(elapsed)
+                elapsed += step
 
         marks = sorted(boundaries)
         if len(marks) < 2:
@@ -1021,7 +1285,8 @@ class Canvas(QGraphicsView):
         target = Path(target_path).with_suffix(".gif")
         rect, only_items = self._resolve_export_rect(selected_only=selected_only)
         sources = self._relevant_gif_sources(only_items)
-        if not sources:
+        item_animations = self._relevant_item_animations(only_items)
+        if not sources and not item_animations:
             return False
 
         selected = [it for it in self.scene.selectedItems()]
@@ -1032,6 +1297,8 @@ class Canvas(QGraphicsView):
         movie_states = []
         frames: list[Image.Image] = []
         try:
+            self._suspend_live_item_animation = True
+            self._stop_live_item_animation()
             for source in sources:
                 movie = source["movie"]
                 state = movie.state()
@@ -1042,7 +1309,7 @@ class Canvas(QGraphicsView):
                 except Exception:
                     pass
 
-            start_times, frame_delays = self._build_animation_schedule(sources)
+            start_times, frame_delays = self._build_animation_schedule(sources, item_animations)
             for time_ms in start_times:
                 for source in sources:
                     movie = source["movie"]
@@ -1051,6 +1318,8 @@ class Canvas(QGraphicsView):
                         movie.jumpToFrame(frame_idx)
                     except Exception:
                         pass
+                if item_animations:
+                    self._apply_item_animations_at(item_animations, time_ms)
                 qimg, _, _ = self._render_rect_to_qimage(rect, only_items)
                 frame = qimage_to_pil(qimg)
                 if frame.mode != "RGBA":
@@ -1088,6 +1357,9 @@ class Canvas(QGraphicsView):
                         movie.stop()
                 except Exception:
                     pass
+            self._restore_item_animations(item_animations)
+            self._suspend_live_item_animation = False
+            self._refresh_live_item_animation_state()
             for it in selected:
                 it.setSelected(True)
             if focus_item:
@@ -1700,11 +1972,20 @@ class Canvas(QGraphicsView):
                 it.setZValue(next_z)
             next_z = max(next_z, it.zValue()) + 1
 
+    def _context_targets(self, clicked_item: QGraphicsItem) -> list[QGraphicsItem]:
+        selected = list(self.scene.selectedItems())
+        if clicked_item in selected and selected:
+            return selected
+        return [clicked_item]
+
     def contextMenuEvent(self, event):
         scene_pos = self.mapToScene(event.pos())
         items = self.scene.items(scene_pos)
         if items:
             item = items[0]
+            while item.parentItem() is not None and not bool(item.flags() & QGraphicsItem.ItemIsSelectable):
+                item = item.parentItem()
+            targets = self._context_targets(item)
             menu = QMenu(self)
             act_add_meme = None
             if isinstance(item, QGraphicsPixmapItem) and item.data(0) in {"screenshot", "meme"}:
@@ -1712,6 +1993,27 @@ class Canvas(QGraphicsView):
                 menu.addSeparator()
             act_front = menu.addAction("На передний план")
             act_back = menu.addAction("На задний план")
+            anim_targets = [it for it in targets if self._can_animate_item(it)]
+            anim_actions: dict = {}
+            pulse_targets = [it for it in anim_targets if self._is_pulse_eligible(it)]
+            if anim_targets:
+                anim_menu = menu.addMenu("Animation")
+                act_anim_none = anim_menu.addAction("Без анимации")
+                act_anim_draw = anim_menu.addAction("Draw animation")
+                act_anim_pulse = anim_menu.addAction("Pulse")
+                act_anim_pulse.setEnabled(bool(pulse_targets))
+                for anim_action in (act_anim_none, act_anim_draw, act_anim_pulse):
+                    anim_action.setCheckable(True)
+                kinds = {self._item_animation_kind(it) for it in anim_targets}
+                current_kind = kinds.pop() if len(kinds) == 1 else ""
+                act_anim_none.setChecked(current_kind == ANIMATION_NONE)
+                act_anim_draw.setChecked(current_kind == ANIMATION_DRAW)
+                act_anim_pulse.setChecked(current_kind == ANIMATION_PULSE and bool(pulse_targets))
+                anim_actions = {
+                    act_anim_none: ANIMATION_NONE,
+                    act_anim_draw: ANIMATION_DRAW,
+                    act_anim_pulse: ANIMATION_PULSE,
+                }
             act_del = menu.addAction("Удалить")
             chosen = menu.exec(event.globalPos())
             if chosen == act_add_meme and act_add_meme is not None:
@@ -1731,10 +2033,26 @@ class Canvas(QGraphicsView):
                 self.bring_to_front(item)
             elif chosen == act_back:
                 self.send_to_back(item)
+            elif chosen in anim_actions and anim_targets:
+                target_kind = anim_actions[chosen]
+                changed = False
+                if target_kind == ANIMATION_PULSE:
+                    for target in pulse_targets:
+                        if self._set_item_animation_kind(target, ANIMATION_PULSE):
+                            changed = True
+                    for target in anim_targets:
+                        if target in pulse_targets:
+                            continue
+                        if self._set_item_animation_kind(target, ANIMATION_NONE):
+                            changed = True
+                else:
+                    for target in anim_targets:
+                        if self._set_item_animation_kind(target, target_kind):
+                            changed = True
+                if changed:
+                    self._refresh_live_item_animation_state()
+                    self.viewport().update()
             elif chosen == act_del:
-                targets = list(self.scene.selectedItems())
-                if item not in targets:
-                    targets = [item]
                 for it in targets:
                     self.scene.removeItem(it)
                     self.handle_item_removed(it)

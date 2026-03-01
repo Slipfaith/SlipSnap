@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+import sys
 import tempfile
 from pathlib import Path
 from time import perf_counter, sleep
@@ -36,6 +37,41 @@ from video_encoding import MP4StreamEncoder, convert_mp4_to_gif
 
 class _CaptureCanceled(Exception):
     """Internal control-flow exception for cancelled recording."""
+
+
+_set_window_display_affinity = None
+_WDA_MONITOR = 0x1
+_WDA_EXCLUDEFROMCAPTURE = 0x11
+if sys.platform.startswith("win"):
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        _user32 = ctypes.WinDLL("user32", use_last_error=True)
+        _set_window_display_affinity = _user32.SetWindowDisplayAffinity
+        _set_window_display_affinity.argtypes = [wintypes.HWND, wintypes.DWORD]
+        _set_window_display_affinity.restype = wintypes.BOOL
+    except Exception:
+        _set_window_display_affinity = None
+
+
+def _exclude_widget_from_capture(widget: QWidget) -> bool:
+    """Best-effort exclusion of helper window from screen capture on Windows."""
+    if _set_window_display_affinity is None or not sys.platform.startswith("win"):
+        return False
+    try:
+        hwnd = int(widget.winId())
+    except Exception:
+        return False
+    if hwnd <= 0:
+        return False
+    try:
+        if _set_window_display_affinity(hwnd, _WDA_EXCLUDEFROMCAPTURE):
+            return True
+        # Windows < 10 2004 fallback: hide content from capture.
+        return bool(_set_window_display_affinity(hwnd, _WDA_MONITOR))
+    except Exception:
+        return False
 
 
 class RegionSelectionOverlay(QWidget):
@@ -240,6 +276,7 @@ class RecordingStatusWindow(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setFocusPolicy(Qt.StrongFocus)
         self._total_frames = max(1, int(total_frames))
+        self._capture_exclusion_applied = False
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -264,9 +301,10 @@ class RecordingStatusWindow(QWidget):
         controls = QHBoxLayout()
         controls.setContentsMargins(0, 0, 0, 0)
         controls.addStretch(1)
-        cancel_btn = QPushButton("Отмена (Esc)", panel)
-        cancel_btn.clicked.connect(self.canceled.emit)
-        controls.addWidget(cancel_btn)
+        self._cancel_btn = QPushButton("Отмена", panel)
+        self._cancel_btn.setToolTip("Отменить запись (Esc)")
+        self._cancel_btn.clicked.connect(self.canceled.emit)
+        controls.addWidget(self._cancel_btn)
 
         panel_layout.addWidget(title)
         panel_layout.addWidget(self._status)
@@ -335,6 +373,8 @@ class RecordingStatusWindow(QWidget):
     def showEvent(self, event):
         super().showEvent(event)
         self._reposition()
+        if not self._capture_exclusion_applied:
+            self._capture_exclusion_applied = _exclude_widget_from_capture(self)
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Escape:
