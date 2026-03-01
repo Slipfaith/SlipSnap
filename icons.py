@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QPen, QColor
 from PySide6.QtCore import Qt
 
@@ -133,30 +134,38 @@ def make_icon_series(size: int = Metrics.ICON_SMALL) -> QIcon:
 
 
 def make_icon_video(size: int = Metrics.ICON_SMALL) -> QIcon:
-    """Камера — «Записать видео»."""
+    """Camera icon for video capture that stays readable on light and dark surfaces."""
     pm = _pm(size)
     p = QPainter(pm)
     p.setRenderHint(QPainter.Antialiasing)
-    body = QColor(*Palette.ICON_BASE)
-    accent = QColor(*Palette.ICON_POSITIVE)
+
+    body_fill = QColor(Palette.PRIMARY_LIGHT)
+    body_stroke = QColor(Palette.PRIMARY_HOVER)
+    lens_fill = QColor(Palette.PRIMARY)
+    rec_dot = QColor(Palette.ERROR)
+
     m = Metrics.ICON_MARGIN_SMALL
     body_w = size - (2 * m) - 6
     body_h = max(8, size - (2 * m) - 4)
     body_y = (size - body_h) // 2
-    p.setPen(QPen(body, 2))
+
+    p.setPen(QPen(body_stroke, 1.8))
+    p.setBrush(body_fill)
     p.drawRoundedRect(m, body_y, body_w, body_h, 4, 4)
-    # "Lens" triangle
+
     lens_x = m + body_w + 1
-    p.setPen(QPen(body, 2))
+    p.setPen(QPen(body_stroke, 1.6))
+    p.setBrush(lens_fill)
+    p.drawRect(lens_x, body_y + 3, max(2, size - m - lens_x), max(4, body_h - 6))
     p.drawLine(lens_x, body_y + 3, size - m, body_y + 1)
     p.drawLine(lens_x, body_y + body_h - 3, size - m, body_y + body_h - 1)
     p.drawLine(size - m, body_y + 1, size - m, body_y + body_h - 1)
-    # Recording dot
-    dot_r = 2
+
+    dot_r = 3 if size >= 28 else 2
     dot_x = m + body_w // 2 - dot_r
     dot_y = body_y + body_h // 2 - dot_r
-    p.setPen(Qt.NoPen)
-    p.setBrush(accent)
+    p.setPen(QPen(QColor("#ffffff"), 1))
+    p.setBrush(rec_dot)
     p.drawEllipse(dot_x, dot_y, dot_r * 2 + 1, dot_r * 2 + 1)
     p.end()
     return QIcon(pm)

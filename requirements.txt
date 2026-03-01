@@ -6,3 +6,4 @@ pyqtkeybind>=0.0.9
 psutil>=5.9
 pyinstaller>=6
 pywin32>=306
+requests>=2.31.0

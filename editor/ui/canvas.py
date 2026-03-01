@@ -1,8 +1,10 @@
+# -*- coding: utf-8 -*-
 from typing import Optional, Dict, Tuple
 from pathlib import Path
 import tempfile
 import shutil
 import math
+import logging
 
 from PySide6.QtCore import (
     Qt,
@@ -74,6 +76,8 @@ from design_tokens import Metrics
 MARKER_ALPHA = Metrics.MARKER_ALPHA
 PENCIL_WIDTH = Metrics.PENCIL_WIDTH
 MARKER_WIDTH = Metrics.MARKER_WIDTH
+
+logger = logging.getLogger(__name__)
 
 ITEM_ANIMATION_ROLE = 9
 ANIMATION_NONE = "none"
@@ -421,7 +425,7 @@ class Canvas(QGraphicsView):
         try:
             save_config(cfg)
         except Exception:
-            pass
+            logger.warning("Failed to persist zoom lens settings", exc_info=True)
 
     def _show_zoom_lens_context_menu(self, global_pos: QPoint, lens: Optional[ZoomLensItem] = None) -> None:
         menu = QMenu(self)
@@ -718,15 +722,19 @@ class Canvas(QGraphicsView):
             try:
                 item.setScale(float(state["base_scale"]))
                 item.setOpacity(float(state["base_opacity"]))
+            except RuntimeError:
+                logger.debug("Animation item was deleted before restore")
             except Exception:
-                pass
+                logger.warning("Failed to restore animated item state", exc_info=True)
             for seg in state.get("segments", []):
                 seg_item = seg["item"]
                 try:
                     seg_item.setLine(QLineF(seg["line"]))
                     seg_item.setOpacity(float(seg["opacity"]))
+                except RuntimeError:
+                    logger.debug("Animation segment item was deleted before restore")
                 except Exception:
-                    pass
+                    logger.warning("Failed to restore animation segment state", exc_info=True)
 
     def _has_item_animations(self) -> bool:
         return bool(self._relevant_item_animations())
@@ -752,7 +760,11 @@ class Canvas(QGraphicsView):
                 except TypeError:
                     return logic.next_snap_filename_for_directory(target_dir)
                 except Exception:
-                    pass
+                    logger.warning(
+                        "Failed to generate next filename for drop directory '%s'; falling back",
+                        target_dir,
+                        exc_info=True,
+                    )
             try:
                 return logic.next_snap_filename(extension=extension)
             except TypeError:
@@ -796,9 +808,13 @@ class Canvas(QGraphicsView):
                     if candidate.is_dir():
                         return candidate
                 except Exception:
+                    logger.debug(
+                        "Skipping inaccessible Explorer window during drop-directory detection",
+                        exc_info=True,
+                    )
                     continue
         except Exception:
-            pass
+            logger.debug("Shell automation failed during drop-directory detection", exc_info=True)
 
         # Desktop icons can come from Progman/WorkerW and are not always listed.
         try:
@@ -809,7 +825,7 @@ class Canvas(QGraphicsView):
                 if candidate.is_dir():
                     return candidate
         except Exception:
-            pass
+            logger.debug("Failed to resolve desktop fallback directory", exc_info=True)
 
         return None
 
@@ -852,7 +868,7 @@ class Canvas(QGraphicsView):
             try:
                 shutil.rmtree(d, ignore_errors=True)
             except Exception:
-                pass
+                logger.warning("Failed to cleanup temporary drag directory '%s'", d, exc_info=True)
         self._drag_temp_dirs.clear()
 
     def _set_pixmap_items_interactive(self, enabled: bool):
@@ -1144,7 +1160,7 @@ class Canvas(QGraphicsView):
                 if source:
                     return Path(source)
             except Exception:
-                pass
+                logger.debug("Failed to read GIF source path from item", exc_info=True)
         raw_path = item.data(2)
         if raw_path:
             try:
@@ -1168,7 +1184,7 @@ class Canvas(QGraphicsView):
                         value = 100
                     durations.append(max(20, value))
         except Exception:
-            pass
+            logger.warning("Failed to load GIF durations from '%s'", path, exc_info=True)
         if not durations:
             durations = [100]
         return durations
@@ -1306,8 +1322,10 @@ class Canvas(QGraphicsView):
                 movie_states.append((movie, state, frame_no))
                 try:
                     movie.setPaused(True)
+                except RuntimeError:
+                    logger.debug("GIF movie object was deleted before pause")
                 except Exception:
-                    pass
+                    logger.warning("Failed to pause GIF movie before export", exc_info=True)
 
             start_times, frame_delays = self._build_animation_schedule(sources, item_animations)
             for time_ms in start_times:
@@ -1316,8 +1334,10 @@ class Canvas(QGraphicsView):
                     frame_idx = self._frame_index_for_time(source, time_ms)
                     try:
                         movie.jumpToFrame(frame_idx)
+                    except RuntimeError:
+                        logger.debug("GIF movie object was deleted before jumpToFrame")
                     except Exception:
-                        pass
+                        logger.warning("Failed to jump GIF movie to target frame", exc_info=True)
                 if item_animations:
                     self._apply_item_animations_at(item_animations, time_ms)
                 qimg, _, _ = self._render_rect_to_qimage(rect, only_items)
@@ -1340,14 +1360,17 @@ class Canvas(QGraphicsView):
             )
             return True
         except Exception:
+            logger.warning("Failed to save animated GIF to '%s'", target, exc_info=True)
             return False
         finally:
             for movie, state, frame_no in movie_states:
                 try:
                     if frame_no >= 0:
                         movie.jumpToFrame(frame_no)
+                except RuntimeError:
+                    logger.debug("GIF movie object was deleted before frame restore")
                 except Exception:
-                    pass
+                    logger.warning("Failed to restore GIF frame after export", exc_info=True)
                 try:
                     if state == QMovie.Running:
                         movie.setPaused(False)
@@ -1355,8 +1378,10 @@ class Canvas(QGraphicsView):
                         movie.setPaused(True)
                     else:
                         movie.stop()
+                except RuntimeError:
+                    logger.debug("GIF movie object was deleted before playback restore")
                 except Exception:
-                    pass
+                    logger.warning("Failed to restore GIF playback state after export", exc_info=True)
             self._restore_item_animations(item_animations)
             self._suspend_live_item_animation = False
             self._refresh_live_item_animation_state()

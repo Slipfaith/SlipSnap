@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Прямое копирование PNG в буфер через Win32 API
 Qt добавляет слишком много лишних форматов - обходим его
@@ -6,6 +7,7 @@ from __future__ import annotations
 
 from io import BytesIO
 import json
+import logging
 from pathlib import Path
 import sys
 
@@ -20,6 +22,7 @@ except ImportError:
     HAS_WIN32 = False
 
 SLIPSNAP_MEME_MIME = "application/x-slipsnap-meme"
+logger = logging.getLogger(__name__)
 
 
 def _set_qt_clipboard_image(qimg: QImage) -> bool:
@@ -90,12 +93,19 @@ def copy_gif_file_to_clipboard(path: Path) -> bool:
     }
     mime.setData(SLIPSNAP_MEME_MIME, json.dumps(payload, ensure_ascii=False).encode("utf-8"))
     mime.setUrls([QUrl.fromLocalFile(str(gif_path))])
+    gif_bytes = b""
     try:
         gif_bytes = gif_path.read_bytes()
         if gif_bytes:
             mime.setData("image/gif", gif_bytes)
-    except Exception:
-        pass
+        else:
+            logger.warning("GIF file '%s' is empty; clipboard will contain path metadata only.", gif_path)
+    except Exception as exc:
+        logger.warning(
+            "Failed to read GIF bytes for '%s'; clipboard will contain path metadata only: %s",
+            gif_path,
+            exc,
+        )
     clipboard.setMimeData(mime)
     return True
 

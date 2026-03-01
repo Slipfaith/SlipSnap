@@ -1,11 +1,15 @@
+# -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 class VideoEncodingError(RuntimeError):
@@ -177,12 +181,12 @@ class MP4StreamEncoder:
         except Exception as exc:
             try:
                 proc.kill()
-            except Exception:
-                pass
+            except Exception as kill_exc:
+                logger.debug("Failed to kill ffmpeg process during finalize: %s", kill_exc)
             try:
                 proc.wait(timeout=5)
-            except Exception:
-                pass
+            except Exception as wait_exc:
+                logger.debug("Failed to wait ffmpeg process during finalize: %s", wait_exc)
             self._proc = None
             raise VideoEncodingError("Не удалось завершить кодирование MP4.") from exc
 
@@ -202,16 +206,16 @@ class MP4StreamEncoder:
         try:
             if proc.stdin is not None:
                 proc.stdin.close()
-        except Exception:
-            pass
+        except Exception as stdin_exc:
+            logger.debug("Failed to close ffmpeg stdin during abort: %s", stdin_exc)
         try:
             proc.kill()
-        except Exception:
-            pass
+        except Exception as kill_exc:
+            logger.debug("Failed to kill ffmpeg process during abort: %s", kill_exc)
         try:
             proc.wait(timeout=5)
-        except Exception:
-            pass
+        except Exception as wait_exc:
+            logger.debug("Failed to wait ffmpeg process during abort: %s", wait_exc)
 
 
 def convert_mp4_to_gif(
@@ -266,8 +270,8 @@ def convert_mp4_to_gif(
     finally:
         try:
             palette.unlink(missing_ok=True)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed to remove temporary GIF palette '%s': %s", palette, exc)
 
 
 def _run_ffmpeg(cmd: list[str], context_message: str) -> None:

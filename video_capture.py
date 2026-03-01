@@ -1,5 +1,7 @@
+# -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import logging
 import shutil
 import sys
 import tempfile
@@ -33,6 +35,8 @@ from design_tokens import Metrics, Palette, Typography, selection_overlay_label_
 from logic import save_config
 from meme_gif_workflow import try_add_gif_to_meme_library
 from video_encoding import MP4StreamEncoder, convert_mp4_to_gif
+
+logger = logging.getLogger(__name__)
 
 
 class _CaptureCanceled(Exception):
@@ -121,8 +125,8 @@ class RegionSelectionOverlay(QWidget):
             self._current = self._origin
             try:
                 self.grabMouse()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Unable to grab mouse for selection overlay: %s", exc)
             self.update()
 
     def mouseMoveEvent(self, event):
@@ -177,8 +181,8 @@ class RegionSelectionOverlay(QWidget):
         try:
             if QWidget.mouseGrabber() is self:
                 self.releaseMouse()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Unable to release mouse grab for selection overlay: %s", exc)
 
     @staticmethod
     def _nearest_screen(point: QPoint):
@@ -685,8 +689,8 @@ class VideoCaptureController(QObject):
         finally:
             try:
                 temp_mp4.unlink(missing_ok=True)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Failed to remove temporary recording file '%s': %s", temp_mp4, exc)
 
     def _request_target_path(self) -> Tuple[Optional[Path], str, bool]:
         default_format = str(self.cfg.get("video_default_format", "mp4")).lower()

@@ -1,7 +1,8 @@
+# -*- coding: utf-8 -*-
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Set, Tuple
 
-from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, Qt
+from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPen, QPainterPath
 from PySide6.QtWidgets import (
     QGraphicsItem,
@@ -50,11 +51,18 @@ class OcrSelectionOverlay(QObject):
         self._selected_chars: Dict[int, Set[int]] = {}
         self._selection_anchor: Optional[QPointF] = None
         self._full_text: str = ""
+        self._geometry_update_in_progress = False
+        self._geometry_reschedule_requested = False
+        self._ignore_scene_changes = False
+        self._geometry_timer = QTimer(self)
+        self._geometry_timer.setSingleShot(True)
+        self._geometry_timer.setInterval(12)
+        self._geometry_timer.timeout.connect(self._flush_geometry_update)
 
         self.canvas.viewport().installEventFilter(self)
-        self.canvas.horizontalScrollBar().valueChanged.connect(self._update_geometry)
-        self.canvas.verticalScrollBar().valueChanged.connect(self._update_geometry)
-        self.scene.changed.connect(self._update_geometry)
+        self.canvas.horizontalScrollBar().valueChanged.connect(self._schedule_geometry_update)
+        self.canvas.verticalScrollBar().valueChanged.connect(self._schedule_geometry_update)
+        self.scene.changed.connect(self._on_scene_changed)
 
     def clear(self) -> None:
         self.words = []
@@ -72,6 +80,8 @@ class OcrSelectionOverlay(QObject):
         self._scene_line_rects = []
         self._line_texts = []
         self._char_scene_rects = []
+        self._geometry_timer.stop()
+        self._geometry_reschedule_requested = False
 
     def apply_result(self, result: OcrResult, capture: OcrCapture) -> None:
         self.clear()
@@ -107,7 +117,7 @@ class OcrSelectionOverlay(QObject):
         self._full_text = text
         self._normalized_line_rects = self._compute_normalized_line_rects(capture.pixel_size, ordered)
         self._create_line_items()
-        self._update_geometry()
+        self._schedule_geometry_update()
 
     def set_active(self, active: bool) -> None:
         self._active = active
@@ -185,11 +195,37 @@ class OcrSelectionOverlay(QObject):
         """Keep the OCR overlay aligned with the viewport and scene changes."""
         if obj is self.canvas.viewport() and event.type() in (
                 QEvent.Resize,
-                QEvent.Paint,
                 QEvent.Wheel,
         ):
-            self._update_geometry()
+            self._schedule_geometry_update()
         return super().eventFilter(obj, event)
+
+    def _on_scene_changed(self, *_args) -> None:
+        if self._ignore_scene_changes:
+            return
+        self._schedule_geometry_update()
+
+    def _schedule_geometry_update(self, *_args) -> None:
+        if self._geometry_update_in_progress:
+            self._geometry_reschedule_requested = True
+            return
+        if not self._geometry_timer.isActive():
+            self._geometry_timer.start()
+
+    def _flush_geometry_update(self) -> None:
+        if self._geometry_update_in_progress:
+            self._geometry_reschedule_requested = True
+            return
+        self._geometry_update_in_progress = True
+        try:
+            self._ignore_scene_changes = True
+            self._update_geometry()
+        finally:
+            self._ignore_scene_changes = False
+            self._geometry_update_in_progress = False
+        if self._geometry_reschedule_requested:
+            self._geometry_reschedule_requested = False
+            self._schedule_geometry_update()
 
     def _current_scene_rect(self) -> Optional[QRectF]:
         if self._capture_scene_rect is None:

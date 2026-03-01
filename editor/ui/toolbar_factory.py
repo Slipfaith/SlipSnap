@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from typing import Dict
 
 from PySide6.QtCore import Qt, QSize
@@ -34,6 +35,7 @@ from .icon_factory import (
     make_icon_collage,
     make_icon_ocr,
     make_icon_copy,
+    make_icon_share,
     make_icon_save,
     make_icon_undo,
     make_icon_redo
@@ -71,7 +73,6 @@ def enhanced_tools_toolbar_style() -> str:
 
     QToolBar QToolButton:hover {{
         background: {ModernColors.SURFACE_HOVER};
-        transform: translateX(2px);
     }}
 
     QToolBar QToolButton:checked:hover {{
@@ -81,7 +82,7 @@ def enhanced_tools_toolbar_style() -> str:
     }}
 
     QToolBar QToolButton:pressed {{
-        transform: scale(0.95);
+        padding: 7px 5px 5px 7px;
     }}
 
     /* Стили для стрелок прокрутки панели инструментов */
@@ -106,7 +107,7 @@ def enhanced_tools_toolbar_style() -> str:
     QToolBar QAbstractButton:pressed {{
         background: {ModernColors.PRIMARY};
         color: white;
-        transform: scale(0.95);
+        padding: 5px 3px 3px 5px;
     }}
 
     /* Специальные стили для кнопок со стрелками */
@@ -130,14 +131,13 @@ def enhanced_tools_toolbar_style() -> str:
             stop:1 {ModernColors.SURFACE_HOVER});
         border: 2px solid {ModernColors.PRIMARY};
         color: {ModernColors.PRIMARY};
-        transform: translateX(2px);
     }}
 
     QToolBar QAbstractButton[accessibleName="qt_toolbar_ext_button"]:pressed {{
         background: {ModernColors.PRIMARY};
         border: 2px solid {ModernColors.PRIMARY_HOVER};
         color: white;
-        transform: scale(0.9);
+        padding: 7px 5px 5px 7px;
     }}
     """
 
@@ -172,12 +172,11 @@ def enhanced_actions_toolbar_style() -> str:
     QToolBar QToolButton:hover {{
         background: {ModernColors.SURFACE_HOVER};
         color: {ModernColors.TEXT_PRIMARY};
-        transform: translateY(-1px);
     }}
 
     QToolBar QToolButton:pressed {{
         background: {ModernColors.PRIMARY_LIGHT};
-        transform: translateY(0px);
+        padding: 11px 13px 9px 15px;
     }}
 
     QToolBar QToolButton:checked {{
@@ -225,7 +224,7 @@ def enhanced_actions_toolbar_style() -> str:
     QToolBar QAbstractButton:pressed {{
         background: {ModernColors.PRIMARY};
         color: white;
-        transform: scale(0.95);
+        padding: 5px 3px 3px 5px;
     }}
 
     /* Специальные стили для кнопок со стрелками горизонтальной панели */
@@ -249,14 +248,13 @@ def enhanced_actions_toolbar_style() -> str:
             stop:1 {ModernColors.SURFACE_HOVER});
         border: 2px solid {ModernColors.PRIMARY};
         color: {ModernColors.PRIMARY};
-        transform: translateY(-2px);
     }}
 
     QToolBar QAbstractButton[accessibleName="qt_toolbar_ext_button"]:pressed {{
         background: {ModernColors.PRIMARY};
         border: 2px solid {ModernColors.PRIMARY_HOVER};
         color: white;
-        transform: scale(0.9);
+        padding: 7px 5px 5px 7px;
     }}
     """
 
@@ -650,6 +648,7 @@ def create_actions_toolbar(window, canvas):
         show_text=False,
     )
     add_action("copy", "Копировать", window.copy_to_clipboard, sc="Ctrl+C", icon=make_icon_copy(), show_text=False)
+    add_action("share", "Поделиться ссылкой (24ч)", window.share_image, icon=make_icon_share(), show_text=False)
     add_action("save", "Сохранить", window.save_image, sc="Ctrl+S", icon=make_icon_save(), show_text=False)
 
     undo_act = canvas.undo_stack.createUndoAction(window, "Отмена")

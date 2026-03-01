@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QPen, QColor, QImage, QPainter
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsPixmapItem

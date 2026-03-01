@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Utility helpers for managing the local meme stash."""
 
 from __future__ import annotations

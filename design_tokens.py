@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Design tokens and shared UI styles for SlipSnap."""
 
 from dataclasses import dataclass
@@ -72,23 +73,23 @@ class Palette:
     ICON_SERIES_COUNTER: Tuple[int, int, int] = (255, 255, 255)
 
     # Meme dialog palette
-    MEME_BACKGROUND: str = "#0f141a"
-    MEME_FOREGROUND: str = "#e6edf4"
-    MEME_LIST_BORDER: str = "#27313d"
-    MEME_LIST_BACKGROUND: str = "#131a22"
-    MEME_ITEM_BORDER: str = "#2a3542"
-    MEME_ITEM_HOVER: str = "#1b2530"
-    MEME_ITEM_SELECTED_BG: str = "#223243"
-    MEME_ITEM_SELECTED_BORDER: str = "#7f9bb8"
-    MEME_BUTTON_PRIMARY: str = "#3b4e63"
-    MEME_BUTTON_PRIMARY_HOVER: str = "#465c73"
-    MEME_BUTTON_PRIMARY_PRESSED: str = "#324558"
-    MEME_BUTTON_DISABLED_BG: str = "#202b36"
-    MEME_BUTTON_DISABLED_TEXT: str = "#6f7f90"
-    MEME_BUTTON_REMOVE: str = "#7b4a53"
-    MEME_BUTTON_REMOVE_HOVER: str = "#8f5862"
-    MEME_BUTTON_REMOVE_PRESSED: str = "#6f424b"
-    MEME_EMPTY_TEXT: str = "#8ea1b3"
+    MEME_BACKGROUND: str = "#f6f9fc"
+    MEME_FOREGROUND: str = "#0f172a"
+    MEME_LIST_BORDER: str = "#d8e0ea"
+    MEME_LIST_BACKGROUND: str = "#ffffff"
+    MEME_ITEM_BORDER: str = "#dce5ef"
+    MEME_ITEM_HOVER: str = "#f0f6ff"
+    MEME_ITEM_SELECTED_BG: str = "#e8f1ff"
+    MEME_ITEM_SELECTED_BORDER: str = "#5b8def"
+    MEME_BUTTON_PRIMARY: str = "#e8f0ff"
+    MEME_BUTTON_PRIMARY_HOVER: str = "#dce9ff"
+    MEME_BUTTON_PRIMARY_PRESSED: str = "#cfe1ff"
+    MEME_BUTTON_DISABLED_BG: str = "#eef2f7"
+    MEME_BUTTON_DISABLED_TEXT: str = "#9aa7b6"
+    MEME_BUTTON_REMOVE: str = "#ffecee"
+    MEME_BUTTON_REMOVE_HOVER: str = "#ffe0e4"
+    MEME_BUTTON_REMOVE_PRESSED: str = "#ffd3d9"
+    MEME_EMPTY_TEXT: str = "#64748b"
 
 
 @dataclass(frozen=True)
@@ -542,7 +543,7 @@ def meme_dialog_stylesheet() -> str:
 
         QPushButton {{
             background: {Palette.MEME_BUTTON_PRIMARY};
-            color: {Palette.OVERLAY_LABEL_TEXT};
+            color: {Palette.TEXT_PRIMARY};
             border: none;
             border-radius: 10px;
             font-size: {Typography.SMALL_SIZE}px;
@@ -570,6 +571,7 @@ def meme_dialog_stylesheet() -> str:
 
         QPushButton#removeButton {{
             background: {Palette.MEME_BUTTON_REMOVE};
+            color: #9f1239;
             min-width: 84px;
         }}
 

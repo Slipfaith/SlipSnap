@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QToolBar, QApplication
 from PySide6.QtGui import QImage

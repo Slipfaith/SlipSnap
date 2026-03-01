@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 from PySide6.QtCore import QRectF, Qt
@@ -55,4 +56,3 @@ class ZoomLensItem(QGraphicsEllipseItem):
 
     def effective_radius_scene(self) -> float:
         return float(self._radius_px) * max(0.001, abs(float(self.scale())))
-

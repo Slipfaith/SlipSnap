@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from PySide6.QtCore import QPointF, Qt, QRectF
 from PySide6.QtGui import (
     QPainter, QPen, QPixmap, QIcon, QColor, QCursor,
@@ -468,6 +469,30 @@ def make_icon_copy() -> QIcon:
 
     p.end()
     return QIcon(pm)
+
+
+def make_icon_share() -> QIcon:
+    pm = _base_pixmap()
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+
+    p.setPen(QPen(QColor(ModernColors.TEXT_SECONDARY), 2.2))
+    p.setBrush(Qt.NoBrush)
+    p.drawRoundedRect(QRectF(8, 18, 24, 14), 3, 3)
+
+    p.setPen(QPen(QColor(ModernColors.PRIMARY), 2.8, Qt.SolidLine, Qt.RoundCap))
+    p.drawLine(20, 28, 20, 10)
+
+    head = QPainterPath()
+    head.moveTo(20, 7)
+    head.lineTo(14, 13)
+    head.moveTo(20, 7)
+    head.lineTo(26, 13)
+    p.drawPath(head)
+
+    p.end()
+    return QIcon(pm)
+
 
 def make_icon_save() -> QIcon:
     pm = _base_pixmap()

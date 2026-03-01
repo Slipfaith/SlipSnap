@@ -1,17 +1,19 @@
 # -*- coding: utf-8 -*-
 
+import logging
 import shutil
 import tempfile
 from pathlib import Path
 from typing import Callable, Optional
 
-from PySide6.QtCore import Qt, QTimer, QRectF, Signal, QThread, QMimeData
+from PySide6.QtCore import Qt, QTimer, QRectF, Signal, QThread, QMimeData, QCoreApplication
 from PySide6.QtGui import QAction, QImage, QPixmap, QPainter, QPainterPath, QKeySequence, QShortcut, QColor, QMovie
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QDialog,
     QDialogButtonBox,
+    QFormLayout,
     QFrame,
     QGraphicsItem,
     QGraphicsPixmapItem,
@@ -24,13 +26,14 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QProgressDialog,
+    QSpinBox,
     QToolButton,
     QVBoxLayout,
     QWidget,
     QWidgetAction,
 )
 
-from logic import APP_NAME, APP_VERSION, qimage_to_pil, save_history, save_config
+from logic import qimage_to_pil, save_history, save_config
 from editor.text_tools import TextManager
 from editor.ocr_overlay import OcrCapture
 from editor.editor_logic import EditorLogic
@@ -58,6 +61,8 @@ from .ui.meme_library_dialog import MemesDialog
 from icons import make_icon_series, make_icon_video
 
 from design_tokens import Metrics, editor_main_stylesheet
+
+logger = logging.getLogger(__name__)
 
 
 class _AnimatedGifItem(QGraphicsPixmapItem):
@@ -429,6 +434,8 @@ class EditorWindow(QMainWindow):
         self._video_action: Optional[QAction] = None
         self._video_button: Optional[QToolButton] = None
         self._clipboard_temp_dirs: list[Path] = []
+        self._share_worker: Optional[QThread] = None
+        self._share_temp_file: Optional[Path] = None
 
         self._tool_buttons = create_tools_toolbar(self, self.canvas)
         self.color_btn, actions, action_buttons = create_actions_toolbar(self, self.canvas)
@@ -541,8 +548,12 @@ class EditorWindow(QMainWindow):
         self.setStyleSheet(editor_main_stylesheet())
 
     def show_shortcuts(self):
+        capture_hotkey = str(self.cfg.get("capture_hotkey", "Ctrl+Alt+S")).strip() or "Ctrl+Alt+S"
+        video_hotkey = str(self.cfg.get("video_hotkey", "Ctrl+Alt+V")).strip() or "Ctrl+Alt+V"
         shortcuts = (
             "SlipSnap — горячие клавиши\n\n"
+            f"{capture_hotkey} — снимок области (глобально)\n"
+            f"{video_hotkey} — запись видео (глобально)\n\n"
             "Ctrl+N — новый снимок\n"
             "Ctrl+Shift+N — коллаж\n"
             "Ctrl+K — история\n"
@@ -564,10 +575,23 @@ class EditorWindow(QMainWindow):
         msg.exec()
 
     def show_about(self):
+        app_name = QCoreApplication.applicationName() or "SlipSnap"
+        app_version = str(QCoreApplication.applicationVersion() or "").strip()
+        header = f"{app_name} {app_version}".strip()
+        app = QCoreApplication.instance()
+        description = "Современный редактор скриншотов"
+        author = "slipfaith"
+        if app is not None:
+            app_description = app.property("app_description")
+            if isinstance(app_description, str) and app_description.strip():
+                description = app_description.strip()
+            app_author = app.property("app_author")
+            if isinstance(app_author, str) and app_author.strip():
+                author = app_author.strip()
         text = (
-            f"{APP_NAME} {APP_VERSION}\n"
-            "Современный редактор скриншотов\n"
-            "Автор: slipfaith"
+            f"{header}\n"
+            f"{description}\n"
+            f"Автор: {author}"
         )
         msg = QMessageBox(self)
         msg.setWindowTitle("SlipSnap · О программе")
@@ -608,6 +632,86 @@ class EditorWindow(QMainWindow):
         name = self.logic.save_image(self)
         if name:
             self.statusBar().showMessage(f"✓ Сохранено: {name}", 3000)
+
+    def _cleanup_share_temp_file(self) -> None:
+        temp_path = self._share_temp_file
+        self._share_temp_file = None
+        if temp_path is None:
+            return
+        try:
+            temp_path.unlink(missing_ok=True)
+        except Exception as exc:
+            logger.debug("Failed to delete temporary share file '%s': %s", temp_path, exc)
+
+    def _release_share_worker(self) -> None:
+        worker = self._share_worker
+        self._share_worker = None
+        if worker is not None:
+            try:
+                worker.deleteLater()
+            except Exception:
+                pass
+        self._cleanup_share_temp_file()
+
+    def share_image(self) -> None:
+        if self._share_worker is not None and self._share_worker.isRunning():
+            self.statusBar().showMessage("Загрузка уже выполняется...", 2500)
+            return
+
+        is_gif = self.logic.should_force_gif_output()
+        suffix = ".gif" if is_gif else ".png"
+
+        try:
+            image = self.logic.export_image()
+        except Exception as exc:
+            QMessageBox.warning(self, "Ошибка загрузки", f"Не удалось подготовить изображение: {exc}")
+            return
+
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="wb", prefix="slipsnap_share_", suffix=suffix, delete=False
+            ) as tmp:
+                temp_path = Path(tmp.name)
+            self._share_temp_file = temp_path
+
+            if is_gif:
+                saved = False
+                animated_export = getattr(self.canvas, "save_animated_gif", None)
+                if callable(animated_export):
+                    try:
+                        saved = bool(animated_export(temp_path, selected_only=False))
+                    except TypeError:
+                        saved = bool(animated_export(temp_path))
+                    except Exception:
+                        saved = False
+                if not saved:
+                    image.save(str(temp_path), format="GIF")
+            else:
+                image.save(str(temp_path), format="PNG")
+        except Exception as exc:
+            self._cleanup_share_temp_file()
+            QMessageBox.warning(self, "Ошибка загрузки", f"Не удалось сохранить временный файл: {exc}")
+            return
+
+        from upload_service import UploadWorker
+        worker = UploadWorker(temp_path)
+        worker.finished.connect(self._on_share_done)
+        worker.failed.connect(self._on_share_failed)
+        self._share_worker = worker
+        fmt = "GIF" if is_gif else "скриншот"
+        self.statusBar().showMessage(f"Загружаю {fmt}...", 0)
+        worker.start()
+
+    def _on_share_done(self, url: str) -> None:
+        self._release_share_worker()
+        QApplication.clipboard().setText(url)
+        self.statusBar().showMessage(f"Ссылка скопирована: {url}", 10000)
+        QMessageBox.information(self, "Ссылка готова", f"Ссылка скопирована в буфер обмена:\n\n{url}")
+
+    def _on_share_failed(self, msg: str) -> None:
+        self._release_share_worker()
+        self.statusBar().showMessage("Ошибка шеринга", 5000)
+        QMessageBox.warning(self, "Ошибка загрузки", msg)
 
     def _update_collage_enabled(self):
         try:
@@ -1131,7 +1235,8 @@ class EditorWindow(QMainWindow):
         gif_path = Path(path)
         try:
             gif_item = _AnimatedGifItem(gif_path)
-        except Exception:
+        except Exception as exc:
+            logger.warning("Failed to create GIF scene item from '%s': %s", gif_path, exc)
             return False
 
         gif_item.setFlag(QGraphicsItem.ItemIsMovable, True)
@@ -1153,7 +1258,8 @@ class EditorWindow(QMainWindow):
             temp_dir = Path(tempfile.mkdtemp(prefix="slipsnap_clip_gif_"))
             target = temp_dir / "clipboard.gif"
             target.write_bytes(gif_bytes)
-        except Exception:
+        except Exception as exc:
+            logger.warning("Failed to materialize GIF from clipboard bytes: %s", exc)
             return None
         self._clipboard_temp_dirs.append(temp_dir)
         return target
@@ -1170,6 +1276,8 @@ class EditorWindow(QMainWindow):
         for gif_path in gif_paths:
             if self._insert_gif_item(gif_path, item_tag="gif"):
                 inserted = True
+        if gif_paths and not inserted:
+            logger.warning("GIF payload detected but no GIF items were inserted (%d candidates).", len(gif_paths))
         return inserted
 
     def _paste_from_clipboard(self) -> bool:
@@ -1249,6 +1357,15 @@ class EditorWindow(QMainWindow):
                 )
 
     def closeEvent(self, event):
+        worker = self._share_worker
+        if worker is not None:
+            try:
+                if worker.isRunning():
+                    worker.wait(3000)
+            except Exception:
+                pass
+        self._release_share_worker()
+
         for temp_dir in self._clipboard_temp_dirs:
             try:
                 shutil.rmtree(temp_dir, ignore_errors=True)
@@ -1258,3 +1375,4 @@ class EditorWindow(QMainWindow):
         if hasattr(self, "canvas"):
             self.canvas._cleanup_temp_dirs()
         super().closeEvent(event)
+

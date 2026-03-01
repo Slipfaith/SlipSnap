@@ -1,6 +1,8 @@
+# -*- coding: utf-8 -*-
 from typing import List, Tuple, Optional, TYPE_CHECKING, Type
 from pathlib import Path
 from time import perf_counter
+import logging
 from PIL import Image, ImageQt
 from PySide6.QtCore import (
     Qt,
@@ -61,6 +63,9 @@ from design_tokens import (
 if TYPE_CHECKING:
     from editor.editor_window import EditorWindow
     from logic import ScreenGrabber
+
+
+logger = logging.getLogger(__name__)
 
 
 class _KeybinderEventFilter(QAbstractNativeEventFilter):
@@ -153,7 +158,7 @@ class SelectionOverlayBase(QWidget):
             try:
                 self.grabMouse()
             except Exception:
-                pass
+                logger.debug("Failed to grab mouse in selection overlay", exc_info=True)
             self._update_hint_visibility()
             self.update()
 
@@ -229,7 +234,7 @@ class SelectionOverlayBase(QWidget):
             if QWidget.mouseGrabber() is self:
                 self.releaseMouse()
         except Exception:
-            pass
+            logger.debug("Failed to release mouse grab in selection overlay", exc_info=True)
 
     def paintEvent(self, e):
         p = QPainter(self)
@@ -484,6 +489,7 @@ class Launcher(QWidget):
     start_video = Signal()
     toggle_shape = Signal()
     hotkey_changed = Signal(str)
+    video_hotkey_changed = Signal(str)
     request_hide = Signal()
 
     def __init__(self, cfg: dict):
@@ -613,8 +619,10 @@ class Launcher(QWidget):
         lay = QVBoxLayout(dlg)
 
         form = QFormLayout()
-        edit = QKeySequenceEdit(self.cfg.get("capture_hotkey", "Ctrl+Alt+S"))
-        form.addRow("Горячая клавиша:", edit)
+        capture_edit = QKeySequenceEdit(self.cfg.get("capture_hotkey", "Ctrl+Alt+S"))
+        video_edit = QKeySequenceEdit(self.cfg.get("video_hotkey", "Ctrl+Alt+V"))
+        form.addRow("Горячая клавиша (снимок):", capture_edit)
+        form.addRow("Горячая клавиша (видео):", video_edit)
 
         try:
             duration_value = int(self.cfg.get("video_duration_sec", 6))
@@ -641,15 +649,28 @@ class Launcher(QWidget):
         buttons.rejected.connect(dlg.reject)
 
         if dlg.exec():
-            seq = edit.keySequence().toString()
-            if seq:
-                self.cfg["capture_hotkey"] = seq
+            capture_seq = capture_edit.keySequence().toString().strip()
+            video_seq = video_edit.keySequence().toString().strip()
+            if capture_seq and video_seq and capture_seq == video_seq:
+                QMessageBox.warning(
+                    self,
+                    "SlipSnap",
+                    "Горячие клавиши для снимка и видео должны отличаться.",
+                )
+                return
+
+            if capture_seq:
+                self.cfg["capture_hotkey"] = capture_seq
+            if video_seq:
+                self.cfg["video_hotkey"] = video_seq
             self.cfg["video_duration_sec"] = duration_spin.value()
             self.cfg["video_fps"] = fps_spin.value()
             save_config(self.cfg)
-            if seq:
-                self.btn_hotkey.setText(seq)
-                self.hotkey_changed.emit(seq)
+            if capture_seq:
+                self.btn_hotkey.setText(capture_seq)
+                self.hotkey_changed.emit(capture_seq)
+            if video_seq:
+                self.video_hotkey_changed.emit(video_seq)
 
 
 class App(QObject):
@@ -664,6 +685,7 @@ class App(QObject):
         self.launcher.start_video.connect(self.capture_video)
         self.launcher.toggle_shape.connect(self._toggle_shape)
         self.launcher.hotkey_changed.connect(self._update_hotkey)
+        self.launcher.video_hotkey_changed.connect(self._update_video_hotkey)
         self.launcher.request_hide.connect(self._on_launcher_hide_request)
         keybinder.init()
         dispatcher = QAbstractEventDispatcher.instance()
@@ -672,7 +694,9 @@ class App(QObject):
             self._keybinder_event_filter = _KeybinderEventFilter()
             dispatcher.installNativeEventFilter(self._keybinder_event_filter)
         self._hotkey_seq = None
+        self._video_hotkey_seq = None
         self._register_hotkey(self.cfg.get("capture_hotkey", "Ctrl+Alt+S"))
+        self._register_video_hotkey(self.cfg.get("video_hotkey", "Ctrl+Alt+V"))
         self.launcher.show()
         self._captured_once = False
         self._hidden_editors: List["EditorWindow"] = []
@@ -729,6 +753,30 @@ class App(QObject):
 
     def _update_hotkey(self, seq: str):
         self._register_hotkey(seq, fallback_seq=self._hotkey_seq)
+
+    def _trigger_video_hotkey(self):
+        self.capture_video(parent_widget=self.launcher)
+
+    def _register_video_hotkey(self, seq: str, fallback_seq: Optional[str] = None):
+        if self._video_hotkey_seq:
+            try:
+                keybinder.unregister_hotkey(None, self._video_hotkey_seq)
+            except (KeyError, AttributeError):
+                pass
+
+        if keybinder.register_hotkey(None, seq, self._trigger_video_hotkey):
+            self._video_hotkey_seq = seq
+        else:
+            self._video_hotkey_seq = None
+            QMessageBox.warning(None, "SlipSnap", f"Не удалось зарегистрировать горячую клавишу видео: {seq}")
+            if fallback_seq and fallback_seq != seq:
+                if keybinder.register_hotkey(None, fallback_seq, self._trigger_video_hotkey):
+                    self._video_hotkey_seq = fallback_seq
+                    self.cfg["video_hotkey"] = fallback_seq
+                    save_config(self.cfg)
+
+    def _update_video_hotkey(self, seq: str):
+        self._register_video_hotkey(seq, fallback_seq=self._video_hotkey_seq)
 
     def _start_series_capture(self, parent: Optional[QWidget] = None) -> bool:
         if parent is None:
@@ -977,8 +1025,10 @@ class App(QObject):
         if self._video_controller is not None:
             try:
                 self._video_controller.deleteLater()
+            except RuntimeError:
+                logger.debug("Video controller already deleted before cleanup")
             except Exception:
-                pass
+                logger.warning("Failed to delete video controller after recording", exc_info=True)
         self._video_controller = None
         if self._video_should_restore_launcher:
             self._show_launcher()
@@ -1206,7 +1256,7 @@ class App(QObject):
             self.launcher.raise_()
             self.launcher.activateWindow()
         except Exception:
-            pass
+            logger.debug("Failed to raise launcher window", exc_info=True)
         self._is_background = False
         self._update_tray_actions()
 
@@ -1233,17 +1283,17 @@ class App(QObject):
             try:
                 self.ovm.deleteLater()
             except Exception:
-                pass
+                logger.debug("Overlay window already deleted during background cleanup", exc_info=True)
             self.ovm = None
         if self._video_controller is not None:
             try:
                 self._video_controller.cancel_recording()
             except Exception:
-                pass
+                logger.warning("Failed to cancel active video recording during cleanup", exc_info=True)
             try:
                 self._video_controller.deleteLater()
             except Exception:
-                pass
+                logger.warning("Failed to delete video controller during cleanup", exc_info=True)
             self._video_controller = None
             self._video_capture_in_progress = False
         self._video_should_restore_launcher = False
@@ -1277,6 +1327,12 @@ class App(QObject):
             except (KeyError, AttributeError):
                 pass
             self._hotkey_seq = None
+        if self._video_hotkey_seq:
+            try:
+                keybinder.unregister_hotkey(None, self._video_hotkey_seq)
+            except (KeyError, AttributeError):
+                pass
+            self._video_hotkey_seq = None
 
         if self._tray_icon is not None:
             self._tray_icon.hide()
@@ -1291,7 +1347,7 @@ class App(QObject):
         try:
             self.launcher.force_close()
         except Exception:
-            pass
+            logger.warning("Failed to close launcher during app cleanup", exc_info=True)
         return True
 
     def _update_tray_actions(self):

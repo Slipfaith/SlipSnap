@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from .editor_window import EditorWindow
 from .ui.canvas import Canvas
 from .ui.color_widgets import ColorButton

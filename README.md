@@ -1,28 +1,64 @@
+<!-- -*- coding: utf-8 -*- -->
 # SlipSnap
 
-SlipSnap — десктоп-приложение на PySide6 для быстрого захвата экрана, редактирования и экспорта в статические и анимированные форматы.
+SlipSnap is a desktop screenshot and short-video editor built with PySide6.  
+Current version: **3.0**
 
-## Основные возможности
+---
 
-- Захват области или всего виртуального рабочего стола.
-- Корректная работа на 1-3+ мониторах с разным DPI и разрешением.
-- Лончер + режим в трее: при закрытии лончер уходит в трей, приложение продолжает работать.
-- Редактор с undo/redo, слоями и drag-and-drop изображений.
-- Вставка и редактирование анимированных GIF (в том числе из буфера и библиотеки мемов).
-- Экспорт в PNG/JPG/GIF; при анимированном контенте сохранение по умолчанию в GIF.
-- Видео-захват 5-10 секунд с экспортом в MP4 или GIF.
-- Библиотека мемов с анимированными GIF-превью, удалением, переименованием и открытием папки.
-- OCR-поток с выбором языков и вставкой распознанного текста на холст.
+## Русский
 
-## Установка и запуск
+### Что нового в 3.0
 
-### Требования
+- Централизована информация о версии/приложении в `main.py` (`APP_NAME`, `APP_VERSION`, `APP_DESCRIPTION`, `APP_AUTHOR`).
+- Добавлен быстрый шаринг из редактора: кнопка **Поделиться ссылкой (24ч)**.
+- Шаринг отправляет текущий экспорт (PNG или GIF) и копирует ссылку в буфер обмена.
+- Улучшена работа с GIF:
+  - вставка GIF из буфера/мем-библиотеки как анимированных элементов;
+  - сохранение в GIF по умолчанию при анимированном контенте;
+  - поддержка анимаций объектов и экспорт в анимированный GIF.
+- Улучшены инструменты редактора:
+  - Zoom Lens (лупа) как полноценный объект сцены;
+  - анимации объектов (`Draw`, `Pulse`);
+  - объединённая кнопка `Линия/Стрелка` с выбором через ПКМ.
+- Обновлена библиотека мемов:
+  - анимированные GIF-превью;
+  - удаление и переименование мемов;
+  - открытие папки мемов из UI;
+  - сохранение размера окна.
+- Видео-захват:
+  - экспорт в MP4/GIF;
+  - корректная работа UI записи и отмены;
+  - улучшенная интеграция с GIF workflow.
+- Улучшена обработка multi-monitor и DPI-сценариев при захвате области.
 
-- Python 3.8+
-- PySide6
+### Основные возможности
+
+- Захват области и всего рабочего стола.
+- Работа на 1–3+ мониторах с разным разрешением и DPI.
+- Лончер + режим в трее (приложение не закрывается полностью при закрытии окна).
+- Редактор с undo/redo, слоями, drag-and-drop и вставкой из буфера.
+- OCR с выбором языков и вставкой результата на холст.
+- Экспорт в PNG/JPG/GIF, видео в MP4/GIF.
+- Мем-библиотека с поддержкой анимированных GIF.
+
+### Шаринг (новое)
+
+- Кнопка: **Поделиться ссылкой (24ч)** в верхнем тулбаре редактора.
+- Сервис: `litterbox.catbox.moe` (временная ссылка, обычно до 24 часов).
+- API-ключ не нужен.
+- Ссылка автоматически копируется в буфер обмена.
+
+Примечание: доступность ссылки зависит от внешнего сервиса и маршрута сети.
+
+### Установка и запуск
+
+Требования:
+
+- Python 3.9+
 - FFmpeg (для видео и конвертации MP4 -> GIF)
 
-### Установка
+Установка:
 
 ```bash
 python -m venv .venv
@@ -36,116 +72,149 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### Запуск
+Запуск:
 
 ```bash
 python main.py
 ```
 
-## Базовый workflow
+### Быстрый workflow
 
-1. В лончере нажмите `Снимок` или `Видео`.
-2. Выделите область на экране.
-3. Для скриншота результат откроется в редакторе.
-4. Для видео выберите путь, формат (`MP4`/`GIF`) и при `GIF` при необходимости отметьте `Добавить в библиотеку мемов`.
+1. В лончере выбери `Снимок` или `Видео`.
+2. Выдели область.
+3. Отредактируй результат в Editor.
+4. Сохрани, скопируй или нажми `Поделиться ссылкой (24ч)`.
 
-Важно:
-- Отдельного отложенного popup после сохранения GIF нет — решение о добавлении в мемы принимается сразу в диалоге сохранения.
-- `Esc` отменяет захват/запись в процессе.
+### Горячие клавиши
 
-## Редактор
+Глобальные:
 
-### Инструменты
+- `Ctrl+Alt+S` — запуск захвата (настраивается в конфиге)
+- `Ctrl+Alt+V` — запуск записи видео (настраивается в конфиге)
 
-- `Выделение` (`V`)
-- `Лупа` (`G`) — отдельный объект сцены, можно добавлять несколько луп
-- `Фигуры` (`R`/`O`) — прямоугольник/эллипс
-- `Линия/Стрелка` (`L`/`A`) — одна кнопка, выбор типа через ПКМ
-- `Карандаш/Маркер` (`P` + выбор через ПКМ)
-- `Текст` (`T`)
-- `Блюр` (`B`)
-- `Ластик` (`E`)
+Редактор:
 
-### Анимации объектов
-
-Через контекстное меню элемента: `Animation`.
-
-- `Draw animation`:
-  - для линий/стрелок идёт прорисовка от начала к концу;
-  - цикл: активная прорисовка ~1.2с, пауза в финале ~1.5с, затем повтор.
-- `Pulse`:
-  - лёгкий масштаб `1.0 -> 1.05 -> 1.0`;
-  - доступен только для небольших объектов.
-
-Если на сцене есть GIF-элементы или назначены анимации объектов, сохранение по умолчанию идёт в `.gif`.
-
-### Лупа (Zoom Lens)
-
-- Лупа работает как обычная фигура: выделение, перемещение, масштабирование.
-- Размер и кратность сохраняются в конфиге.
-- Настройки лупы в верхней панели показываются только когда:
-  - активен инструмент `Лупа`, или
-  - выделена ровно одна лупа.
-- Визуальный бейдж кратности на самой лупе убран, чтобы не шуметь интерфейс.
-
-## GIF и библиотека мемов
-
-- GIF из библиотеки копируется как GIF (через набор MIME-форматов), вставка в редактор приоритетно GIF-first.
-- Превью GIF в библиотеке анимированные.
-- Поддержаны:
-  - удаление выбранных мемов;
-  - переименование (контекстное меню или `F2`);
-  - кнопка `Папка` / пункт `Открыть папку мемов`;
-  - сохранение размеров окна библиотеки между сессиями.
-
-## Горячие клавиши
-
-### Глобальные
-
-- `Ctrl+Alt+S` — запуск захвата (настраивается)
-
-### Выделение на экране
-
-- `ЛКМ` — начать/завершить выделение
-- `Space` — переключить форму (`rect`/`ellipse`)
-- `Esc` — отменить
-
-### Редактор
-
-- `Ctrl+N` — новый скриншот
+- `Ctrl+N` — новый снимок
 - `Ctrl+K` — история
 - `Ctrl+C` — копировать
 - `Ctrl+S` — сохранить
-- `Ctrl+Z` — отмена
-- `Ctrl+Shift+Z` — повтор
-- `Delete` — удалить выбранное
-- `Ctrl` + колесо / `Ctrl` + `+` / `Ctrl` + `-` — масштаб
+- `Ctrl+Z` / `Ctrl+Shift+Z` — undo/redo
+- `Delete` — удалить выбранные элементы
 
-## Конфигурация
+### Конфиг
 
 Файл: `~/.slipsnap_config.json`
 
-Ключи, связанные с новыми сценариями:
+Ключи (основные):
 
-- `video_duration_sec` (`5..10`)
-- `video_fps` (`10..24`)
-- `video_default_format` (`mp4`/`gif`)
+- `capture_hotkey`
+- `video_hotkey`
+- `video_duration_sec`
+- `video_fps`
+- `video_default_format`
 - `video_last_save_directory`
 - `meme_dialog_width`, `meme_dialog_height`
 - `zoom_lens_size`, `zoom_lens_factor`
 
-## Build With Bundled FFmpeg
+### Сборка с FFmpeg
 
-1. Положите `ffmpeg.exe` в один из путей в корне проекта:
+1. Положи `ffmpeg.exe` в один из путей:
    - `ffmpeg.exe`
    - `ffmpeg/ffmpeg.exe`
    - `bin/ffmpeg.exe`
-2. Соберите исполняемый файл:
+2. Собери `.exe`:
    - `pyinstaller SlipSnap.spec`
-3. Соберите установщик (Inno Setup):
+3. Собери инсталлятор:
    - `ISCC SlipSnap.iss`
 
-Примечания:
+---
 
-- `SlipSnap.spec` автоматически подхватывает `ffmpeg.exe` и добавляет его в сборку.
-- При запуске поиск FFmpeg идёт сначала в bundled-локациях (`sys._MEIPASS` / рядом с `.exe`), затем в `PATH`.
+## English
+
+### What is new in 3.0
+
+- App metadata/version is centralized in `main.py` (`APP_NAME`, `APP_VERSION`, `APP_DESCRIPTION`, `APP_AUTHOR`).
+- New editor action: **Share link (24h)**.
+- Sharing uploads current export (PNG or GIF) and copies URL to clipboard.
+- Improved GIF workflow:
+  - animated GIF paste from clipboard/meme library;
+  - default GIF export for animated content;
+  - object animations exported to animated GIF.
+- Editor tool improvements:
+  - Zoom Lens as a full scene object;
+  - object animations (`Draw`, `Pulse`);
+  - merged `Line/Arrow` tool button with right-click mode selection.
+- Meme library updates:
+  - animated GIF previews;
+  - delete/rename memes;
+  - open memes folder from UI;
+  - persisted window size.
+- Video capture updates:
+  - MP4/GIF output;
+  - better record UI/cancel handling;
+  - tighter GIF workflow integration.
+- Better region mapping in multi-monitor + mixed-DPI setups.
+
+### Core features
+
+- Region/full-screen capture.
+- 1–3+ monitor support with mixed resolution and DPI.
+- Launcher + tray mode.
+- Editor with undo/redo, layers, drag-and-drop, clipboard paste.
+- OCR flow with language selection.
+- Export to PNG/JPG/GIF and video MP4/GIF.
+- Meme library with animated GIF support.
+
+### Sharing (new)
+
+- Button: **Share link (24h)** in editor top toolbar.
+- Provider: `litterbox.catbox.moe` (temporary URL, typically up to 24 hours).
+- No API key required.
+- URL is copied to clipboard automatically.
+
+Note: link availability depends on the external hosting/CDN route.
+
+### Install and run
+
+Requirements:
+
+- Python 3.9+
+- FFmpeg (for video and MP4 -> GIF conversion)
+
+Install:
+
+```bash
+python -m venv .venv
+
+# Windows
+.venv\Scripts\activate
+
+# Linux/macOS
+source .venv/bin/activate
+
+pip install -r requirements.txt
+```
+
+Run:
+
+```bash
+python main.py
+```
+
+### Quick workflow
+
+1. Choose `Screenshot` or `Video` in launcher.
+2. Select capture region.
+3. Edit in editor.
+4. Save/copy/share with `Share link (24h)`.
+
+### Build with bundled FFmpeg
+
+1. Put `ffmpeg.exe` into one of:
+   - `ffmpeg.exe`
+   - `ffmpeg/ffmpeg.exe`
+   - `bin/ffmpeg.exe`
+2. Build app:
+   - `pyinstaller SlipSnap.spec`
+3. Build installer:
+   - `ISCC SlipSnap.iss`

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Workflow helpers for storing recorded GIFs in meme library."""
 
 from __future__ import annotations
@@ -45,4 +46,3 @@ def try_add_gif_to_meme_library(source_gif: Path, *, stem: Optional[str] = None)
         return GifLibrarySaveResult(ok=True, target_path=saved)
     except Exception as exc:
         return GifLibrarySaveResult(ok=False, error=str(exc))
-

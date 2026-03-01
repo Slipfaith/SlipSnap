@@ -1,7 +1,9 @@
+# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Dict
+import logging
 
 from PIL import Image
 from PySide6.QtCore import QSize, Qt, QTimer, Signal, QUrl
@@ -29,8 +31,11 @@ from meme_library import add_memes_from_paths, delete_memes, list_memes
 from logic import MEME_DIR, save_config
 
 
+logger = logging.getLogger(__name__)
+
+
 class MemesDialog(QWidget):
-    """Dark modern meme library dialog with animated GIF previews."""
+    """Light modern meme library dialog with animated GIF previews."""
 
     memeSelected = Signal(Path)
     _THUMB_BATCH = 6
@@ -44,6 +49,7 @@ class MemesDialog(QWidget):
         self._gif_movies: Dict[Path, QMovie] = {}
         self._all_paths: list[Path] = []
         self._thumb_idx = 0
+        self._thumb_loading_enabled = True
         self._size_save_timer = QTimer(self)
         self._size_save_timer.setSingleShot(True)
         self._size_save_timer.timeout.connect(self._persist_window_size)
@@ -161,6 +167,7 @@ class MemesDialog(QWidget):
 
     def _reload_list(self) -> None:
         query = self._search_edit.text().strip().lower()
+        self._thumb_loading_enabled = True
         if query:
             filtered = [p for p in self._all_paths if query in p.stem.lower() or query in p.name.lower()]
         else:
@@ -198,11 +205,11 @@ class MemesDialog(QWidget):
         try:
             movie.stop()
         except Exception:
-            pass
+            logger.debug("Failed to stop GIF preview movie", exc_info=True)
         try:
             movie.setFileName("")
         except Exception:
-            pass
+            logger.debug("Failed to clear GIF preview movie filename", exc_info=True)
         movie.deleteLater()
 
     def _clear_gif_movies(self) -> None:
@@ -303,6 +310,8 @@ class MemesDialog(QWidget):
         self._sync_gif_playback()
 
     def _load_thumb_batch(self) -> None:
+        if not self._thumb_loading_enabled:
+            return
         end = min(self._thumb_idx + self._THUMB_BATCH, self._list.count())
         max_dimension = Metrics.MEME_LIST_ICON
 
@@ -324,7 +333,7 @@ class MemesDialog(QWidget):
             self._set_static_item_icon(item, pixmap, max_dimension)
 
         self._thumb_idx = end
-        if self._thumb_idx < self._list.count():
+        if self._thumb_loading_enabled and self._thumb_idx < self._list.count():
             QTimer.singleShot(0, self._load_thumb_batch)
         else:
             self._sync_gif_playback()
@@ -370,7 +379,7 @@ class MemesDialog(QWidget):
         try:
             MEME_DIR.mkdir(parents=True, exist_ok=True)
         except Exception:
-            pass
+            logger.warning("Failed to create/open meme directory '%s'", MEME_DIR, exc_info=True)
         opened = QDesktopServices.openUrl(QUrl.fromLocalFile(str(MEME_DIR)))
         if not opened:
             QMessageBox.warning(self, "Ошибка", f"Не удалось открыть папку:\n{MEME_DIR}")
@@ -602,9 +611,10 @@ class MemesDialog(QWidget):
         try:
             save_config(self._cfg)
         except Exception:
-            pass
+            logger.warning("Failed to persist meme dialog size", exc_info=True)
 
     def hideEvent(self, event):
+        self._thumb_loading_enabled = False
         self._persist_window_size()
         self._pause_all_gif_playback()
         super().hideEvent(event)

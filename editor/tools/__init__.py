@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Tool implementations used by the editor canvas."""
 
 from .selection_tool import SelectionTool

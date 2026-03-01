@@ -1,10 +1,13 @@
+# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 import copy
 import json
+import logging
 import math
 import uuid
 import tempfile
+from datetime import datetime
 from pathlib import Path
 from typing import Tuple, Optional, TYPE_CHECKING
 
@@ -15,8 +18,9 @@ import mss
 from PIL import Image
 
 from design_tokens import Typography, Metrics
-APP_NAME = "SlipSnap"
-APP_VERSION = "2.2"
+
+logger = logging.getLogger(__name__)
+
 CONFIG_PATH = Path.home() / ".slipsnap_config.json"
 HISTORY_DIR = Path(tempfile.gettempdir()) / "slipsnap_history"
 HISTORY_DIR.mkdir(parents=True, exist_ok=True)
@@ -28,6 +32,7 @@ DEFAULT_CONFIG = {
     "pen_width": 3,
     "font_px": Typography.TEXT_TOOL_DEFAULT_POINT,
     "capture_hotkey": "Ctrl+Alt+S",
+    "video_hotkey": "Ctrl+Alt+V",
     "last_save_directory": str(Path.home()),
     "video_duration_sec": 6,
     "video_fps": 15,
@@ -69,6 +74,18 @@ def _clamp_float(value, default: float, min_value: float, max_value: float) -> f
 
 
 def _normalize_video_config(cfg: dict) -> None:
+    capture_hotkey = str(cfg.get("capture_hotkey", "Ctrl+Alt+S")).strip()
+    if not capture_hotkey:
+        capture_hotkey = "Ctrl+Alt+S"
+    cfg["capture_hotkey"] = capture_hotkey
+
+    video_hotkey = str(cfg.get("video_hotkey", "Ctrl+Alt+V")).strip()
+    if not video_hotkey:
+        video_hotkey = "Ctrl+Alt+V"
+    if video_hotkey == capture_hotkey:
+        video_hotkey = "Ctrl+Alt+V"
+    cfg["video_hotkey"] = video_hotkey
+
     cfg["video_duration_sec"] = _clamp_int(cfg.get("video_duration_sec"), 6, 5, 10)
     cfg["video_fps"] = _clamp_int(cfg.get("video_fps"), 15, 10, 24)
 
@@ -107,6 +124,22 @@ def _normalize_video_config(cfg: dict) -> None:
     cfg["zoom_lens_size"] = _clamp_int(cfg.get("zoom_lens_size"), 90, 60, 260)
     cfg["zoom_lens_factor"] = _clamp_float(cfg.get("zoom_lens_factor"), 2.0, 1.2, 8.0)
 
+
+def _backup_corrupted_config(path: Path) -> Optional[Path]:
+    """Move corrupted config aside to a timestamped backup file."""
+    if not path.exists():
+        return None
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    for suffix_idx in range(100):
+        postfix = f".bak.{stamp}" if suffix_idx == 0 else f".bak.{stamp}.{suffix_idx}"
+        target = path.with_name(path.name + postfix)
+        if target.exists():
+            continue
+        path.replace(target)
+        return target
+    return None
+
+
 def load_config() -> dict:
     cfg = copy.deepcopy(DEFAULT_CONFIG)
     if CONFIG_PATH.exists():
@@ -123,8 +156,20 @@ def load_config() -> dict:
                         cfg[key] = merged
                     elif not isinstance(default_value, dict):
                         cfg[key] = user_value
-        except Exception:
-            pass
+        except (json.JSONDecodeError, OSError) as exc:
+            backup_path = None
+            try:
+                backup_path = _backup_corrupted_config(CONFIG_PATH)
+            except Exception as backup_exc:
+                logger.warning("Failed to backup corrupted config '%s': %s", CONFIG_PATH, backup_exc)
+            logger.warning(
+                "Failed to load config '%s' (%s). Using defaults. Backup: %s",
+                CONFIG_PATH,
+                exc,
+                backup_path if backup_path is not None else "not created",
+            )
+        except Exception as exc:
+            logger.warning("Unexpected error while reading config '%s': %s", CONFIG_PATH, exc)
     _normalize_video_config(cfg)
     return cfg
 
