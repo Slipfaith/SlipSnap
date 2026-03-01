@@ -94,6 +94,7 @@ tests/slipsnap_test_*/
 tests/tt_*/
 .codex_tmp/
 tests/.tmp/
+tests/.tmp*
 
 # =========================
 # Local configs / Secrets
@@ -115,6 +116,7 @@ tests/.tmp/
 *.tgz
 *.7z
 *.rar
+*.mhtml
 
 # =========================
 # Images / Assets (unnecessary in repo)
