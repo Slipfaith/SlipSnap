@@ -92,12 +92,15 @@ temp/
 *.orig
 tests/slipsnap_test_*/
 tests/tt_*/
+.codex_tmp/
+tests/.tmp/
 
 # =========================
 # Local configs / Secrets
 # =========================
 .env
 .env.*.local
+.claude/settings.local.json
 *.secret
 *.key
 *.pem
