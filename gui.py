@@ -24,6 +24,8 @@ from PySide6.QtGui import (
     QImage,
     QPainterPath,
     QIcon,
+    QKeySequence,
+    QShortcut,
 )
 from PySide6.QtWidgets import (
     QApplication,
@@ -87,6 +89,7 @@ class SelectionOverlayBase(QWidget):
 
         self.cfg = cfg
         self.shape = cfg.get("shape", "rect")
+        self._cancel_emitted = False
 
         self.base_img = base_img.convert("RGBA")
         self._blur_factor = max(1, cfg.get("blur_radius", 2) * 2)
@@ -111,6 +114,12 @@ class SelectionOverlayBase(QWidget):
         self.shape_hint.hide()
         self._update_shape_hint()
 
+        # Some packaged builds sporadically miss direct keyPressEvent delivery.
+        # Application-level shortcut keeps Esc cancellation reliable.
+        self._esc_shortcut = QShortcut(QKeySequence(Qt.Key_Escape), self)
+        self._esc_shortcut.setContext(Qt.ApplicationShortcut)
+        self._esc_shortcut.activated.connect(self._cancel_selection)
+
     def _blur_pixmap(self, pixmap: QPixmap) -> QPixmap:
         """Fast blur via downsample + upsample (no PIL dependency)."""
         w, h = pixmap.width(), pixmap.height()
@@ -131,6 +140,7 @@ class SelectionOverlayBase(QWidget):
     def showEvent(self, e):
         super().showEvent(e)
         self.activateWindow()
+        self.setFocus(Qt.ActiveWindowFocusReason)
         self.raise_()
         self.grabKeyboard()
 
@@ -141,14 +151,22 @@ class SelectionOverlayBase(QWidget):
 
     def keyPressEvent(self, e):
         if e.key() == Qt.Key_Escape:
-            self._release_mouse_grab()
-            self.releaseKeyboard()
-            self.cancel_all.emit()
+            self._cancel_selection()
             return
         if e.key() == Qt.Key_Space:
             self.shape = "ellipse" if self.shape == "rect" else "rect"
             self._update_shape_hint()
             self.update()
+
+    def _cancel_selection(self) -> None:
+        if self._cancel_emitted:
+            return
+        self._cancel_emitted = True
+        self.selecting = False
+        self._update_hint_visibility()
+        self._release_mouse_grab()
+        self.releaseKeyboard()
+        self.cancel_all.emit()
 
     def mousePressEvent(self, e):
         if e.button() == Qt.LeftButton:
@@ -183,9 +201,7 @@ class SelectionOverlayBase(QWidget):
                     result.putalpha(mask)
                     qimg = copy_pil_image_to_clipboard(result)
                     self.captured.emit(qimg)
-        self._release_mouse_grab()
-        self.releaseKeyboard()
-        self.cancel_all.emit()
+        self._cancel_selection()
 
     def _create_selection_mask(self, width: int, height: int) -> Image.Image:
         """Build a smooth alpha mask for the current selection shape.

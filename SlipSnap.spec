@@ -1,4 +1,4 @@
-# -*- mode: python ; coding: utf-8 -*-
+gi# -*- mode: python ; coding: utf-8 -*-
 """
 PyInstaller spec for building SlipSnap as a single-file Windows executable.
 Compatible with PyInstaller 6+ and Python 3.13+
@@ -37,6 +37,8 @@ hiddenimports += collect_submodules("pyqtkeybind")
 # OCR stack (pytesseract pulls optional submodules dynamically)
 hiddenimports += collect_submodules("pytesseract")
 hiddenimports += collect_submodules("PIL")
+# Upload stack (requests is imported dynamically in upload_service.py)
+hiddenimports += collect_submodules("requests")
 
 # ----------------------------------------------------------------------
 # 🧩 Path & icon
