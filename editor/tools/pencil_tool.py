@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from PySide6.QtCore import QPointF
 from PySide6.QtGui import QPainterPath
 from PySide6.QtWidgets import QGraphicsItem

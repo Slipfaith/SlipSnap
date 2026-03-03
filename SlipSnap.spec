@@ -43,6 +43,18 @@ hiddenimports += collect_submodules("PIL")
 # ----------------------------------------------------------------------
 pathex = [str(project_dir)]
 icon_path = project_dir / "SlipSnap.ico"
+ffmpeg_candidates = [
+    project_dir / "ffmpeg.exe",
+    project_dir / "ffmpeg" / "ffmpeg.exe",
+    project_dir / "bin" / "ffmpeg.exe",
+]
+bundled_binaries = []
+for candidate in ffmpeg_candidates:
+    if candidate.is_file():
+        bundled_binaries.append((str(candidate), "."))
+        break
+if not bundled_binaries:
+    print("WARNING: ffmpeg.exe not found, build will require FFmpeg in PATH at runtime.")
 
 # ----------------------------------------------------------------------
 # ⚙️ Analysis configuration
@@ -50,7 +62,7 @@ icon_path = project_dir / "SlipSnap.ico"
 a = Analysis(
     [str(project_dir / "main.py")],
     pathex=pathex,
-    binaries=[],
+    binaries=bundled_binaries,
     datas=[],  # можно добавить ресурсы: [("assets", "assets")]
     hiddenimports=hiddenimports,
     hookspath=[],

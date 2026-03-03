@@ -1,6 +1,8 @@
+# -*- coding: utf-8 -*-
 from typing import List, Tuple, Optional, TYPE_CHECKING, Type
 from pathlib import Path
 from time import perf_counter
+import logging
 from PIL import Image, ImageQt
 from PySide6.QtCore import (
     Qt,
@@ -33,17 +35,21 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QDialog,
     QDialogButtonBox,
+    QFormLayout,
     QKeySequenceEdit,
+    QSpinBox,
     QSystemTrayIcon,
     QMenu,
 )
 from logic import load_config, save_config, qimage_to_pil, save_history
 from clipboard_utils import copy_pil_image_to_clipboard
-from icons import make_icon_capture, make_icon_shape, make_icon_close
+from icons import make_icon_capture, make_icon_shape, make_icon_close, make_icon_video
 from pyqtkeybind import keybinder
 
 from editor.series_capture import SeriesCaptureController
 from ocr import configure_tesseract, warm_up_ocr
+from video_capture import VideoCaptureController
+from video_encoding import FFmpegUnavailableError, ensure_ffmpeg_available
 
 from design_tokens import (
     Palette,
@@ -57,6 +63,9 @@ from design_tokens import (
 if TYPE_CHECKING:
     from editor.editor_window import EditorWindow
     from logic import ScreenGrabber
+
+
+logger = logging.getLogger(__name__)
 
 
 class _KeybinderEventFilter(QAbstractNativeEventFilter):
@@ -132,6 +141,7 @@ class SelectionOverlayBase(QWidget):
 
     def keyPressEvent(self, e):
         if e.key() == Qt.Key_Escape:
+            self._release_mouse_grab()
             self.releaseKeyboard()
             self.cancel_all.emit()
             return
@@ -145,6 +155,10 @@ class SelectionOverlayBase(QWidget):
             self.selecting = True
             self.origin = e.globalPosition().toPoint()
             self.current = self.origin
+            try:
+                self.grabMouse()
+            except Exception:
+                logger.debug("Failed to grab mouse in selection overlay", exc_info=True)
             self._update_hint_visibility()
             self.update()
 
@@ -157,6 +171,7 @@ class SelectionOverlayBase(QWidget):
     def mouseReleaseEvent(self, e):
         if e.button() == Qt.LeftButton and self.selecting:
             self.selecting = False
+            self._release_mouse_grab()
             self._update_hint_visibility()
             gr = self._norm(self.origin, self.current)
             if gr.width() > 5 and gr.height() > 5:
@@ -168,6 +183,7 @@ class SelectionOverlayBase(QWidget):
                     result.putalpha(mask)
                     qimg = copy_pil_image_to_clipboard(result)
                     self.captured.emit(qimg)
+        self._release_mouse_grab()
         self.releaseKeyboard()
         self.cancel_all.emit()
 
@@ -212,6 +228,13 @@ class SelectionOverlayBase(QWidget):
         left, right = sorted([x1, x2])
         top, bottom = sorted([y1, y2])
         return QRect(left, top, right - left, bottom - top)
+
+    def _release_mouse_grab(self) -> None:
+        try:
+            if QWidget.mouseGrabber() is self:
+                self.releaseMouse()
+        except Exception:
+            logger.debug("Failed to release mouse grab in selection overlay", exc_info=True)
 
     def paintEvent(self, e):
         p = QPainter(self)
@@ -288,16 +311,18 @@ class ScreenOverlay(SelectionOverlayBase):
 
     def _map_rect_to_image_coords(self, gr: QRect) -> Tuple[int, int, int, int]:
         g = self._screen.geometry()
-        try:
-            dpr = float(self._screen.devicePixelRatio())
-        except Exception:
-            dpr = 1.0
-        lx = gr.x() - g.x()
-        ly = gr.y() - g.y()
-        left = int(round(lx * dpr))
-        top = int(round(ly * dpr))
-        w = int(round(gr.width() * dpr))
-        h = int(round(gr.height() * dpr))
+        screen_w = max(1.0, float(g.width()))
+        screen_h = max(1.0, float(g.height()))
+        img_w = float(max(1, self.base_img.width))
+        img_h = float(max(1, self.base_img.height))
+        scale_x = img_w / screen_w
+        scale_y = img_h / screen_h
+        lx = max(0.0, min(screen_w, float(gr.x() - g.x())))
+        ly = max(0.0, min(screen_h, float(gr.y() - g.y())))
+        left = int(round(lx * scale_x))
+        top = int(round(ly * scale_y))
+        w = int(round(float(gr.width()) * scale_x))
+        h = int(round(float(gr.height()) * scale_y))
         return left, top, max(1, w), max(1, h)
 
 
@@ -314,9 +339,37 @@ class VirtualOverlay(SelectionOverlayBase):
         self._screen_map = screen_map
         self._base_left, self._base_top = base_origin
 
+    @staticmethod
+    def _nearest_screen(point: QPoint):
+        screens = QGuiApplication.screens()
+        if not screens:
+            return QGuiApplication.primaryScreen()
+        best = screens[0]
+        best_dist = float("inf")
+        px, py = point.x(), point.y()
+        for screen in screens:
+            g = screen.geometry()
+            dx = 0
+            if px < g.left():
+                dx = g.left() - px
+            elif px > g.right():
+                dx = px - g.right()
+            dy = 0
+            if py < g.top():
+                dy = g.top() - py
+            elif py > g.bottom():
+                dy = py - g.bottom()
+            dist = float(dx * dx + dy * dy)
+            if dist < best_dist:
+                best = screen
+                best_dist = dist
+        return best
+
     def _screen_for_point(self, p: QPoint):
         s = QGuiApplication.screenAt(p)
-        return s if s else QGuiApplication.primaryScreen()
+        if s is not None:
+            return s
+        return self._nearest_screen(p)
 
     def _find_mon(self, screen) -> dict:
         for sc, mon in self._screen_map:
@@ -326,21 +379,23 @@ class VirtualOverlay(SelectionOverlayBase):
 
     def _logical_to_phys(self, p: QPoint) -> Tuple[int, int]:
         s = self._screen_for_point(p)
+        if s is None:
+            return 0, 0
         mon = self._find_mon(s)
         g = s.geometry()
-        try:
-            dpr = float(s.devicePixelRatio())
-        except Exception:
-            dpr = 1.0
-        lx = p.x() - g.x()
-        ly = p.y() - g.y()
-        ax = mon["left"] + int(round(lx * dpr))
-        ay = mon["top"] + int(round(ly * dpr))
+        screen_w = max(1.0, float(g.width()))
+        screen_h = max(1.0, float(g.height()))
+        scale_x = float(mon["width"]) / screen_w
+        scale_y = float(mon["height"]) / screen_h
+        lx = max(0.0, min(screen_w, float(p.x() - g.x())))
+        ly = max(0.0, min(screen_h, float(p.y() - g.y())))
+        ax = int(round(float(mon["left"]) + lx * scale_x))
+        ay = int(round(float(mon["top"]) + ly * scale_y))
         return ax - self._base_left, ay - self._base_top
 
     def _map_rect_to_image_coords(self, gr: QRect) -> Tuple[int, int, int, int]:
         p1 = self._logical_to_phys(gr.topLeft())
-        p2 = self._logical_to_phys(gr.bottomRight())
+        p2 = self._logical_to_phys(QPoint(gr.x() + gr.width(), gr.y() + gr.height()))
         left = min(p1[0], p2[0])
         top = min(p1[1], p2[1])
         right = max(p1[0], p2[0])
@@ -367,48 +422,12 @@ class OverlayManager(QObject):
             self._grabber = ScreenGrabber()
         return self._grabber
 
-    def _screen_phys_rect(self, s) -> Tuple[int, int, int, int]:
-        g = s.geometry()
-        try:
-            dpr = float(s.devicePixelRatio())
-        except Exception:
-            dpr = 1.0
-        return (
-            int(round(g.x() * dpr)),
-            int(round(g.y() * dpr)),
-            int(round(g.width() * dpr)),
-            int(round(g.height() * dpr)),
-        )
-
     def _match_monitors(self) -> List[Tuple[object, dict]]:
         grabber = self._ensure_grabber()
-        sct = grabber._sct
-        mons = sct.monitors[1:]
-        if not mons:
+        try:
+            return grabber.match_screens_to_monitors()
+        except Exception:
             return []
-        # O(1) lookup for exact geometry matches
-        by_key = {(m["left"], m["top"], m["width"], m["height"]): m for m in mons}
-        out: List[Tuple[object, dict]] = []
-        for s in QGuiApplication.screens():
-            key = self._screen_phys_rect(s)
-            exact = by_key.get(key)
-            if exact:
-                out.append((s, exact))
-                continue
-            # Fallback: single pass to find best intersection
-            sx, sy, sw, sh = key
-            best = None
-            best_area = -1
-            for m in mons:
-                ix = max(sx, m["left"])
-                iy = max(sy, m["top"])
-                area = max(0, min(sx + sw, m["left"] + m["width"]) - ix) * \
-                       max(0, min(sy + sh, m["top"] + m["height"]) - iy)
-                if area > best_area:
-                    best_area = area
-                    best = m
-            out.append((s, best if best else mons[0]))
-        return out
 
     def start(self):
         mode = self.cfg.get("capture_mode", "virtual")
@@ -418,7 +437,10 @@ class OverlayManager(QObject):
             self._start_virtual()
 
     def _start_virtual(self):
-        virt = QGuiApplication.primaryScreen().virtualGeometry()
+        primary = QGuiApplication.primaryScreen()
+        if primary is None:
+            raise RuntimeError("Не удалось определить основной экран.")
+        virt = primary.virtualGeometry()
         grabber = self._ensure_grabber()
         img = grabber.grab_virtual()
         mapping = self._match_monitors()
@@ -464,8 +486,10 @@ class OverlayManager(QObject):
 
 class Launcher(QWidget):
     start_capture = Signal()
+    start_video = Signal()
     toggle_shape = Signal()
     hotkey_changed = Signal(str)
+    video_hotkey_changed = Signal(str)
     request_hide = Signal()
 
     def __init__(self, cfg: dict):
@@ -503,6 +527,14 @@ class Launcher(QWidget):
         self.btn_capture.clicked.connect(self.start_capture.emit)
         btns.addWidget(self.btn_capture)
 
+        self.btn_video = QToolButton()
+        self.btn_video.setIcon(make_icon_video())
+        self.btn_video.setIconSize(QSize(Metrics.LAUNCHER_ICON, Metrics.LAUNCHER_ICON))
+        self.btn_video.setText("Видео")
+        self.btn_video.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+        self.btn_video.clicked.connect(self.start_video.emit)
+        btns.addWidget(self.btn_video)
+
         self.btn_shape = QToolButton()
         self.btn_shape.setIcon(make_icon_shape(self.cfg.get("shape", "rect")))
         self.btn_shape.setIconSize(QSize(Metrics.LAUNCHER_ICON, Metrics.LAUNCHER_ICON))
@@ -529,6 +561,7 @@ class Launcher(QWidget):
         main_layout.addWidget(container)
 
         self._drag_pos = None
+        self._force_close_requested = False
         scr = QGuiApplication.primaryScreen().geometry()
         self.move(
             scr.center().x() - self.width() // 2,
@@ -542,7 +575,18 @@ class Launcher(QWidget):
         self.request_hide.emit()
 
     def force_close(self):
-        super().close()
+        self._force_close_requested = True
+        try:
+            super().close()
+        finally:
+            self._force_close_requested = False
+
+    def closeEvent(self, event):
+        if self._force_close_requested:
+            super().closeEvent(event)
+            return
+        event.ignore()
+        self.request_hide.emit()
 
     def _create_shadow_effect(self):
         from PySide6.QtWidgets import QGraphicsDropShadowEffect
@@ -571,20 +615,62 @@ class Launcher(QWidget):
 
     def _on_hotkey(self):
         dlg = QDialog(self)
-        dlg.setWindowTitle("Горячая клавиша")
+        dlg.setWindowTitle("Настройки")
         lay = QVBoxLayout(dlg)
-        edit = QKeySequenceEdit(self.cfg.get("capture_hotkey", "Ctrl+Alt+S"))
-        lay.addWidget(edit)
+
+        form = QFormLayout()
+        capture_edit = QKeySequenceEdit(self.cfg.get("capture_hotkey", "Ctrl+Alt+S"))
+        video_edit = QKeySequenceEdit(self.cfg.get("video_hotkey", "Ctrl+Alt+V"))
+        form.addRow("Горячая клавиша (снимок):", capture_edit)
+        form.addRow("Горячая клавиша (видео):", video_edit)
+
+        try:
+            duration_value = int(self.cfg.get("video_duration_sec", 6))
+        except Exception:
+            duration_value = 6
+        duration_spin = QSpinBox(dlg)
+        duration_spin.setRange(5, 10)
+        duration_spin.setValue(max(5, min(10, duration_value)))
+        form.addRow("Видео, сек:", duration_spin)
+
+        try:
+            fps_value = int(self.cfg.get("video_fps", 15))
+        except Exception:
+            fps_value = 15
+        fps_spin = QSpinBox(dlg)
+        fps_spin.setRange(10, 24)
+        fps_spin.setValue(max(10, min(24, fps_value)))
+        form.addRow("Видео FPS:", fps_spin)
+
+        lay.addLayout(form)
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         lay.addWidget(buttons)
         buttons.accepted.connect(dlg.accept)
         buttons.rejected.connect(dlg.reject)
-        if dlg.exec() and not edit.keySequence().isEmpty():
-            seq = edit.keySequence().toString()
-            self.cfg["capture_hotkey"] = seq
+
+        if dlg.exec():
+            capture_seq = capture_edit.keySequence().toString().strip()
+            video_seq = video_edit.keySequence().toString().strip()
+            if capture_seq and video_seq and capture_seq == video_seq:
+                QMessageBox.warning(
+                    self,
+                    "SlipSnap",
+                    "Горячие клавиши для снимка и видео должны отличаться.",
+                )
+                return
+
+            if capture_seq:
+                self.cfg["capture_hotkey"] = capture_seq
+            if video_seq:
+                self.cfg["video_hotkey"] = video_seq
+            self.cfg["video_duration_sec"] = duration_spin.value()
+            self.cfg["video_fps"] = fps_spin.value()
             save_config(self.cfg)
-            self.btn_hotkey.setText(seq)
-            self.hotkey_changed.emit(seq)
+            if capture_seq:
+                self.btn_hotkey.setText(capture_seq)
+                self.hotkey_changed.emit(capture_seq)
+            if video_seq:
+                self.video_hotkey_changed.emit(video_seq)
 
 
 class App(QObject):
@@ -596,8 +682,10 @@ class App(QObject):
         warm_up_ocr()
         self.launcher = Launcher(self.cfg)
         self.launcher.start_capture.connect(self.capture_region)
+        self.launcher.start_video.connect(self.capture_video)
         self.launcher.toggle_shape.connect(self._toggle_shape)
         self.launcher.hotkey_changed.connect(self._update_hotkey)
+        self.launcher.video_hotkey_changed.connect(self._update_video_hotkey)
         self.launcher.request_hide.connect(self._on_launcher_hide_request)
         keybinder.init()
         dispatcher = QAbstractEventDispatcher.instance()
@@ -606,7 +694,9 @@ class App(QObject):
             self._keybinder_event_filter = _KeybinderEventFilter()
             dispatcher.installNativeEventFilter(self._keybinder_event_filter)
         self._hotkey_seq = None
+        self._video_hotkey_seq = None
         self._register_hotkey(self.cfg.get("capture_hotkey", "Ctrl+Alt+S"))
+        self._register_video_hotkey(self.cfg.get("video_hotkey", "Ctrl+Alt+V"))
         self.launcher.show()
         self._captured_once = False
         self._hidden_editors: List["EditorWindow"] = []
@@ -618,10 +708,14 @@ class App(QObject):
         self._tray_icon: Optional[QSystemTrayIcon] = None
         self._tray_menu: Optional[QMenu] = None
         self._tray_action_capture = None
+        self._tray_action_video = None
         self._tray_action_show = None
         self._tray_action_exit = None
         self._cleaned_up = False
         self._is_background = False
+        self._video_capture_in_progress = False
+        self._video_controller: Optional[VideoCaptureController] = None
+        self._video_should_restore_launcher = False
         self._series_controller = SeriesCaptureController(self.cfg)
         self._series_parent: Optional[QWidget] = None
         self._init_tray_icon()
@@ -660,6 +754,30 @@ class App(QObject):
     def _update_hotkey(self, seq: str):
         self._register_hotkey(seq, fallback_seq=self._hotkey_seq)
 
+    def _trigger_video_hotkey(self):
+        self.capture_video(parent_widget=self.launcher)
+
+    def _register_video_hotkey(self, seq: str, fallback_seq: Optional[str] = None):
+        if self._video_hotkey_seq:
+            try:
+                keybinder.unregister_hotkey(None, self._video_hotkey_seq)
+            except (KeyError, AttributeError):
+                pass
+
+        if keybinder.register_hotkey(None, seq, self._trigger_video_hotkey):
+            self._video_hotkey_seq = seq
+        else:
+            self._video_hotkey_seq = None
+            QMessageBox.warning(None, "SlipSnap", f"Не удалось зарегистрировать горячую клавишу видео: {seq}")
+            if fallback_seq and fallback_seq != seq:
+                if keybinder.register_hotkey(None, fallback_seq, self._trigger_video_hotkey):
+                    self._video_hotkey_seq = fallback_seq
+                    self.cfg["video_hotkey"] = fallback_seq
+                    save_config(self.cfg)
+
+    def _update_video_hotkey(self, seq: str):
+        self._register_video_hotkey(seq, fallback_seq=self._video_hotkey_seq)
+
     def _start_series_capture(self, parent: Optional[QWidget] = None) -> bool:
         if parent is None:
             parent = self.launcher
@@ -672,6 +790,12 @@ class App(QObject):
             self._series_parent = None
         self._update_editor_series_buttons()
         return False
+
+    def _start_video_capture(self, parent: Optional[QWidget] = None) -> bool:
+        if self._video_capture_in_progress or self._full_capture_in_progress:
+            return False
+        self.capture_video(parent_widget=parent)
+        return self._video_capture_in_progress
 
     def _on_series_captured(self, qimg: QImage):
         parent = self._series_parent or self.launcher
@@ -785,6 +909,8 @@ class App(QObject):
         self._enter_background(from_user=True)
 
     def capture_region(self):
+        if self._video_capture_in_progress:
+            return
         self._hide_editor_windows()
         self.launcher.hide()
         try:
@@ -805,8 +931,112 @@ class App(QObject):
         """Backward-compatible alias for region capture."""
         self.capture_region()
 
+    def capture_video(self, _checked: bool = False, parent_widget: Optional[QWidget] = None):
+        if self._video_capture_in_progress or self._full_capture_in_progress:
+            return
+
+        self._video_should_restore_launcher = not self._is_background and not self.launcher.isHidden()
+        ffmpeg_bin = self._ensure_ffmpeg_ready()
+        if not ffmpeg_bin:
+            if self._video_should_restore_launcher:
+                self._show_launcher()
+            self._video_should_restore_launcher = False
+            return
+
+        self.launcher.hide()
+        self._video_capture_in_progress = True
+        self._update_tray_actions()
+
+        try:
+            self._video_controller = VideoCaptureController(
+                self.cfg,
+                self._get_screen_grabber(),
+                ffmpeg_bin=ffmpeg_bin,
+                parent_widget=parent_widget or self.launcher,
+            )
+            self._video_controller.completed.connect(self._on_video_completed)
+            self._video_controller.failed.connect(self._on_video_failed)
+            self._video_controller.canceled.connect(self._on_video_canceled)
+            self._video_controller.finished.connect(self._on_video_finished)
+            self._video_controller.start()
+        except Exception as e:
+            self._video_capture_in_progress = False
+            self._update_tray_actions()
+            self._video_controller = None
+            if self._video_should_restore_launcher:
+                self._show_launcher()
+            self._video_should_restore_launcher = False
+            QMessageBox.critical(None, "SlipSnap", f"Ошибка видео-захвата: {e}")
+
+    def _ensure_ffmpeg_ready(self) -> Optional[str]:
+        candidate_paths = []
+        configured_path = str(self.cfg.get("ffmpeg_path", "")).strip()
+        if configured_path:
+            candidate_paths.append(configured_path)
+
+        known_path = Path(r"C:\ffmpeg\bin\ffmpeg.exe")
+        if known_path.exists():
+            candidate_paths.append(str(known_path))
+        candidate_paths.append(None)
+        candidate_paths = list(dict.fromkeys(candidate_paths))
+
+        while True:
+            last_exc: Optional[FFmpegUnavailableError] = None
+            for candidate in candidate_paths:
+                try:
+                    resolved = ensure_ffmpeg_available(candidate)
+                    self.cfg["ffmpeg_path"] = resolved
+                    save_config(self.cfg)
+                    return resolved
+                except FFmpegUnavailableError as exc:
+                    last_exc = exc
+                    continue
+
+            if last_exc is not None:
+                message = str(last_exc)
+            else:
+                message = "FFmpeg не найден. Установите ffmpeg и добавьте его в PATH."
+            if known_path.exists():
+                message += f"\n\nОбнаружен путь: {known_path}"
+                message += "\nПриложение попробует использовать его автоматически."
+
+            reply = QMessageBox.warning(
+                None,
+                "SlipSnap",
+                f"{message}\n\n"
+                "Для записи MP4/GIF установите ffmpeg и добавьте его в PATH.",
+                QMessageBox.Retry | QMessageBox.Cancel,
+                QMessageBox.Retry,
+            )
+            if reply != QMessageBox.Retry:
+                return None
+
+    def _on_video_completed(self, _output_path: str):
+        self._captured_once = True
+
+    def _on_video_failed(self, error_message: str):
+        QMessageBox.critical(None, "SlipSnap", f"Ошибка видео-захвата: {error_message}")
+
+    def _on_video_canceled(self):
+        pass
+
+    def _on_video_finished(self):
+        self._video_capture_in_progress = False
+        if self._video_controller is not None:
+            try:
+                self._video_controller.deleteLater()
+            except RuntimeError:
+                logger.debug("Video controller already deleted before cleanup")
+            except Exception:
+                logger.warning("Failed to delete video controller after recording", exc_info=True)
+        self._video_controller = None
+        if self._video_should_restore_launcher:
+            self._show_launcher()
+        self._video_should_restore_launcher = False
+        self._update_tray_actions()
+
     def capture_fullscreen(self):
-        if self._full_capture_in_progress:
+        if self._full_capture_in_progress or self._video_capture_in_progress:
             return
 
         self._full_capture_in_progress = True
@@ -898,6 +1128,11 @@ class App(QObject):
                     )
                 except Exception:
                     pass
+            if hasattr(target_window, "set_video_capture_controls"):
+                try:
+                    target_window.set_video_capture_controls(self._start_video_capture)
+                except Exception:
+                    pass
 
             try:
                 target_window.showNormal()
@@ -935,6 +1170,8 @@ class App(QObject):
         self._tray_action_show.triggered.connect(self._show_launcher)
         self._tray_action_capture = menu.addAction("Сделать скриншот")
         self._tray_action_capture.triggered.connect(self.capture_region)
+        self._tray_action_video = menu.addAction("Записать видео")
+        self._tray_action_video.triggered.connect(self.capture_video)
         menu.addSeparator()
         self._tray_action_exit = menu.addAction("Выход")
         self._tray_action_exit.triggered.connect(self._exit_from_tray)
@@ -1019,7 +1256,7 @@ class App(QObject):
             self.launcher.raise_()
             self.launcher.activateWindow()
         except Exception:
-            pass
+            logger.debug("Failed to raise launcher window", exc_info=True)
         self._is_background = False
         self._update_tray_actions()
 
@@ -1046,8 +1283,20 @@ class App(QObject):
             try:
                 self.ovm.deleteLater()
             except Exception:
-                pass
+                logger.debug("Overlay window already deleted during background cleanup", exc_info=True)
             self.ovm = None
+        if self._video_controller is not None:
+            try:
+                self._video_controller.cancel_recording()
+            except Exception:
+                logger.warning("Failed to cancel active video recording during cleanup", exc_info=True)
+            try:
+                self._video_controller.deleteLater()
+            except Exception:
+                logger.warning("Failed to delete video controller during cleanup", exc_info=True)
+            self._video_controller = None
+            self._video_capture_in_progress = False
+        self._video_should_restore_launcher = False
         self._screen_grabber = None
         self._editor_window_cls = None
 
@@ -1078,6 +1327,12 @@ class App(QObject):
             except (KeyError, AttributeError):
                 pass
             self._hotkey_seq = None
+        if self._video_hotkey_seq:
+            try:
+                keybinder.unregister_hotkey(None, self._video_hotkey_seq)
+            except (KeyError, AttributeError):
+                pass
+            self._video_hotkey_seq = None
 
         if self._tray_icon is not None:
             self._tray_icon.hide()
@@ -1089,8 +1344,18 @@ class App(QObject):
             self._tray_menu = None
 
         self._release_background_resources()
+        try:
+            self.launcher.force_close()
+        except Exception:
+            logger.warning("Failed to close launcher during app cleanup", exc_info=True)
         return True
 
     def _update_tray_actions(self):
         if self._tray_action_capture is not None:
-            self._tray_action_capture.setEnabled(not self._full_capture_in_progress)
+            self._tray_action_capture.setEnabled(
+                not self._full_capture_in_progress and not self._video_capture_in_progress
+            )
+        if self._tray_action_video is not None:
+            self._tray_action_video.setEnabled(
+                not self._full_capture_in_progress and not self._video_capture_in_progress
+            )

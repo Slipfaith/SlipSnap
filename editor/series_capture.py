@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Tools for managing screenshot series workflow."""
 
 from __future__ import annotations

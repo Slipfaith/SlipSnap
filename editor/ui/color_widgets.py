@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QToolButton, QDialog, QGridLayout
@@ -26,10 +27,9 @@ class ColorButton(QToolButton):
             }}
             QToolButton:hover {{
                 border: 2px solid {ModernColors.PRIMARY};
-                transform: scale(1.05);
             }}
             QToolButton:pressed {{
-                transform: scale(0.95);
+                padding: 1px 0px 0px 1px;
             }}
         """)
 
@@ -77,10 +77,9 @@ class HexColorDialog(QDialog):
                 }}
                 QToolButton:hover{{
                     border: 2px solid {ModernColors.PRIMARY};
-                    transform: scale(1.1);
                 }}
                 QToolButton:pressed{{
-                    transform: scale(0.9);
+                    padding: 1px 0px 0px 1px;
                 }}
             """)
             btn.clicked.connect(lambda _=None, c=col: self._choose(c))

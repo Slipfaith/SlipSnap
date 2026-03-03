@@ -1,10 +1,12 @@
+# -*- coding: utf-8 -*-
 from typing import Dict
 
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QAction, QKeySequence, QColor, QActionGroup
-from PySide6.QtWidgets import QToolBar, QToolButton, QMenu, QSlider, QLabel
+from PySide6.QtWidgets import QToolBar, QToolButton, QMenu, QSlider, QLabel, QSpinBox, QDoubleSpinBox
 
 from logic import save_config
+from icons import make_icon_video
 
 from design_tokens import Metrics
 
@@ -25,6 +27,7 @@ from .icon_factory import (
     make_icon_blur,
     make_icon_eraser,
     make_icon_select,
+    make_icon_zoom_lens,
     make_icon_memes,
     # New icons for top toolbar
     make_icon_new,
@@ -32,6 +35,7 @@ from .icon_factory import (
     make_icon_collage,
     make_icon_ocr,
     make_icon_copy,
+    make_icon_share,
     make_icon_save,
     make_icon_undo,
     make_icon_redo
@@ -69,7 +73,6 @@ def enhanced_tools_toolbar_style() -> str:
 
     QToolBar QToolButton:hover {{
         background: {ModernColors.SURFACE_HOVER};
-        transform: translateX(2px);
     }}
 
     QToolBar QToolButton:checked:hover {{
@@ -79,7 +82,7 @@ def enhanced_tools_toolbar_style() -> str:
     }}
 
     QToolBar QToolButton:pressed {{
-        transform: scale(0.95);
+        padding: 7px 5px 5px 7px;
     }}
 
     /* Стили для стрелок прокрутки панели инструментов */
@@ -104,7 +107,7 @@ def enhanced_tools_toolbar_style() -> str:
     QToolBar QAbstractButton:pressed {{
         background: {ModernColors.PRIMARY};
         color: white;
-        transform: scale(0.95);
+        padding: 5px 3px 3px 5px;
     }}
 
     /* Специальные стили для кнопок со стрелками */
@@ -128,14 +131,13 @@ def enhanced_tools_toolbar_style() -> str:
             stop:1 {ModernColors.SURFACE_HOVER});
         border: 2px solid {ModernColors.PRIMARY};
         color: {ModernColors.PRIMARY};
-        transform: translateX(2px);
     }}
 
     QToolBar QAbstractButton[accessibleName="qt_toolbar_ext_button"]:pressed {{
         background: {ModernColors.PRIMARY};
         border: 2px solid {ModernColors.PRIMARY_HOVER};
         color: white;
-        transform: scale(0.9);
+        padding: 7px 5px 5px 7px;
     }}
     """
 
@@ -170,12 +172,11 @@ def enhanced_actions_toolbar_style() -> str:
     QToolBar QToolButton:hover {{
         background: {ModernColors.SURFACE_HOVER};
         color: {ModernColors.TEXT_PRIMARY};
-        transform: translateY(-1px);
     }}
 
     QToolBar QToolButton:pressed {{
         background: {ModernColors.PRIMARY_LIGHT};
-        transform: translateY(0px);
+        padding: 11px 13px 9px 15px;
     }}
 
     QToolBar QToolButton:checked {{
@@ -223,7 +224,7 @@ def enhanced_actions_toolbar_style() -> str:
     QToolBar QAbstractButton:pressed {{
         background: {ModernColors.PRIMARY};
         color: white;
-        transform: scale(0.95);
+        padding: 5px 3px 3px 5px;
     }}
 
     /* Специальные стили для кнопок со стрелками горизонтальной панели */
@@ -247,14 +248,13 @@ def enhanced_actions_toolbar_style() -> str:
             stop:1 {ModernColors.SURFACE_HOVER});
         border: 2px solid {ModernColors.PRIMARY};
         color: {ModernColors.PRIMARY};
-        transform: translateY(-2px);
     }}
 
     QToolBar QAbstractButton[accessibleName="qt_toolbar_ext_button"]:pressed {{
         background: {ModernColors.PRIMARY};
         border: 2px solid {ModernColors.PRIMARY_HOVER};
         color: white;
-        transform: scale(0.9);
+        padding: 7px 5px 5px 7px;
     }}
     """
 
@@ -309,6 +309,7 @@ def create_tools_toolbar(window, canvas):
         return btn
 
     add_tool("select", make_icon_select(), "Выделение", "V")
+    add_tool("zoom_lens", make_icon_zoom_lens(), "Лупа", "G")
     shape_btn = QToolButton()
     shape_btn.setIcon(make_icon_rect())
     shape_btn.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
@@ -356,8 +357,53 @@ def create_tools_toolbar(window, canvas):
     act_o.triggered.connect(lambda: _set_shape("ellipse"))
     window.addAction(act_o)
 
-    add_tool("line", make_icon_line(), "Линия", "L")
-    add_tool("arrow", make_icon_arrow(), "Стрелка", "A")
+    current_line_tool = "line"
+    line_btn = QToolButton()
+    line_btn.setIcon(make_icon_line())
+    line_btn.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
+    line_btn.setToolTip("Линия / Стрелка (L/A)")
+    line_btn.setCheckable(True)
+    line_btn.setAutoExclusive(True)
+    line_btn.setFixedSize(Metrics.TOOL_BUTTON, Metrics.TOOL_BUTTON)
+    line_btn.clicked.connect(lambda checked: canvas.set_tool(current_line_tool))
+    tools_tb.addWidget(line_btn)
+    tool_buttons.append(line_btn)
+
+    line_menu = QMenu(line_btn)
+    line_grp = QActionGroup(line_menu)
+    act_line = line_menu.addAction("Линия")
+    act_arrow = line_menu.addAction("Стрелка")
+    for act in (act_line, act_arrow):
+        act.setCheckable(True)
+        line_grp.addAction(act)
+    act_line.setChecked(True)
+
+    def _set_line_tool(tool: str):
+        nonlocal current_line_tool
+        current_line_tool = tool
+        canvas.set_tool(tool)
+        line_btn.setChecked(True)
+        line_btn.setIcon(make_icon_line() if tool == "line" else make_icon_arrow())
+        act_line.setChecked(tool == "line")
+        act_arrow.setChecked(tool == "arrow")
+
+    act_line.triggered.connect(lambda: _set_line_tool("line"))
+    act_arrow.triggered.connect(lambda: _set_line_tool("arrow"))
+
+    line_btn.setContextMenuPolicy(Qt.CustomContextMenu)
+    line_btn.customContextMenuRequested.connect(lambda pos: line_menu.exec(line_btn.mapToGlobal(pos)))
+
+    act_l = QAction(window)
+    act_l.setShortcut(QKeySequence("L"))
+    act_l.setShortcutContext(Qt.WindowShortcut)
+    act_l.triggered.connect(lambda: _set_line_tool("line"))
+    window.addAction(act_l)
+
+    act_a = QAction(window)
+    act_a.setShortcut(QKeySequence("A"))
+    act_a.setShortcutContext(Qt.WindowShortcut)
+    act_a.triggered.connect(lambda: _set_line_tool("arrow"))
+    window.addAction(act_a)
     free_btn = add_tool("free", make_icon_pencil(), "Карандаш", "P")
 
     menu = QMenu(free_btn)
@@ -459,11 +505,139 @@ def create_actions_toolbar(window, canvas):
     zoom_slider.valueChanged.connect(lambda v: (canvas.set_zoom(v / 100), zoom_label.setText(f"{v}%")))
     tb.addWidget(zoom_slider)
     tb.addWidget(zoom_label)
+
+    # Sync slider when zoom is changed via scroll wheel (without re-triggering set_zoom)
+    def _on_canvas_zoom_changed(factor: float) -> None:
+        pct = int(round(factor * 100))
+        zoom_slider.blockSignals(True)
+        zoom_slider.setValue(pct)
+        zoom_slider.blockSignals(False)
+        zoom_label.setText(f"{pct}%")
+
+    canvas.zoomChanged.connect(_on_canvas_zoom_changed)
+
+    # Zoom lens controls (active only for the zoom_lens tool)
+    lens_size_label = QLabel("Лупа")
+    lens_size_label.setToolTip("Размер лупы")
+    lens_size_spin = QSpinBox()
+    lens_size_spin.setRange(60, 260)
+    lens_size_spin.setSingleStep(10)
+    lens_size_spin.setSuffix(" px")
+    lens_size_spin.setFixedWidth(82)
+    lens_size_spin.setToolTip("Диаметр лупы")
+
+    lens_factor_label = QLabel("x")
+    lens_factor_label.setToolTip("Кратность увеличения")
+    lens_factor_spin = QDoubleSpinBox()
+    lens_factor_spin.setDecimals(1)
+    lens_factor_spin.setRange(1.2, 8.0)
+    lens_factor_spin.setSingleStep(0.2)
+    lens_factor_spin.setSuffix("x")
+    lens_factor_spin.setFixedWidth(72)
+    lens_factor_spin.setToolTip("Увеличение лупы")
+
+    initial_size = canvas.zoom_lens_radius()
+    initial_factor = canvas.zoom_lens_factor()
+    if hasattr(window, "cfg") and isinstance(window.cfg, dict):
+        try:
+            initial_size = int(window.cfg.get("zoom_lens_size", initial_size))
+        except Exception:
+            initial_size = canvas.zoom_lens_radius()
+        try:
+            initial_factor = float(window.cfg.get("zoom_lens_factor", initial_factor))
+        except Exception:
+            initial_factor = canvas.zoom_lens_factor()
+
+    canvas.set_zoom_lens_radius(initial_size)
+    canvas.set_zoom_lens_factor(initial_factor)
+    lens_size_spin.setValue(canvas.zoom_lens_radius())
+    lens_factor_spin.setValue(canvas.zoom_lens_factor())
+
+    def _persist_lens_value(key: str, value) -> None:
+        cfg = getattr(window, "cfg", None)
+        if not isinstance(cfg, dict):
+            return
+        cfg[key] = value
+        save_config(cfg)
+
+    def _on_lens_size_changed(value: int) -> None:
+        canvas.set_zoom_lens_radius(value)
+        _persist_lens_value("zoom_lens_size", canvas.zoom_lens_radius())
+
+    def _on_lens_factor_changed(value: float) -> None:
+        canvas.set_zoom_lens_factor(value)
+        _persist_lens_value("zoom_lens_factor", round(canvas.zoom_lens_factor(), 2))
+
+    lens_size_spin.valueChanged.connect(_on_lens_size_changed)
+    lens_factor_spin.valueChanged.connect(_on_lens_factor_changed)
+
+    lens_widgets = [lens_size_label, lens_size_spin, lens_factor_label, lens_factor_spin]
+    lens_widget_actions = []
+    for widget in lens_widgets:
+        lens_widget_actions.append(tb.addWidget(widget))
+
+    def _single_selected_lens():
+        scene = getattr(canvas, "scene", None)
+        if scene is None:
+            return None
+        try:
+            selected_items = list(scene.selectedItems())
+        except RuntimeError:
+            return None
+        lens_items = []
+        for item in selected_items:
+            try:
+                if str(item.data(0)).lower() == "zoom_lens":
+                    lens_items.append(item)
+            except RuntimeError:
+                continue
+        if len(selected_items) == 1 and len(lens_items) == 1:
+            return lens_items[0]
+        return None
+
+    def _sync_lens_values() -> None:
+        selected_lens = _single_selected_lens()
+        if selected_lens is not None and hasattr(selected_lens, "radius_px") and hasattr(selected_lens, "zoom_factor"):
+            try:
+                size = int(selected_lens.radius_px())
+            except Exception:
+                size = canvas.zoom_lens_radius()
+            try:
+                factor = float(selected_lens.zoom_factor())
+            except Exception:
+                factor = canvas.zoom_lens_factor()
+        else:
+            size = canvas.zoom_lens_radius()
+            factor = canvas.zoom_lens_factor()
+
+        lens_size_spin.blockSignals(True)
+        lens_factor_spin.blockSignals(True)
+        lens_size_spin.setValue(size)
+        lens_factor_spin.setValue(factor)
+        lens_size_spin.blockSignals(False)
+        lens_factor_spin.blockSignals(False)
+
+    def _sync_lens_controls(*_args) -> None:
+        try:
+            visible = getattr(canvas, "_tool", "select") == "zoom_lens" or _single_selected_lens() is not None
+            for widget in lens_widgets:
+                widget.setVisible(visible)
+            for action in lens_widget_actions:
+                action.setVisible(visible)
+            _sync_lens_values()
+        except RuntimeError:
+            return
+
+    canvas.toolChanged.connect(_sync_lens_controls)
+    canvas.scene.selectionChanged.connect(_sync_lens_controls)
+    _sync_lens_controls()
     tb.addSeparator()
 
     add_action("new", "Новый снимок", window.new_screenshot, sc="Ctrl+N", icon=make_icon_new(), show_text=False)
     if hasattr(window, "request_series_capture"):
         add_action("series", "Серия скриншотов", window.request_series_capture, icon=make_icon_series(), show_text=False)
+    if hasattr(window, "request_video_capture"):
+        add_action("video", "Записать видео", window.request_video_capture, icon=make_icon_video(), show_text=False)
     add_action("collage", "История", window.open_collage, sc="Ctrl+K", icon=make_icon_collage(), show_text=False)
     add_action(
         "ocr",
@@ -474,6 +648,7 @@ def create_actions_toolbar(window, canvas):
         show_text=False,
     )
     add_action("copy", "Копировать", window.copy_to_clipboard, sc="Ctrl+C", icon=make_icon_copy(), show_text=False)
+    add_action("share", "Поделиться ссылкой (24ч)", window.share_image, icon=make_icon_share(), show_text=False)
     add_action("save", "Сохранить", window.save_image, sc="Ctrl+S", icon=make_icon_save(), show_text=False)
 
     undo_act = canvas.undo_stack.createUndoAction(window, "Отмена")
