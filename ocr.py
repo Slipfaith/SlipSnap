@@ -30,25 +30,36 @@ _TESSERACT_DOWNLOAD_URL = "https://github.com/UB-Mannheim/tesseract/wiki"
 _TESSDATA_FAST_URL = "https://github.com/tesseract-ocr/tessdata_fast/raw/main"
 
 
-# На Windows скрываем всплывающие консольные окна Tesseract
-if os.name == "nt":
-    _existing_kwargs = getattr(pytesseract.pytesseract, "popen_kwargs", {})
-    _popen_kwargs = dict(_existing_kwargs) if isinstance(_existing_kwargs, dict) else {}
+def _windows_hidden_subprocess_kwargs(base: Optional[dict] = None) -> dict:
+    kwargs = dict(base) if isinstance(base, dict) else {}
+    if os.name != "nt":
+        return kwargs
 
-    # Блокируем создание консольного окна даже на доли секунды.
-    # combination of CREATE_NO_WINDOW + скрытый STARTUPINFO помогает
-    # и при установке tesseract_cmd пользователем.
-    _popen_kwargs.setdefault("creationflags", subprocess.CREATE_NO_WINDOW)
-    if "startupinfo" not in _popen_kwargs:
+    kwargs["creationflags"] = int(kwargs.get("creationflags", 0)) | subprocess.CREATE_NO_WINDOW
+    startup = kwargs.get("startupinfo")
+    if not isinstance(startup, subprocess.STARTUPINFO):
         startup = subprocess.STARTUPINFO()
-        startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        startup.wShowWindow = subprocess.SW_HIDE
-        _popen_kwargs["startupinfo"] = startup
+    startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startup.wShowWindow = subprocess.SW_HIDE
+    kwargs["startupinfo"] = startup
+    return kwargs
 
-    pytesseract.pytesseract.popen_kwargs = _popen_kwargs
 
-    # Дополнительно патчим subprocess.Popen, чтобы любые внутренние вызовы
-    # (включая subprocess.run) Tesseract не всплывали отдельным окном.
+# На Windows скрываем всплывающие консольные окна Tesseract.
+if os.name == "nt":
+    # Legacy-совместимость для старых веток pytesseract, читающих popen_kwargs.
+    _existing_kwargs = getattr(pytesseract.pytesseract, "popen_kwargs", {})
+    pytesseract.pytesseract.popen_kwargs = _windows_hidden_subprocess_kwargs(_existing_kwargs)
+
+    # Актуальные версии (например 0.3.13) используют subprocess_args().
+    _original_subprocess_args = getattr(pytesseract.pytesseract, "subprocess_args", None)
+    if callable(_original_subprocess_args):
+        def _patched_subprocess_args(*args, **kwargs):
+            raw_kwargs = _original_subprocess_args(*args, **kwargs)
+            return _windows_hidden_subprocess_kwargs(raw_kwargs)
+
+        pytesseract.pytesseract.subprocess_args = _patched_subprocess_args
+
 _AVAILABLE_LANG_CACHE: Optional[List[str]] = None
 _WARMUP_LOCK = threading.Lock()
 _WARMUP_STARTED = False
@@ -638,14 +649,16 @@ def _get_tessdata_dir() -> Path:
             return prefix_path
 
     cmd = _get_tesseract_cmd()
-    popen_kwargs = getattr(pytesseract.pytesseract, "popen_kwargs", {})
+    popen_kwargs = _windows_hidden_subprocess_kwargs(
+        getattr(pytesseract.pytesseract, "popen_kwargs", {})
+    )
     try:
         result = subprocess.run(
             [cmd, "--print-tessdata-dir"],
             check=True,
             capture_output=True,
             text=True,
-            **(popen_kwargs if isinstance(popen_kwargs, dict) else {}),
+            **popen_kwargs,
         )
         output = (result.stdout or "").strip()
         if output:

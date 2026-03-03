@@ -20,6 +20,21 @@ class FFmpegUnavailableError(VideoEncodingError):
     """Raised when ffmpeg is not installed or cannot be executed."""
 
 
+def _windows_hidden_subprocess_kwargs(base: Optional[dict] = None) -> dict:
+    kwargs = dict(base) if isinstance(base, dict) else {}
+    if os.name != "nt":
+        return kwargs
+
+    kwargs["creationflags"] = int(kwargs.get("creationflags", 0)) | subprocess.CREATE_NO_WINDOW
+    startup = kwargs.get("startupinfo")
+    if not isinstance(startup, subprocess.STARTUPINFO):
+        startup = subprocess.STARTUPINFO()
+    startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startup.wShowWindow = subprocess.SW_HIDE
+    kwargs["startupinfo"] = startup
+    return kwargs
+
+
 def _bundled_ffmpeg_candidates() -> list[Path]:
     candidates: list[Path] = []
     meipass = getattr(sys, "_MEIPASS", None)
@@ -89,6 +104,7 @@ def ensure_ffmpeg_available(ffmpeg_bin: Optional[str] = None) -> str:
             stderr=subprocess.DEVNULL,
             check=True,
             timeout=5,
+            **_windows_hidden_subprocess_kwargs(),
         )
     except Exception as exc:
         raise FFmpegUnavailableError(
@@ -153,6 +169,7 @@ class MP4StreamEncoder:
             stdin=subprocess.PIPE,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
+            **_windows_hidden_subprocess_kwargs(),
         )
 
     def write_frame(self, rgb_bytes: bytes) -> None:
@@ -282,6 +299,7 @@ def _run_ffmpeg(cmd: list[str], context_message: str) -> None:
             stderr=subprocess.PIPE,
             check=False,
             timeout=120,
+            **_windows_hidden_subprocess_kwargs(),
         )
     except Exception as exc:
         raise VideoEncodingError(context_message) from exc
