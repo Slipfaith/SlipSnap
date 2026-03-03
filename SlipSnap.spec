@@ -1,4 +1,4 @@
-gi# -*- mode: python ; coding: utf-8 -*-
+# -*- mode: python ; coding: utf-8 -*-
 """
 PyInstaller spec for building SlipSnap as a single-file Windows executable.
 Compatible with PyInstaller 6+ and Python 3.13+
