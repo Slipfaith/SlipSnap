@@ -4,7 +4,6 @@ from pathlib import Path
 import tempfile
 import shutil
 import math
-import uuid
 import logging
 
 from PySide6.QtCore import (
@@ -773,7 +772,14 @@ class Canvas(QGraphicsView):
         return f"snap_01{extension}"
 
     def _detect_external_drop_directory(self) -> Optional[Path]:
-        """Best-effort detection of Explorer folder under cursor on Windows."""
+        """Best-effort detection of Explorer folder that is the likely drag target on Windows.
+
+        Detection order:
+        1. Window directly under the cursor (most accurate when cursor is already over Explorer).
+        2. If only one Explorer window is open, use it unconditionally.
+        3. Multiple Explorer windows — pick the topmost one in Z-order that is not SlipSnap itself.
+        4. Desktop (Progman / WorkerW) fallback.
+        """
         try:
             import win32con
             import win32gui
@@ -782,23 +788,23 @@ class Canvas(QGraphicsView):
         except Exception:
             return None
 
+        # --- cursor position for stage 1 and desktop fallback ---
+        root_at_cursor = 0
         try:
             cursor_pos = win32gui.GetCursorPos()
-            hwnd = win32gui.WindowFromPoint(cursor_pos)
-            if not hwnd:
-                return None
-            root_hwnd = win32gui.GetAncestor(hwnd, win32con.GA_ROOT)
-            if not root_hwnd:
-                root_hwnd = hwnd
+            hwnd_at_cursor = win32gui.WindowFromPoint(cursor_pos)
+            if hwnd_at_cursor:
+                root_at_cursor = win32gui.GetAncestor(hwnd_at_cursor, win32con.GA_ROOT) or hwnd_at_cursor
         except Exception:
-            return None
+            pass
 
+        # --- enumerate all open Explorer windows ---
+        explorer_windows: list[tuple[int, Path]] = []
         try:
             shell_app = win32com.client.Dispatch("Shell.Application")
             for window in shell_app.Windows():
                 try:
-                    if int(window.HWND) != int(root_hwnd):
-                        continue
+                    hwnd = int(window.HWND)
                     folder = window.Document.Folder
                     if folder is None:
                         continue
@@ -807,19 +813,43 @@ class Canvas(QGraphicsView):
                         continue
                     candidate = Path(folder_path)
                     if candidate.is_dir():
-                        return candidate
+                        explorer_windows.append((hwnd, candidate))
                 except Exception:
-                    logger.debug(
-                        "Skipping inaccessible Explorer window during drop-directory detection",
-                        exc_info=True,
-                    )
                     continue
         except Exception:
             logger.debug("Shell automation failed during drop-directory detection", exc_info=True)
 
-        # Desktop icons can come from Progman/WorkerW and are not always listed.
+        # Stage 1: cursor is already over an Explorer window
+        if root_at_cursor:
+            for hwnd, path in explorer_windows:
+                if hwnd == root_at_cursor:
+                    return path
+
+        # Stage 2: only one Explorer window open — use it regardless of cursor position
+        if len(explorer_windows) == 1:
+            return explorer_windows[0][1]
+
+        # Stage 3: multiple windows — pick the topmost in Z-order, skipping our own window
+        if explorer_windows:
+            try:
+                own_hwnd = int(self.window().winId())
+            except Exception:
+                own_hwnd = 0
+            explorer_map = {hwnd: path for hwnd, path in explorer_windows}
+            found: list[int] = []
+
+            def _enum_cb(hwnd: int, _) -> bool:
+                if hwnd != own_hwnd and hwnd in explorer_map:
+                    found.append(hwnd)
+                return True
+
+            win32gui.EnumWindows(_enum_cb, None)
+            if found:
+                return explorer_map[found[0]]
+
+        # Stage 4: desktop fallback (Progman / WorkerW)
         try:
-            class_name = win32gui.GetClassName(root_hwnd)
+            class_name = win32gui.GetClassName(root_at_cursor)
             if class_name in {"Progman", "WorkerW"}:
                 desktop = shell.SHGetFolderPath(0, shellcon.CSIDL_DESKTOPDIRECTORY, 0, 0)
                 candidate = Path(desktop)
@@ -835,14 +865,12 @@ class Canvas(QGraphicsView):
             for item, pos in self._move_snapshot.items():
                 item.setPos(pos)
             self._move_snapshot = {}
-        use_gif = self._effective_drag_extension() == ".gif"
-        ext = ".gif" if use_gif else ".png"
-        # Use a unique temporary name to avoid filename conflicts in the destination
-        drag_id = uuid.uuid4().hex[:8]
-        temp_filename = f"slipsnap_{drag_id}{ext}"
+        filename = self._next_drag_filename()
         drag_dir = Path(tempfile.mkdtemp(prefix="slipsnap_drag_"))
         self._drag_temp_dirs.append(drag_dir)
-        target = drag_dir / temp_filename
+        use_gif = self._effective_drag_extension() == ".gif"
+        target = drag_dir / filename
+        target = target.with_suffix(".gif" if use_gif else ".png")
         if use_gif:
             saved = self.save_animated_gif(target, selected_only=bool(self.scene.selectedItems()))
             if not saved:
@@ -864,33 +892,16 @@ class Canvas(QGraphicsView):
         self._dragging_external = True
         result_action = drag.exec(Qt.CopyAction)
         self._dragging_external = False
-        # After drop the cursor is still over the destination window — detect and fix filename
+        # Update last_save_directory after a successful drop so the next drag
+        # to the same folder picks up the correct sequential number.
         if result_action == Qt.CopyAction:
-            self._post_drop_fix_filename(temp_filename, ext)
-
-    def _post_drop_fix_filename(self, temp_filename: str, ext: str) -> None:
-        """Detect the Explorer folder where the file was dropped, rename it to the correct
-        sequential snap name, and update _last_save_directory for future operations."""
-        dropped_dir = self._detect_external_drop_directory()
-        if dropped_dir is None:
-            return
-        win = self.window()
-        logic = getattr(win, "logic", None)
-        if logic is not None:
-            logic._last_save_directory = dropped_dir
-            logic._persist_save_directory()
-        temp_path = dropped_dir / temp_filename
-        if not temp_path.exists():
-            return
-        if logic is None:
-            return
-        try:
-            proper_name = logic.next_snap_filename_for_directory(dropped_dir, extension=ext)
-            new_path = dropped_dir / proper_name
-            temp_path.rename(new_path)
-            logger.info("Renamed drag file: %s → %s", temp_filename, proper_name)
-        except Exception:
-            logger.warning("Failed to rename dropped file to sequential name", exc_info=True)
+            dropped_dir = self._detect_external_drop_directory()
+            if dropped_dir is not None:
+                win = self.window()
+                logic = getattr(win, "logic", None)
+                if logic is not None:
+                    logic._last_save_directory = dropped_dir
+                    logic._persist_save_directory()
 
     def _cleanup_temp_dirs(self) -> None:
         """Remove accumulated drag-and-drop temp directories."""
