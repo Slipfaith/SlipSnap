@@ -127,12 +127,7 @@ tests/.tmp*
 tesseract/
 
 NUL
-todo.md
-research.md
-plan.md
-gui.md
-fix.md
-claude_suggextion.md
-share.md
-github.md
+*.md
+!README.md
+!CHANGELOG.md
 ffmpeg.exe
