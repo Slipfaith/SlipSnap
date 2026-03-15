@@ -4,6 +4,7 @@ from pathlib import Path
 import tempfile
 import shutil
 import math
+import uuid
 import logging
 
 from PySide6.QtCore import (
@@ -834,12 +835,14 @@ class Canvas(QGraphicsView):
             for item, pos in self._move_snapshot.items():
                 item.setPos(pos)
             self._move_snapshot = {}
-        filename = self._next_drag_filename()
+        use_gif = self._effective_drag_extension() == ".gif"
+        ext = ".gif" if use_gif else ".png"
+        # Use a unique temporary name to avoid filename conflicts in the destination
+        drag_id = uuid.uuid4().hex[:8]
+        temp_filename = f"slipsnap_{drag_id}{ext}"
         drag_dir = Path(tempfile.mkdtemp(prefix="slipsnap_drag_"))
         self._drag_temp_dirs.append(drag_dir)
-        use_gif = self._effective_drag_extension() == ".gif"
-        target = drag_dir / filename
-        target = target.with_suffix(".gif" if use_gif else ".png")
+        target = drag_dir / temp_filename
         if use_gif:
             saved = self.save_animated_gif(target, selected_only=bool(self.scene.selectedItems()))
             if not saved:
@@ -859,8 +862,35 @@ class Canvas(QGraphicsView):
         drag = QDrag(self.viewport())
         drag.setMimeData(mime)
         self._dragging_external = True
-        drag.exec(Qt.CopyAction)
+        result_action = drag.exec(Qt.CopyAction)
         self._dragging_external = False
+        # After drop the cursor is still over the destination window — detect and fix filename
+        if result_action == Qt.CopyAction:
+            self._post_drop_fix_filename(temp_filename, ext)
+
+    def _post_drop_fix_filename(self, temp_filename: str, ext: str) -> None:
+        """Detect the Explorer folder where the file was dropped, rename it to the correct
+        sequential snap name, and update _last_save_directory for future operations."""
+        dropped_dir = self._detect_external_drop_directory()
+        if dropped_dir is None:
+            return
+        win = self.window()
+        logic = getattr(win, "logic", None)
+        if logic is not None:
+            logic._last_save_directory = dropped_dir
+            logic._persist_save_directory()
+        temp_path = dropped_dir / temp_filename
+        if not temp_path.exists():
+            return
+        if logic is None:
+            return
+        try:
+            proper_name = logic.next_snap_filename_for_directory(dropped_dir, extension=ext)
+            new_path = dropped_dir / proper_name
+            temp_path.rename(new_path)
+            logger.info("Renamed drag file: %s → %s", temp_filename, proper_name)
+        except Exception:
+            logger.warning("Failed to rename dropped file to sequential name", exc_info=True)
 
     def _cleanup_temp_dirs(self) -> None:
         """Remove accumulated drag-and-drop temp directories."""
