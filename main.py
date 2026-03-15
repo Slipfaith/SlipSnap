@@ -12,7 +12,7 @@ from PySide6.QtCore import QLockFile, QDir
 from gui import App
 
 APP_NAME = "SlipSnap"
-APP_VERSION = "3.0"  # Меняй версию программы только здесь.
+APP_VERSION = "3.1"  # Меняй версию программы только здесь.
 APP_DESCRIPTION = "Современный редактор скриншотов"
 APP_AUTHOR = "slipfaith"
 
