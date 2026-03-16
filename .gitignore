@@ -130,4 +130,5 @@ NUL
 *.md
 !README.md
 !CHANGELOG.md
+!AGENT.md
 ffmpeg.exe
