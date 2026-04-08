@@ -6,7 +6,7 @@ from typing import Dict
 import logging
 
 from PIL import Image
-from PySide6.QtCore import QSize, Qt, QTimer, Signal, QUrl
+from PySide6.QtCore import QSize, Qt, QTimer, Signal, QUrl, QBuffer, QByteArray, QIODevice
 from PySide6.QtGui import QColor, QIcon, QKeySequence, QMovie, QPainter, QPixmap, QShortcut, QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
 
 from clipboard_utils import copy_gif_file_to_clipboard, copy_pil_image_to_clipboard
 from design_tokens import Metrics, meme_dialog_stylesheet
-from meme_library import add_memes_from_paths, delete_memes, list_memes
+from meme_library import add_memes_from_paths, delete_memes, ensure_meme_dir, list_memes
 from logic import MEME_DIR, save_config
 
 
@@ -47,6 +47,7 @@ class MemesDialog(QWidget):
         self.setMinimumSize(Metrics.MEME_DIALOG_MIN_WIDTH, Metrics.MEME_DIALOG_MIN_HEIGHT)
         self._cfg = cfg
         self._gif_movies: Dict[Path, QMovie] = {}
+        self._gif_buffers: Dict[Path, QBuffer] = {}
         self._all_paths: list[Path] = []
         self._thumb_idx = 0
         self._thumb_loading_enabled = True
@@ -200,7 +201,14 @@ class MemesDialog(QWidget):
 
     def _release_gif_movie(self, path: Path) -> None:
         movie = self._gif_movies.pop(path, None)
+        buffer = self._gif_buffers.pop(path, None)
         if movie is None:
+            if buffer is not None:
+                try:
+                    buffer.close()
+                except Exception:
+                    logger.debug("Failed to close GIF preview buffer", exc_info=True)
+                buffer.deleteLater()
             return
         try:
             movie.stop()
@@ -210,10 +218,17 @@ class MemesDialog(QWidget):
             movie.setFileName("")
         except Exception:
             logger.debug("Failed to clear GIF preview movie filename", exc_info=True)
+        if buffer is not None:
+            try:
+                buffer.close()
+            except Exception:
+                logger.debug("Failed to close GIF preview buffer", exc_info=True)
+            buffer.deleteLater()
         movie.deleteLater()
 
     def _clear_gif_movies(self) -> None:
-        for path in list(self._gif_movies.keys()):
+        known_paths = set(self._gif_movies.keys()) | set(self._gif_buffers.keys())
+        for path in list(known_paths):
             self._release_gif_movie(path)
 
     @staticmethod
@@ -284,8 +299,16 @@ class MemesDialog(QWidget):
         self._set_static_item_icon(item, preview, max_dimension, badge_text="GIF")
 
     def _setup_gif_item(self, item: QListWidgetItem, path: Path, max_dimension: int) -> None:
-        movie = QMovie(str(path))
-        if not movie.isValid():
+        self._release_gif_movie(path)
+        try:
+            raw = path.read_bytes()
+        except Exception:
+            raw = b""
+
+        buffer = QBuffer(self)
+        buffer.setData(QByteArray(raw))
+        if not buffer.open(QIODevice.ReadOnly):
+            buffer.deleteLater()
             fallback = QPixmap(str(path))
             if fallback.isNull():
                 self._set_broken_gif_icon(item, max_dimension)
@@ -293,6 +316,18 @@ class MemesDialog(QWidget):
                 self._set_static_item_icon(item, fallback, max_dimension, badge_text="GIF")
             return
 
+        movie = QMovie(buffer, QByteArray(b"gif"), self)
+        if not movie.isValid():
+            buffer.close()
+            buffer.deleteLater()
+            fallback = QPixmap(str(path))
+            if fallback.isNull():
+                self._set_broken_gif_icon(item, max_dimension)
+            else:
+                self._set_static_item_icon(item, fallback, max_dimension, badge_text="GIF")
+            return
+
+        self._gif_buffers[path] = buffer
         self._gif_movies[path] = movie
 
         def _on_frame_changed(_frame_no: int, target_item=item, target_movie=movie):
@@ -376,11 +411,12 @@ class MemesDialog(QWidget):
             self.refresh()
 
     def _open_meme_folder(self) -> None:
+        meme_dir = MEME_DIR
         try:
-            MEME_DIR.mkdir(parents=True, exist_ok=True)
+            meme_dir = ensure_meme_dir()
         except Exception:
             logger.warning("Failed to create/open meme directory '%s'", MEME_DIR, exc_info=True)
-        opened = QDesktopServices.openUrl(QUrl.fromLocalFile(str(MEME_DIR)))
+        opened = QDesktopServices.openUrl(QUrl.fromLocalFile(str(meme_dir)))
         if not opened:
             QMessageBox.warning(self, "Ошибка", f"Не удалось открыть папку:\n{MEME_DIR}")
 

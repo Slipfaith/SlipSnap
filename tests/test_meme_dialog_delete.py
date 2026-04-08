@@ -42,6 +42,17 @@ class MemeDialogDeleteTests(unittest.TestCase):
             self.assertNotIn(_FIXTURE_GIF, dlg._gif_movies)
             dlg.close()
 
+    def test_gif_preview_avoids_direct_file_binding(self) -> None:
+        with patch("editor.ui.meme_library_dialog.list_memes", return_value=[_FIXTURE_GIF]):
+            dlg = MemesDialog()
+            dlg.refresh()
+            dlg._load_thumb_batch()
+
+            self.assertIn(_FIXTURE_GIF, dlg._gif_movies)
+            movie = dlg._gif_movies[_FIXTURE_GIF]
+            self.assertEqual(movie.fileName(), "")
+            dlg.close()
+
     def test_rename_base_sanitization(self) -> None:
         self.assertEqual(MemesDialog._sanitize_rename_base("good_name"), "good_name")
         self.assertEqual(MemesDialog._sanitize_rename_base("bad<>:\"/\\|?*name"), "badname")

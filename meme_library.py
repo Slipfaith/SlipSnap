@@ -11,7 +11,7 @@ from typing import Iterable, List, Optional
 
 from PIL import Image
 
-from logic import MEME_DIR
+from logic import LEGACY_MEME_DIR, MEME_DIR
 
 try:  # Pillow >= 9.1.0
     _RESAMPLE = Image.Resampling.LANCZOS  # type: ignore[attr-defined]
@@ -26,8 +26,36 @@ MEME_EXTENSIONS = STATIC_IMAGE_EXTENSIONS | {".gif"}
 def ensure_meme_dir() -> Path:
     """Ensure the meme directory exists and return it."""
 
-    MEME_DIR.mkdir(parents=True, exist_ok=True)
-    return MEME_DIR
+    try:
+        MEME_DIR.mkdir(parents=True, exist_ok=True)
+        _migrate_legacy_memes(MEME_DIR)
+        return MEME_DIR
+    except Exception:
+        LEGACY_MEME_DIR.mkdir(parents=True, exist_ok=True)
+        return LEGACY_MEME_DIR
+
+
+def _migrate_legacy_memes(target_dir: Path) -> None:
+    if LEGACY_MEME_DIR == target_dir:
+        return
+    if not LEGACY_MEME_DIR.exists() or not LEGACY_MEME_DIR.is_dir():
+        return
+
+    for legacy_path in LEGACY_MEME_DIR.iterdir():
+        if not legacy_path.is_file():
+            continue
+        if legacy_path.suffix.lower() not in MEME_EXTENSIONS:
+            continue
+
+        target = _unique_target(legacy_path.stem, legacy_path.suffix.lower(), parent=target_dir)
+        try:
+            legacy_path.replace(target)
+        except Exception:
+            try:
+                shutil.copy2(legacy_path, target)
+                legacy_path.unlink(missing_ok=True)
+            except Exception:
+                continue
 
 
 def _normalize_name(name: Optional[str]) -> Optional[str]:
@@ -56,12 +84,13 @@ def _prepare_image(image: Image.Image) -> Image.Image:
     return image
 
 
-def _unique_target(stem: str, extension: str) -> Path:
+def _unique_target(stem: str, extension: str, *, parent: Optional[Path] = None) -> Path:
+    base_dir = parent if parent is not None else MEME_DIR
     normalized_ext = extension if extension.startswith(".") else f".{extension}"
-    candidate = MEME_DIR / f"{stem}{normalized_ext}"
+    candidate = base_dir / f"{stem}{normalized_ext}"
     counter = 1
     while candidate.exists():
-        candidate = MEME_DIR / f"{stem}_{counter}{normalized_ext}"
+        candidate = base_dir / f"{stem}_{counter}{normalized_ext}"
         counter += 1
     return candidate
 
@@ -69,11 +98,11 @@ def _unique_target(stem: str, extension: str) -> Path:
 def save_meme_image(image: Image.Image, *, stem: Optional[str] = None) -> Path:
     """Save ``image`` into the meme directory, ensuring constraints."""
 
-    ensure_meme_dir()
+    meme_dir = ensure_meme_dir()
     prepared = _prepare_image(image)
 
     base_name = _normalize_name(stem) or f"meme_{uuid.uuid4().hex}"
-    candidate = _unique_target(base_name, ".png")
+    candidate = _unique_target(base_name, ".png", parent=meme_dir)
 
     prepared.save(candidate, format="PNG")
     return candidate
@@ -82,7 +111,7 @@ def save_meme_image(image: Image.Image, *, stem: Optional[str] = None) -> Path:
 def save_meme_gif(path: Path, *, stem: Optional[str] = None) -> Path:
     """Copy GIF to meme library without re-encoding to keep animation."""
 
-    ensure_meme_dir()
+    meme_dir = ensure_meme_dir()
     source = Path(path)
     if not source.exists():
         raise RuntimeError(f"GIF файл не найден: {source}")
@@ -98,7 +127,7 @@ def save_meme_gif(path: Path, *, stem: Optional[str] = None) -> Path:
         raise RuntimeError(f"Не удалось прочитать GIF '{source}': {exc}") from exc
 
     base_name = _normalize_name(stem) or f"meme_{uuid.uuid4().hex}"
-    candidate = _unique_target(base_name, ".gif")
+    candidate = _unique_target(base_name, ".gif", parent=meme_dir)
     try:
         shutil.copy2(source, candidate)
     except Exception as exc:
@@ -131,9 +160,9 @@ def add_memes_from_paths(paths: Iterable[Path]) -> List[Path]:
 def list_memes() -> List[Path]:
     """Return meme files sorted by modification time (newest first)."""
 
-    ensure_meme_dir()
+    meme_dir = ensure_meme_dir()
     files = sorted(
-        [p for p in MEME_DIR.iterdir() if p.is_file() and p.suffix.lower() in MEME_EXTENSIONS],
+        [p for p in meme_dir.iterdir() if p.is_file() and p.suffix.lower() in MEME_EXTENSIONS],
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )
@@ -143,10 +172,11 @@ def list_memes() -> List[Path]:
 def delete_memes(paths: Iterable[Path]) -> None:
     """Remove provided meme files from the stash."""
 
+    meme_dir = ensure_meme_dir()
     try:
-        meme_dir_resolved = MEME_DIR.resolve()
+        meme_dir_resolved = meme_dir.resolve()
     except Exception:
-        meme_dir_resolved = MEME_DIR
+        meme_dir_resolved = meme_dir
 
     for path in paths:
         candidate = Path(path)
@@ -154,7 +184,7 @@ def delete_memes(paths: Iterable[Path]) -> None:
             parent_resolved = candidate.resolve().parent
         except Exception:
             parent_resolved = candidate.parent
-        if parent_resolved != meme_dir_resolved and candidate.parent != MEME_DIR:
+        if parent_resolved != meme_dir_resolved and candidate.parent != meme_dir:
             continue
         for attempt in range(3):
             try:

@@ -5,6 +5,7 @@ import copy
 import json
 import logging
 import math
+import os
 import uuid
 import tempfile
 from datetime import datetime
@@ -24,8 +25,24 @@ logger = logging.getLogger(__name__)
 CONFIG_PATH = Path.home() / ".slipsnap_config.json"
 HISTORY_DIR = Path(tempfile.gettempdir()) / "slipsnap_history"
 HISTORY_DIR.mkdir(parents=True, exist_ok=True)
-MEME_DIR = Path(tempfile.gettempdir()) / "slipsnap_memes"
-MEME_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _resolve_app_data_dir() -> Path:
+    if os.name == "nt":
+        base = os.environ.get("LOCALAPPDATA")
+        if base:
+            return Path(base) / "SlipSnap"
+        return Path.home() / "AppData" / "Local" / "SlipSnap"
+
+    xdg_data_home = os.environ.get("XDG_DATA_HOME")
+    if xdg_data_home:
+        return Path(xdg_data_home) / "slipsnap"
+    return Path.home() / ".local" / "share" / "slipsnap"
+
+
+APP_DATA_DIR = _resolve_app_data_dir()
+MEME_DIR = APP_DATA_DIR / "memes"
+LEGACY_MEME_DIR = Path(tempfile.gettempdir()) / "slipsnap_memes"
 
 DEFAULT_CONFIG = {
     "shape": "rect",

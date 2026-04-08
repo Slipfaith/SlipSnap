@@ -57,6 +57,7 @@ htmlcov/
 .pyre/
 .dmypy.json
 dmypy.json
+pytest-cache-files-*/
 
 # =========================
 # IDE / Editors
@@ -92,6 +93,7 @@ temp/
 *.orig
 tests/slipsnap_test_*/
 tests/tt_*/
+tests/meme_migration_*/
 .codex_tmp/
 tests/.tmp/
 tests/.tmp*

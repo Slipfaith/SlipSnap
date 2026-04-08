@@ -13,6 +13,25 @@ The format is inspired by Keep a Changelog and follows Semantic Versioning.
 
 - Подготовка к следующим улучшениям стабильности и UX.
 
+### [3.2.0] - 2026-04-08
+
+#### Added
+
+- Новые автотесты:
+  - `tests/test_logic_paths.py`
+  - `tests/test_textbox_interactions.py`
+  - `tests/test_meme_dialog_delete.py::test_gif_preview_avoids_direct_file_binding`
+
+#### Changed
+
+- Библиотека мемов перенесена в пользовательскую директорию приложения (`LOCALAPPDATA/SlipSnap/memes`) с fallback и миграцией из legacy-пути `%TEMP%/slipsnap_memes`.
+- Улучшено редактирование текста на холсте: корректное завершение редактирования при смене инструмента/клике вне текста и стабильная работа placeholder.
+- Превью GIF в библиотеке теперь работает через буфер в памяти вместо прямой привязки к файлу, что снижает блокировки при удалении и переименовании.
+
+#### Fixed
+
+- Удалены тестовые артефакты из репозитория и добавлен ignore-шаблон для временных директорий `tests/meme_migration_*/`.
+
 ### [3.0.0] - 2026-03-01
 
 #### Added
@@ -53,6 +72,25 @@ The format is inspired by Keep a Changelog and follows Semantic Versioning.
 
 - Preparations for upcoming stability and UX improvements.
 
+### [3.2.0] - 2026-04-08
+
+#### Added
+
+- New automated tests:
+  - `tests/test_logic_paths.py`
+  - `tests/test_textbox_interactions.py`
+  - `tests/test_meme_dialog_delete.py::test_gif_preview_avoids_direct_file_binding`
+
+#### Changed
+
+- Meme storage moved to app data (`LOCALAPPDATA/SlipSnap/memes`) with fallback and automatic migration from legacy `%TEMP%/slipsnap_memes`.
+- Improved canvas text-editing flow: proper edit finalization on tool switch/outside click and more stable placeholder behavior.
+- GIF previews in the meme library now use in-memory buffers instead of direct file binding, reducing file-lock issues during delete/rename.
+
+#### Fixed
+
+- Removed test artifacts from the repository and added an ignore pattern for temporary `tests/meme_migration_*/` directories.
+
 ### [3.0.0] - 2026-03-01
 
 #### Added
@@ -84,4 +122,3 @@ The format is inspired by Keep a Changelog and follows Semantic Versioning.
 - Fixed silent-failure paths in critical GIF/clipboard/video flows.
 - Improved diagnostics/logging in sensitive user-facing scenarios.
 - Improved share UX behavior (status feedback, error handling, temp-file cleanup).
-

@@ -56,6 +56,38 @@ class EditableTextItem(QGraphicsTextItem):
         except Exception:
             pass
 
+    def _is_placeholder_active(self) -> bool:
+        return self.toPlainText() == self._placeholder_text
+
+    def _clear_placeholder_text(self) -> None:
+        if not self._is_placeholder_active():
+            return
+        self._ignore_content_changes = True
+        self.setPlainText("")
+        self._ignore_content_changes = False
+        cursor = self.textCursor()
+        cursor.clearSelection()
+        self.setTextCursor(cursor)
+
+    def _apply_readonly_state(self) -> None:
+        self._is_editing = False
+        current_text = self.toPlainText().strip()
+        if not current_text:
+            self._ignore_content_changes = True
+            self.setPlainText(self._placeholder_text)
+            self._ignore_content_changes = False
+            self._select_all_text()
+        self.setTextInteractionFlags(Qt.NoTextInteraction)
+        cursor = self.textCursor()
+        cursor.clearSelection()
+        self.setTextCursor(cursor)
+
+    def finish_editing(self) -> None:
+        if self.hasFocus():
+            self.clearFocus()
+            return
+        self._apply_readonly_state()
+
     def _on_text_changed(self):
         if self._ignore_content_changes:
             return
@@ -122,23 +154,12 @@ class EditableTextItem(QGraphicsTextItem):
     def focusInEvent(self, event):
         super().focusInEvent(event)
         self._is_editing = self.textInteractionFlags() != Qt.NoTextInteraction
-        if self._is_editing and self.toPlainText() == self._placeholder_text:
-            self.setPlainText("")
+        if self._is_editing and self._is_placeholder_active():
+            self._select_all_text()
 
     def focusOutEvent(self, event):
         super().focusOutEvent(event)
-        self._is_editing = False
-        current_text = self.toPlainText().strip()
-        if not current_text:
-            self._ignore_content_changes = True
-            self.setPlainText(self._placeholder_text)
-            self._ignore_content_changes = False
-            self._select_all_text()
-        self.setTextInteractionFlags(Qt.NoTextInteraction)
-        # Clear any text selection so it doesn't persist as a highlight
-        cursor = self.textCursor()
-        cursor.clearSelection()
-        self.setTextCursor(cursor)
+        self._apply_readonly_state()
 
     def keyPressEvent(self, event):
         if not self._is_editing and event.key() == Qt.Key_Delete:
@@ -152,6 +173,17 @@ class EditableTextItem(QGraphicsTextItem):
                     scene.removeItem(self)
             event.accept()
             return
+
+        if self._is_editing and self._is_placeholder_active():
+            if event.key() in (Qt.Key_Backspace, Qt.Key_Delete):
+                self._clear_placeholder_text()
+                event.accept()
+                return
+            has_plain_text_input = bool(event.text()) and not (
+                event.modifiers() & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)
+            )
+            if has_plain_text_input:
+                self._clear_placeholder_text()
 
         if event.modifiers() & Qt.ControlModifier:
             if event.key() == Qt.Key_B:
@@ -188,6 +220,12 @@ class EditableTextItem(QGraphicsTextItem):
         if event.button() == Qt.LeftButton:
             self.setTextInteractionFlags(Qt.TextEditorInteraction)
             self._is_editing = True
+            self.setFocus(Qt.MouseFocusReason)
+            super().mouseDoubleClickEvent(event)
+            self.setFocus(Qt.MouseFocusReason)
+            if self._is_placeholder_active():
+                self._select_all_text()
+            return
         super().mouseDoubleClickEvent(event)
 
     def contextMenuEvent(self, event):
@@ -266,5 +304,8 @@ class TextManager:
 
     def finish_current_editing(self):
         if self._current_text_item:
-            self._current_text_item.clearFocus()
+            if hasattr(self._current_text_item, "finish_editing"):
+                self._current_text_item.finish_editing()
+            else:
+                self._current_text_item.clearFocus()
             self._current_text_item = None

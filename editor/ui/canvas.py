@@ -974,6 +974,15 @@ class Canvas(QGraphicsView):
         self._refresh_live_item_animation_state()
 
     def set_tool(self, tool: str):
+        active_text = self._active_editing_text_item()
+        if active_text is not None:
+            if hasattr(active_text, "finish_editing"):
+                active_text.finish_editing()
+            else:
+                active_text.clearFocus()
+            if self._text_manager and getattr(self._text_manager, "_current_text_item", None) is active_text:
+                self._text_manager._current_text_item = None
+
         if self._text_manager:
             self._text_manager.finish_current_editing()
 
@@ -1743,6 +1752,15 @@ class Canvas(QGraphicsView):
         for item in selectable:
             item.setSelected(True)
 
+    def _active_editing_text_item(self) -> Optional[EditableTextItem]:
+        focus_item = self.scene.focusItem()
+        if isinstance(focus_item, EditableTextItem) and getattr(focus_item, "_is_editing", False):
+            return focus_item
+        for item in self.scene.items():
+            if isinstance(item, EditableTextItem) and getattr(item, "_is_editing", False):
+                return item
+        return None
+
     def mousePressEvent(self, event):
         if self._tool == "zoom_lens":
             vp = event.position().toPoint()
@@ -1775,6 +1793,19 @@ class Canvas(QGraphicsView):
             event.accept()
             return
         if event.button() == Qt.LeftButton:
+            pos = self.mapToScene(event.position().toPoint())
+            active_text = self._active_editing_text_item()
+            if active_text and not active_text.contains(active_text.mapFromScene(pos)):
+                if hasattr(active_text, "finish_editing"):
+                    active_text.finish_editing()
+                else:
+                    active_text.clearFocus()
+                if self._text_manager and getattr(self._text_manager, "_current_text_item", None) is active_text:
+                    self._text_manager._current_text_item = None
+                if self._tool == "text":
+                    self.set_tool("select")
+                    event.accept()
+                    return
             if self._tool == "select":
                 # Rotation handle takes priority over resize and move
                 rot_item = self._find_rotation_handle(event.position().toPoint())
@@ -1824,7 +1855,6 @@ class Canvas(QGraphicsView):
                     self._move_snapshot = {it: it.pos() for it in items}
                 self._drag_start_pos = event.position().toPoint()
             elif self._tool not in ("none", "select"):
-                pos = self.mapToScene(event.position().toPoint())
                 if self._tool == "text" and self._text_manager:
                     current = getattr(self._text_manager, "_current_text_item", None)
                     if current:
@@ -1848,6 +1878,19 @@ class Canvas(QGraphicsView):
                     event.accept()
                     return
         super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.LeftButton and self._tool == "select":
+            clicked = self.itemAt(event.position().toPoint())
+            while clicked is not None and clicked.parentItem() is not None and not isinstance(clicked, EditableTextItem):
+                clicked = clicked.parentItem()
+            if isinstance(clicked, EditableTextItem):
+                clicked.setTextInteractionFlags(Qt.TextEditorInteraction)
+                clicked._is_editing = True
+                clicked.setFocus(Qt.MouseFocusReason)
+                if self._text_manager is not None:
+                    self._text_manager._current_text_item = clicked
+        super().mouseDoubleClickEvent(event)
 
     def mouseMoveEvent(self, event):
         if self._tool == "zoom_lens":
