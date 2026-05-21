@@ -6,9 +6,10 @@ from typing import Dict
 import logging
 
 from PIL import Image
-from PySide6.QtCore import QSize, Qt, QTimer, Signal, QUrl, QBuffer, QByteArray, QIODevice
-from PySide6.QtGui import QColor, QIcon, QKeySequence, QMovie, QPainter, QPixmap, QShortcut, QDesktopServices
+from PySide6.QtCore import QEvent, QSize, Qt, QTimer, Signal, QUrl, QBuffer, QByteArray, QIODevice
+from PySide6.QtGui import QColor, QCursor, QIcon, QKeySequence, QMovie, QPainter, QPixmap, QShortcut, QDesktopServices
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
     QFileDialog,
     QHBoxLayout,
@@ -40,11 +41,13 @@ class MemesDialog(QWidget):
     memeSelected = Signal(Path)
     _THUMB_BATCH = 6
     _MAX_ANIMATED_VISIBLE = 12
+    _PREVIEW_MAX_DIM = 220
 
     def __init__(self, parent=None, cfg: dict | None = None):
         super().__init__(parent, Qt.Window | Qt.WindowCloseButtonHint)
         self.setWindowTitle("Библиотека мемов")
         self.setMinimumSize(Metrics.MEME_DIALOG_MIN_WIDTH, Metrics.MEME_DIALOG_MIN_HEIGHT)
+        self.setMaximumSize(Metrics.MEME_DIALOG_MAX_WIDTH, Metrics.MEME_DIALOG_MAX_HEIGHT)
         self._cfg = cfg
         self._gif_movies: Dict[Path, QMovie] = {}
         self._gif_buffers: Dict[Path, QBuffer] = {}
@@ -54,6 +57,11 @@ class MemesDialog(QWidget):
         self._size_save_timer = QTimer(self)
         self._size_save_timer.setSingleShot(True)
         self._size_save_timer.timeout.connect(self._persist_window_size)
+        self._hover_item: QListWidgetItem | None = None
+        self._hover_popup: QLabel | None = None
+        self._hover_timer = QTimer(self)
+        self._hover_timer.setSingleShot(True)
+        self._hover_timer.timeout.connect(self._show_hover_preview)
         self._build_ui()
         self._restore_window_size()
         self.refresh()
@@ -106,11 +114,15 @@ class MemesDialog(QWidget):
         self._list.setSelectionMode(QListWidget.ExtendedSelection)
         self._list.setFocusPolicy(Qt.StrongFocus)
         self._list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self._list.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        self._list.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
         self._list.itemDoubleClicked.connect(self._on_item_double_clicked)
         self._list.itemSelectionChanged.connect(self._update_action_state)
         self._list.customContextMenuRequested.connect(self._show_context_menu)
         self._list.verticalScrollBar().valueChanged.connect(self._sync_gif_playback)
         self._list.horizontalScrollBar().valueChanged.connect(self._sync_gif_playback)
+        self._list.viewport().setMouseTracking(True)
+        self._list.viewport().installEventFilter(self)
         layout.addWidget(self._list, 1)
         layout.addWidget(self._empty_label)
 
@@ -406,6 +418,79 @@ class MemesDialog(QWidget):
             if movie.state() == QMovie.Running:
                 movie.setPaused(True)
 
+    def eventFilter(self, obj, event) -> bool:
+        if obj is self._list.viewport():
+            etype = event.type()
+            if etype == QEvent.MouseMove:
+                item = self._list.itemAt(event.pos())
+                if item is not self._hover_item:
+                    self._hover_item = item
+                    self._hover_timer.stop()
+                    self._hide_hover_preview()
+                    if item is not None:
+                        self._hover_timer.start(350)
+            elif etype == QEvent.Leave:
+                self._hover_item = None
+                self._hover_timer.stop()
+                self._hide_hover_preview()
+        return super().eventFilter(obj, event)
+
+    def _show_hover_preview(self) -> None:
+        item = self._hover_item
+        if item is None:
+            return
+        path = item.data(Qt.UserRole)
+        if not isinstance(path, Path):
+            return
+
+        pixmap: QPixmap | None = None
+        if path.suffix.lower() == ".gif":
+            movie = self._gif_movies.get(path)
+            if movie is not None:
+                pixmap = movie.currentPixmap()
+        if pixmap is None or pixmap.isNull():
+            pixmap = QPixmap(str(path))
+        if pixmap is None or pixmap.isNull():
+            return
+
+        preview_size = self._scaled_preview_size(pixmap.size(), self._PREVIEW_MAX_DIM)
+        scaled = pixmap.scaled(preview_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        if scaled.isNull():
+            return
+
+        if self._hover_popup is None:
+            self._hover_popup = QLabel(
+                None,
+                Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint,
+            )
+            self._hover_popup.setAttribute(Qt.WA_ShowWithoutActivating)
+            self._hover_popup.setStyleSheet(
+                "QLabel { background: #ffffff; border: 1px solid #d1d5db;"
+                " border-radius: 8px; padding: 4px; }"
+            )
+
+        self._hover_popup.setPixmap(scaled)
+        self._hover_popup.adjustSize()
+
+        cursor_pos = QCursor.pos()
+        screen = QApplication.screenAt(cursor_pos) or QApplication.primaryScreen()
+        screen_rect = screen.availableGeometry()
+
+        x = cursor_pos.x() + 16
+        y = cursor_pos.y() + 16
+        pw, ph = self._hover_popup.width(), self._hover_popup.height()
+        if x + pw > screen_rect.right():
+            x = cursor_pos.x() - pw - 8
+        if y + ph > screen_rect.bottom():
+            y = cursor_pos.y() - ph - 8
+
+        self._hover_popup.move(x, y)
+        self._hover_popup.show()
+
+    def _hide_hover_preview(self) -> None:
+        if self._hover_popup is not None:
+            self._hover_popup.hide()
+
     def refresh_if_visible(self) -> None:
         if self.isVisible():
             self.refresh()
@@ -635,8 +720,8 @@ class MemesDialog(QWidget):
             height = int(self._cfg.get("meme_dialog_height", Metrics.MEME_DIALOG_MIN_HEIGHT))
         except Exception:
             return
-        width = max(Metrics.MEME_DIALOG_MIN_WIDTH, width)
-        height = max(Metrics.MEME_DIALOG_MIN_HEIGHT, height)
+        width = max(Metrics.MEME_DIALOG_MIN_WIDTH, min(Metrics.MEME_DIALOG_MAX_WIDTH, width))
+        height = max(Metrics.MEME_DIALOG_MIN_HEIGHT, min(Metrics.MEME_DIALOG_MAX_HEIGHT, height))
         self.resize(width, height)
 
     def _persist_window_size(self) -> None:
@@ -651,6 +736,8 @@ class MemesDialog(QWidget):
 
     def hideEvent(self, event):
         self._thumb_loading_enabled = False
+        self._hover_timer.stop()
+        self._hide_hover_preview()
         self._persist_window_size()
         self._pause_all_gif_playback()
         super().hideEvent(event)
