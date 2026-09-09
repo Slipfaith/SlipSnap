@@ -10,10 +10,7 @@ import uuid
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import Tuple, Optional, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from PySide6.QtCore import QRect
+from typing import Tuple, Optional
 
 import mss
 from PIL import Image

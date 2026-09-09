@@ -634,9 +634,11 @@ class Launcher(QWidget):
         dlg.setWindowTitle("Настройки")
         lay = QVBoxLayout(dlg)
 
+        old_capture_seq = str(self.cfg.get("capture_hotkey", "Ctrl+Alt+S")).strip() or "Ctrl+Alt+S"
+        old_video_seq = str(self.cfg.get("video_hotkey", "Ctrl+Alt+V")).strip() or "Ctrl+Alt+V"
         form = QFormLayout()
-        capture_edit = QKeySequenceEdit(self.cfg.get("capture_hotkey", "Ctrl+Alt+S"))
-        video_edit = QKeySequenceEdit(self.cfg.get("video_hotkey", "Ctrl+Alt+V"))
+        capture_edit = QKeySequenceEdit(old_capture_seq)
+        video_edit = QKeySequenceEdit(old_video_seq)
         form.addRow("Горячая клавиша (снимок):", capture_edit)
         form.addRow("Горячая клавиша (видео):", video_edit)
 
@@ -665,9 +667,9 @@ class Launcher(QWidget):
         buttons.rejected.connect(dlg.reject)
 
         if dlg.exec():
-            capture_seq = capture_edit.keySequence().toString().strip()
-            video_seq = video_edit.keySequence().toString().strip()
-            if capture_seq and video_seq and capture_seq == video_seq:
+            capture_seq = capture_edit.keySequence().toString().strip() or old_capture_seq
+            video_seq = video_edit.keySequence().toString().strip() or old_video_seq
+            if capture_seq == video_seq:
                 QMessageBox.warning(
                     self,
                     "SlipSnap",
@@ -675,17 +677,26 @@ class Launcher(QWidget):
                 )
                 return
 
-            if capture_seq:
+            capture_changed = capture_seq != old_capture_seq
+            video_changed = video_seq != old_video_seq
+            duration_changed = duration_spin.value() != duration_value
+            fps_changed = fps_spin.value() != fps_value
+
+            if capture_changed:
                 self.cfg["capture_hotkey"] = capture_seq
-            if video_seq:
+            if video_changed:
                 self.cfg["video_hotkey"] = video_seq
-            self.cfg["video_duration_sec"] = duration_spin.value()
-            self.cfg["video_fps"] = fps_spin.value()
-            save_config(self.cfg)
-            if capture_seq:
+            if duration_changed:
+                self.cfg["video_duration_sec"] = duration_spin.value()
+            if fps_changed:
+                self.cfg["video_fps"] = fps_spin.value()
+
+            if capture_changed or video_changed or duration_changed or fps_changed:
+                save_config(self.cfg)
+            if capture_changed:
                 self.btn_hotkey.setText(capture_seq)
                 self.hotkey_changed.emit(capture_seq)
-            if video_seq:
+            if video_changed:
                 self.video_hotkey_changed.emit(video_seq)
 
 

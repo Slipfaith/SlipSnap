@@ -1,6 +1,6 @@
 [Setup]
 AppName=SlipSnap
-AppVersion=3.1
+AppVersion=3.2
 AppPublisher=slipfaith
 DefaultDirName={pf}\SlipSnap
 DefaultGroupName=SlipSnap
@@ -16,6 +16,13 @@ PrivilegesRequired=admin
 Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
+[CustomMessages]
+russian.AutoStartTask=Запускать SlipSnap при входе в Windows
+english.AutoStartTask=Launch SlipSnap when Windows starts
+
+[Tasks]
+Name: "autostart"; Description: "{cm:AutoStartTask}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+
 [Files]
 ; Файлы программы SlipSnap
 Source: "{#SourcePath}\dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -26,6 +33,7 @@ Source: "{#SourcePath}\tesseract-ocr-w64-setup-5.5.0.2024.exe"; DestDir: "{tmp}"
 [Icons]
 Name: "{autoprograms}\SlipSnap"; Filename: "{app}\SlipSnap.exe"; IconFilename: "{app}\SlipSnap.ico"
 Name: "{autodesktop}\SlipSnap"; Filename: "{app}\SlipSnap.exe"; IconFilename: "{app}\SlipSnap.ico"
+Name: "{userstartup}\SlipSnap"; Filename: "{app}\SlipSnap.exe"; WorkingDir: "{app}"; IconFilename: "{app}\SlipSnap.ico"; Tasks: autostart
 
 [Run]
 ; Установка Tesseract

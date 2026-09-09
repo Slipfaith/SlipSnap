@@ -1,13 +1,10 @@
 # -*- coding: utf-8 -*-
-from typing import Optional
-
-from PySide6.QtCore import QPointF, Qt, QRectF
+from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import (
     QFont,
     QColor,
     QTextCursor,
     QTextCharFormat,
-    QPen,
 )
 from PySide6.QtWidgets import (
     QGraphicsItem,
@@ -18,7 +15,7 @@ from PySide6.QtWidgets import (
 )
 from .undo_commands import RemoveCommand
 
-from design_tokens import Typography, Palette, Metrics
+from design_tokens import Typography, Palette
 
 
 class EditableTextItem(QGraphicsTextItem):

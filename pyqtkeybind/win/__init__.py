@@ -10,8 +10,9 @@ from .keybindutil import keys_from_string
 
 
 class WinKeyBinder(object):
-    __keybinds = defaultdict(list)
-    __keygrabs = defaultdict(int)   # Key grab key -> number of grabs
+    def __init__(self):
+        self.__keybinds = defaultdict(list)
+        self.__keygrabs = defaultdict(int)   # Key grab key -> number of grabs
 
     def init(self):
         # Register os dependent hooks
@@ -38,7 +39,7 @@ class WinKeyBinder(object):
         # This requires VISTA+ operating system
         key_index = kc << 16 | mods
         if not self.__keygrabs[key_index] and\
-                not self.RegisterHotKey(wid.__int__(), key_index, UINT(mods | 0x4000), UINT(kc)):
+                not self.RegisterHotKey(int(wid), key_index, UINT(mods | 0x4000), UINT(kc)):
             return False
 
         self.__keybinds[key_index].append(callback)
@@ -47,13 +48,19 @@ class WinKeyBinder(object):
 
     def unregister_hotkey(self, wid, keys):
         mods, kc = keys_from_string(keys)
+        if wid is None:
+            wid = 0x0
         key_index = kc << 16 | mods
 
-        self.__keybinds.pop(key_index)
-        self.__keygrabs.pop(key_index)
-
-        if not self.UnregisterHotKey(wid.__int__(), key_index):
+        if not self.__keygrabs.get(key_index):
             return False
+
+        # Keep callbacks intact if Windows refuses to unregister the hotkey.
+        if not self.UnregisterHotKey(int(wid), key_index):
+            return False
+
+        self.__keybinds.pop(key_index, None)
+        self.__keygrabs.pop(key_index, None)
         return True
 
     def handler(self, eventType, message):

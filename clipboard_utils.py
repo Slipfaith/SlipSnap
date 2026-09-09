@@ -128,7 +128,7 @@ def _copy_png_win32(png_data: bytes) -> bool:
     finally:
         try:
             wc.CloseClipboard()
-        except:
+        except Exception:
             pass
     return True
 
@@ -228,7 +228,7 @@ def _copy_png_and_dibv5_win32(img: Image.Image, png_data: bytes) -> bool:
     finally:
         try:
             wc.CloseClipboard()
-        except:
+        except Exception:
             pass
     return True
 
@@ -279,7 +279,7 @@ def copy_pil_image_to_clipboard_with_fallback(img: Image.Image) -> QImage:
     finally:
         try:
             wc.CloseClipboard()
-        except:
+        except Exception:
             pass
 
     return qimg

@@ -86,7 +86,6 @@ class ResizeCommand(QUndoCommand):
     """Command to scale an item while keeping an anchor corner fixed."""
 
     def __init__(self, item, old_scale: float, new_scale: float, old_pos, new_pos):
-        from PySide6.QtCore import QPointF  # local import to avoid circular
         super().__init__("Изменить размер")
         self.item = item
         self.old_scale = old_scale

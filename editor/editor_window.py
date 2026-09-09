@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
     QDialogButtonBox,
-    QFormLayout,
     QFrame,
     QGraphicsItem,
     QGraphicsPixmapItem,
@@ -26,7 +25,6 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QProgressDialog,
-    QSpinBox,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -1375,4 +1373,3 @@ class EditorWindow(QMainWindow):
         if hasattr(self, "canvas"):
             self.canvas._cleanup_temp_dirs()
         super().closeEvent(event)
-
