@@ -1196,7 +1196,17 @@ class Canvas(QGraphicsView):
                 for it in selected[1:]:
                     rect = rect.united(it.sceneBoundingRect())
                 return rect, selected
-        return self.scene.itemsBoundingRect(), None
+        return self._content_scene_rect(), None
+
+    def _content_scene_rect(self) -> QRectF:
+        overlay_items = {item for item in self.scene.items() if item.data(0) == "ocr_overlay"}
+        if not overlay_items:
+            return self.scene.itemsBoundingRect()
+        rect = QRectF()
+        for item in self.scene.items():
+            if item not in overlay_items:
+                rect = rect.united(item.sceneBoundingRect())
+        return rect
 
     def _gif_source_path(self, item: QGraphicsItem) -> Optional[Path]:
         getter = getattr(item, "source_path", None)
@@ -1447,21 +1457,23 @@ class Canvas(QGraphicsView):
         img = QImage(w, h, QImage.Format_RGBA8888)
         img.setDevicePixelRatio(dpr)
         img.fill(Qt.transparent)
-        hidden = []
-        if only_items is not None:
-            allowed_items = self._expanded_item_set(only_items)
-            for it in self.scene.items():
-                if it not in allowed_items:
-                    hidden.append((it, it.isVisible()))
-                    it.setVisible(False)
+        overlay_items = {item for item in self.scene.items() if item.data(0) == "ocr_overlay"}
+        allowed_items = self._expanded_item_set(only_items) if only_items is not None else None
+        # Snapshot visibility before hiding parents, which also hides children.
+        hidden = [(it, it.isVisible()) for it in self.scene.items()
+                  if it in overlay_items or (allowed_items is not None and it not in allowed_items)]
+        for it, _visible in hidden:
+            it.setVisible(False)
         p = QPainter(img)
-        p.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
-        p.scale(dpr, dpr)
-        self.scene.render(p, QRectF(0, 0, rect.width(), rect.height()), rect)
-        p.end()
+        try:
+            p.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
+            p.scale(dpr, dpr)
+            self.scene.render(p, QRectF(0, 0, rect.width(), rect.height()), rect)
+        finally:
+            p.end()
+            for it, vis in hidden:
+                it.setVisible(vis)
         self._apply_zoom_lenses_to_image(img, rect, dpr, only_items=only_items)
-        for it, vis in hidden:
-            it.setVisible(vis)
         return img, rect, dpr
 
     def export_image(self) -> QImage:
@@ -1470,7 +1482,7 @@ class Canvas(QGraphicsView):
         for it in selected:
             it.setSelected(False)
 
-        rect = self.scene.itemsBoundingRect()
+        rect = self._content_scene_rect()
         img, _, _ = self._render_rect_to_qimage(rect)
 
         for it in selected:
@@ -1499,7 +1511,7 @@ class Canvas(QGraphicsView):
     def export_selection_with_geometry(self) -> Tuple[Image.Image, QRectF, Tuple[int, int], float]:
         selected = [it for it in self.scene.selectedItems()]
         if not selected:
-            rect = self.scene.itemsBoundingRect()
+            rect = self._content_scene_rect()
             img, rect, dpr = self._render_rect_to_qimage(rect)
         else:
             rect = selected[0].sceneBoundingRect()

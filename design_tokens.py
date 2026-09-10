@@ -50,6 +50,7 @@ class Palette:
     TEXT_TOOL_SELECTION: Tuple[int, int, int, int] = (70, 130, 240, 255)
     TEXT_TOOL_SELECTION_FILL: Tuple[int, int, int, int] = (255, 255, 255, 255)
     OCR_TEXT_SELECTION: Tuple[int, int, int, int] = (37, 99, 235, 255)
+    OCR_TEXT_SELECTED_FOREGROUND: str = "#ffffff"
     ERASER_MAIN_COLOR: Tuple[int, int, int, int] = (255, 100, 100, 120)
     ERASER_CENTER_COLOR: Tuple[int, int, int, int] = (255, 50, 50, 180)
 
@@ -165,6 +166,7 @@ class Metrics:
     MEME_EMPTY_PADDING: Tuple[int, int] = (30, 20)
     MEME_ITEM_EXTRA_SIZE: Tuple[int, int] = (16, 26)
     TEXT_RESIZE_HANDLE: int = 16
+    OCR_SELECTION_PADDING: float = 1.0
     ERASER_DEFAULT_SIZE: int = 20
     ERASER_MIN_SIZE: int = 5
     ERASER_MAX_SIZE: int = 100

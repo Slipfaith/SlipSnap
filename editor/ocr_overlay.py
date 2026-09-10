@@ -3,7 +3,10 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Set, Tuple
 
 from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen
+from PySide6.QtGui import (
+    QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QPen,
+    QTextLayout, QTransform,
+)
 from PySide6.QtWidgets import (
     QGraphicsItem,
     QGraphicsScene,
@@ -12,7 +15,8 @@ from PySide6.QtWidgets import (
 )
 from PIL import Image
 
-from design_tokens import Palette
+from design_tokens import Metrics, Palette, Typography
+from editor.ocr_layout import align_line_rects
 from ocr_models import OcrResult, OcrWord
 
 
@@ -28,24 +32,22 @@ class OcrCapture:
 class _LineVisual:
     background: QGraphicsPathItem  # фон строки
     selection: QGraphicsPathItem   # подсветка выбранных участков
-    text_item: QGraphicsSimpleTextItem
+    text_item: "_SelectedTextItem"
 
 
-class _SelectionPathItem(QGraphicsPathItem):
-    """Highlight that preserves the exact glyph pixels of the screenshot."""
+class _SelectedTextItem(QGraphicsSimpleTextItem):
+    """Draw recognized glyphs only inside the opaque selection background."""
 
-    def __init__(self, parent: QGraphicsItem, *, dark_background: bool) -> None:
-        super().__init__(parent)
-        self.dark_background = dark_background
+    def __init__(self, text: str, parent: QGraphicsItem) -> None:
+        super().__init__(text, parent)
+        self.selection_path = QPainterPath()
 
     def paint(self, painter, option, widget=None) -> None:
+        if self.selection_path.isEmpty():
+            return
         painter.save()
-        mode = (
-            QPainter.CompositionMode_Screen
-            if self.dark_background
-            else QPainter.CompositionMode_Multiply
-        )
-        painter.setCompositionMode(mode)
+        painter.setClipPath(self.mapFromParent(self.selection_path), Qt.IntersectClip)
+        painter.setRenderHint(QPainter.TextAntialiasing)
         super().paint(painter, option, widget)
         painter.restore()
 
@@ -65,11 +67,11 @@ class OcrSelectionOverlay(QObject):
         self._capture_scene_rect: Optional[QRectF] = None
         self._active = False
         self._line_visuals: List[Optional[_LineVisual]] = []
-        self._line_backgrounds_are_dark: List[bool] = []
         self._normalized_line_rects: List[Optional[QRectF]] = []
         self._scene_line_rects: List[Optional[QRectF]] = []
         self._line_texts: List[str] = []
         self._char_scene_rects: List[List[Optional[QRectF]]] = []
+        self._caret_scene_positions: List[List[float]] = []
         self._selected_chars: Dict[int, Set[int]] = {}
         self._selection_anchor: Optional[Tuple[int, int]] = None
         self._selection_focus: Optional[Tuple[int, int]] = None
@@ -100,11 +102,11 @@ class OcrSelectionOverlay(QObject):
             if visual and visual.background.scene() is self.scene:
                 self.scene.removeItem(visual.background)
         self._line_visuals = []
-        self._line_backgrounds_are_dark = []
         self._normalized_line_rects = []
         self._scene_line_rects = []
         self._line_texts = []
         self._char_scene_rects = []
+        self._caret_scene_positions = []
         self._geometry_timer.stop()
         self._geometry_reschedule_requested = False
         self.selectionChanged.emit("")
@@ -141,10 +143,8 @@ class OcrSelectionOverlay(QObject):
         self._line_texts = [" ".join(w.text for w in words) for _, words in ordered]
 
         self._full_text = text
-        self._normalized_line_rects = self._compute_normalized_line_rects(capture.pixel_size, ordered)
-        self._line_backgrounds_are_dark = self._detect_dark_line_backgrounds(
-            capture.image,
-            ordered,
+        self._normalized_line_rects = self._compute_normalized_line_rects(
+            capture, ordered, result.provider,
         )
         self._create_line_items()
         self._schedule_geometry_update()
@@ -154,7 +154,6 @@ class OcrSelectionOverlay(QObject):
         for visual in self._line_visuals:
             if visual:
                 visual.background.setVisible(active)
-                visual.selection.setVisible(active)
         if not active:
             self._selection_anchor = None
             self._selection_focus = None
@@ -169,6 +168,7 @@ class OcrSelectionOverlay(QObject):
 
     def select_all(self) -> None:
         """Select every recognized word to mirror Snipping Tool behavior."""
+        self._flush_geometry_update()
         if not self._line_texts:
             self._selected_chars = {}
             return
@@ -192,6 +192,7 @@ class OcrSelectionOverlay(QObject):
     def start_selection(self, scene_pos: QPointF, *, extend: bool = False) -> None:
         if not self._line_texts:
             return
+        self._flush_geometry_update()
         caret = self._locate_caret_position(scene_pos)
         if caret is None:
             self.clear_selection()
@@ -215,6 +216,7 @@ class OcrSelectionOverlay(QObject):
         self.update_drag(scene_pos)
 
     def select_word_at(self, scene_pos: QPointF) -> None:
+        self._flush_geometry_update()
         location = self._locate_char_position(scene_pos)
         if location is None:
             self.clear_selection()
@@ -335,14 +337,21 @@ class OcrSelectionOverlay(QObject):
         if mapping is None:
             return
         rect, is_local = mapping
-        self._scene_line_rects = self._map_normalized_to_scene(rect, local=is_local)
+        mapped = self._map_normalized_to_scene(rect, local=is_local)
+        # Selection painting emits scene.changed too. Do not rebuild the layout
+        # every 12 ms because of our own redraws; zoom uses the view transform.
+        if mapped == self._scene_line_rects and len(self._char_scene_rects) == len(mapped):
+            return
+        self._scene_line_rects = mapped
         self._update_word_visual_geometry()
         self._update_selection_visuals()
 
     def _compute_normalized_line_rects(
-        self, pixel_size: Tuple[int, int], ordered_lines: List[Tuple[Tuple[int, int, int], List[OcrWord]]]
+        self, capture: OcrCapture,
+        ordered_lines: List[Tuple[Tuple[int, int, int], List[OcrWord]]],
+        provider: str,
     ) -> List[Optional[QRectF]]:
-        px_w, px_h = pixel_size
+        px_w, px_h = capture.pixel_size
         if px_w <= 0 or px_h <= 0:
             return [None for _ in ordered_lines]
         rects: List[Optional[QRectF]] = []
@@ -356,16 +365,19 @@ class OcrSelectionOverlay(QObject):
                 top = min(ys)
                 right = max(x + w for x, w in zip(xs, ws))
                 bottom = max(y + h for y, h in zip(ys, hs))
-                rect = QRectF(
-                    left / px_w,
-                    top / px_h,
-                    max(1.0, right - left) / px_w,
-                    max(1.0, bottom - top) / px_h,
-                )
+                rect = QRectF(left, top, max(1.0, right - left), max(1.0, bottom - top))
+                rect = rect.intersected(QRectF(0, 0, px_w, px_h))
+                if rect.isEmpty():
+                    rect = None
                 rects.append(rect)
             except Exception:
                 rects.append(None)
-        return rects
+        groups = [line_id[:2] if provider == "mistral" else index
+                  for index, (line_id, _) in enumerate(ordered_lines)]
+        rects = align_line_rects(capture.image, rects, groups)
+        return [QRectF(rect.left() / px_w, rect.top() / px_h,
+                       rect.width() / px_w, rect.height() / px_h)
+                if rect is not None else None for rect in rects]
 
     def _map_normalized_to_scene(self, scene_rect: QRectF, *, local: bool = False) -> List[Optional[QRectF]]:
         mapped: List[Optional[QRectF]] = []
@@ -387,22 +399,15 @@ class OcrSelectionOverlay(QObject):
 
     def _create_line_items(self) -> None:
         self._line_visuals = []
-        for line_index, text in enumerate(self._line_texts):
+        for text in self._line_texts:
             background = QGraphicsPathItem()
             background.setZValue(9999)
             background.setAcceptedMouseButtons(Qt.NoButton)
             background.setAcceptHoverEvents(True)
             background.setCursor(Qt.IBeamCursor)
 
-            is_dark = (
-                self._line_backgrounds_are_dark[line_index]
-                if line_index < len(self._line_backgrounds_are_dark)
-                else False
-            )
-            selection = _SelectionPathItem(
-                background,
-                dark_background=is_dark,
-            )
+            selection = QGraphicsPathItem(background)
+            selection.setAcceptedMouseButtons(Qt.NoButton)
             selection.setZValue(1)
             selection.setBrush(QColor(*Palette.OCR_TEXT_SELECTION))
             selection.setPen(Qt.NoPen)
@@ -411,13 +416,16 @@ class OcrSelectionOverlay(QObject):
             background.setBrush(Qt.transparent)
             background.setPen(Qt.NoPen)
 
-            text_item = QGraphicsSimpleTextItem(text, background)
-            text_item.setBrush(Qt.transparent)
+            text_item = _SelectedTextItem(text, background)
+            text_item.setBrush(QColor(Palette.OCR_TEXT_SELECTED_FOREGROUND))
             text_item.setPen(Qt.NoPen)
             text_item.setAcceptedMouseButtons(Qt.NoButton)
             text_item.setAcceptHoverEvents(True)
             text_item.setCursor(Qt.IBeamCursor)
             text_item.setZValue(2)
+
+            for item in (background, selection, text_item):
+                item.setData(0, "ocr_overlay")
 
             self.scene.addItem(background)
             self._line_visuals.append(_LineVisual(
@@ -425,54 +433,12 @@ class OcrSelectionOverlay(QObject):
                 text_item=text_item,
             ))
 
-    @staticmethod
-    def _detect_dark_line_backgrounds(
-        image: Image.Image,
-        ordered_lines: List[Tuple[object, List[OcrWord]]],
-    ) -> List[bool]:
-        """Classify each OCR line by its dominant background luminance."""
-        rgb_image = image.convert("RGB")
-        image_width, image_height = rgb_image.size
-        classifications: List[bool] = []
-
-        for _line_id, words in ordered_lines:
-            valid = [word.bbox for word in words if len(word.bbox) == 4]
-            if not valid:
-                classifications.append(False)
-                continue
-
-            left = max(0, min(box[0] for box in valid))
-            top = max(0, min(box[1] for box in valid))
-            right = min(image_width, max(box[0] + box[2] for box in valid))
-            bottom = min(image_height, max(box[1] + box[3] for box in valid))
-            if right <= left or bottom <= top:
-                classifications.append(False)
-                continue
-
-            histogram = rgb_image.crop((left, top, right, bottom)).convert("L").histogram()
-            halfway = sum(histogram) / 2
-            seen = 0
-            median_luminance = 255
-            for luminance, count in enumerate(histogram):
-                seen += count
-                if seen >= halfway:
-                    median_luminance = luminance
-                    break
-            classifications.append(median_luminance < 128)
-
-        return classifications
-
-    def _create_rounded_rect_path(self, rect: QRectF, radius: float) -> QPainterPath:
-        """Создает путь для прямоугольника со скругленными углами."""
-        path = QPainterPath()
-        path.addRoundedRect(rect, radius, radius)
-        return path
-
     def _update_word_visual_geometry(self) -> None:
         if not self._line_visuals:
             return
 
         self._char_scene_rects = []
+        self._caret_scene_positions = []
         for idx, visual in enumerate(self._line_visuals):
             rect = self._scene_line_rects[idx] if idx < len(self._scene_line_rects) else None
             text = self._line_texts[idx] if idx < len(self._line_texts) else ""
@@ -481,13 +447,12 @@ class OcrSelectionOverlay(QObject):
                     visual.background.setVisible(False)
                     visual.selection.setVisible(False)
                 self._char_scene_rects.append([])
+                self._caret_scene_positions.append([])
                 continue
 
-            font = QFont()
-            font.setPixelSize(max(8, round(rect.height() * 0.8)))
-            font.setWeight(QFont.Medium)
-            font.setHintingPreference(QFont.PreferFullHinting)
-
+            font = QFont(Typography.UI_FAMILY)
+            font.setPixelSize(max(1, round(rect.height() * 1.35)))
+            font.setHintingPreference(QFont.PreferNoHinting)
             visual.text_item.setFont(font)
 
             bg_path = QPainterPath()
@@ -496,29 +461,38 @@ class OcrSelectionOverlay(QObject):
             visual.background.setPos(rect.left(), rect.top())
             visual.background.setVisible(self._active)
 
-            # Keep the screenshot itself as the only visible source of glyphs.
-            # Re-rendering OCR text cannot reproduce the original font and used
-            # to stretch letters whenever the returned bounding box was broad.
-            visual.text_item.setVisible(False)
+            # Fit to the visible ink height, not the provider's paragraph height
+            # or the text tool's fixed 18 pt. Keep the source screenshot untouched
+            # outside the selected range.
+            metrics = QFontMetricsF(font)
+            ink = metrics.tightBoundingRect(text).translated(0, metrics.ascent())
+            scale_x = rect.width() / max(1.0, ink.width())
+            scale_y = rect.height() / max(1.0, ink.height())
+            visual.text_item.setTransform(QTransform.fromScale(scale_x, scale_y))
+            visual.text_item.setPos(-ink.left() * scale_x, -ink.top() * scale_y)
 
-            metrics = QFontMetrics(font)
+            # Qt shapes the entire string (kerning, ligatures, surrogate pairs).
+            # The same font and transform drive painting and pointer hit testing.
+            layout = QTextLayout(text, font)
+            layout.beginLayout()
+            text_line = layout.createLine()
+            text_line.setLineWidth(1e9)
+            layout.endLayout()
+            positions = []
+            utf16_offset = 0
+            for character in text:
+                positions.append(text_line.cursorToX(utf16_offset)[0])
+                utf16_offset += len(character.encode("utf-16-le")) // 2
+            positions.append(text_line.cursorToX(utf16_offset)[0])
+            positions = [max(0.0, min(rect.width(), (x - ink.left()) * scale_x))
+                         for x in positions]
+            self._caret_scene_positions.append([rect.left() + x for x in positions])
             line_chars: List[Optional[QRectF]] = []
-            advances = [max(1, metrics.horizontalAdvance(ch)) for ch in text]
-            total_advance = max(1, sum(advances))
-            cursor_x = rect.left()
-            for char_index, advance in enumerate(advances):
-                if char_index == len(advances) - 1:
-                    char_right = rect.right()
-                else:
-                    char_right = cursor_x + rect.width() * advance / total_advance
-                char_rect = QRectF(
-                    cursor_x,
-                    rect.top(),
-                    max(0.01, char_right - cursor_x),
-                    rect.height(),
-                )
-                line_chars.append(char_rect)
-                cursor_x = char_right
+            for left, right in zip(positions, positions[1:]):
+                line_chars.append(QRectF(
+                    rect.left() + min(left, right), rect.top(),
+                    abs(right - left), rect.height(),
+                ))
 
             self._char_scene_rects.append(line_chars)
 
@@ -546,33 +520,20 @@ class OcrSelectionOverlay(QObject):
         if not chars:
             return None
 
-        first_rect = next((rect for rect in chars if rect is not None), None)
-        last_rect = next((rect for rect in reversed(chars) if rect is not None), None)
-        if first_rect is None or last_rect is None:
-            return None
-
-        if scene_pos.x() <= first_rect.left():
-            return 0
-        if scene_pos.x() >= last_rect.right():
-            return len(chars) - 1
-
         for idx, rect in enumerate(chars):
-            if rect is None:
-                continue
-            if rect.contains(scene_pos) or scene_pos.x() <= rect.right():
+            if rect is not None and rect.left() <= scene_pos.x() < rect.right():
                 return idx
-        return len(chars) - 1
+        candidates = [(abs(rect.center().x() - scene_pos.x()), idx)
+                      for idx, rect in enumerate(chars) if rect is not None]
+        return min(candidates)[1] if candidates else None
 
     def _caret_index_for_pos(self, line_idx: int, scene_pos: QPointF) -> Optional[int]:
-        if line_idx < 0 or line_idx >= len(self._char_scene_rects):
+        if line_idx < 0 or line_idx >= len(self._caret_scene_positions):
             return None
-        chars = self._char_scene_rects[line_idx]
-        if not chars:
+        positions = self._caret_scene_positions[line_idx]
+        if not positions:
             return None
-        for idx, rect in enumerate(chars):
-            if rect is not None and scene_pos.x() < rect.center().x():
-                return idx
-        return len(chars)
+        return min(range(len(positions)), key=lambda idx: abs(positions[idx] - scene_pos.x()))
 
     def _locate_char_position(self, scene_pos: QPointF) -> Optional[Tuple[int, int]]:
         line_idx = self._line_for_pos(scene_pos)
@@ -634,7 +595,8 @@ class OcrSelectionOverlay(QObject):
             visual.background.setPen(base_pen)
             visual.background.setVisible(self._active)
 
-            visual.text_item.setBrush(Qt.transparent)
+            visual.text_item.selection_path = QPainterPath()
+            visual.text_item.setVisible(False)
 
             if not selection or idx >= len(self._char_scene_rects):
                 visual.selection.setPath(QPainterPath())
@@ -648,44 +610,32 @@ class OcrSelectionOverlay(QObject):
                 visual.selection.setVisible(False)
                 continue
 
-            ordered = sorted(selection)
-            start = prev = ordered[0]
-            ranges: List[Tuple[int, int]] = []
-            for char_idx in ordered[1:]:
-                if char_idx == prev + 1:
-                    prev = char_idx
-                    continue
-                ranges.append((start, prev))
-                start = prev = char_idx
-            ranges.append((start, prev))
-
-            for a, b in ranges:
-                if a >= len(chars) or chars[a] is None:
-                    continue
-                line_rect = (
-                    self._scene_line_rects[idx]
-                    if idx < len(self._scene_line_rects)
-                    else None
-                )
-                if line_rect is None:
-                    continue
-                left = max(line_rect.left(), chars[a].left())
-                right = (
-                    min(line_rect.right(), chars[b].right())
-                    if b < len(chars) and chars[b] is not None
-                    else left
-                )
-                bg_pos = visual.background.pos()
-                highlight_rect = QRectF(
-                    left - bg_pos.x(),
-                    line_rect.top() - bg_pos.y(),
-                    max(1.0, right - left),
-                    line_rect.height(),
-                )
+            line_rect = self._scene_line_rects[idx]
+            if line_rect is None:
+                continue
+            # Merge adjacent visual cells, not just logical string ranges: RTL
+            # runs can put the first selected character to the right of the last.
+            cells = sorted((chars[index] for index in selection
+                            if index < len(chars) and chars[index] is not None
+                            and chars[index].width() > 0), key=lambda cell: cell.left())
+            spans: List[QRectF] = []
+            for cell in cells:
+                if spans and cell.left() <= spans[-1].right() + 0.01:
+                    spans[-1] = spans[-1].united(cell)
+                else:
+                    spans.append(QRectF(cell))
+            bg_pos = visual.background.pos()
+            padding = min(Metrics.OCR_SELECTION_PADDING, line_rect.height() * 0.1)
+            for span in spans:
+                highlight_rect = span.translated(-bg_pos)
+                highlight_rect.adjust(0, -padding, 0, padding)
                 path.addRect(highlight_rect)
 
             visual.selection.setPath(path)
             visual.selection.setBrush(selected_bg)
             visual.selection.setVisible(self._active)
+            visual.text_item.selection_path = path
+            visual.text_item.setVisible(self._active)
+            visual.text_item.update()
 
         self.selectionChanged.emit(self.selected_text())
