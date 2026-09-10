@@ -256,6 +256,43 @@ def make_icon_eraser() -> QIcon:
     p.end()
     return QIcon(pm)
 
+
+def make_icon_screenshot_eraser() -> QIcon:
+    """Eraser icon with an image frame for screenshot-pixel mode."""
+    pm = _base_pixmap()
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+
+    frame_pen = QPen(QColor(ModernColors.TEXT_SECONDARY), 1.8)
+    p.setPen(frame_pen)
+    p.setBrush(QColor(ModernColors.SURFACE))
+    p.drawRoundedRect(QRectF(5, 6, 29, 25), 3, 3)
+
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor(ModernColors.PRIMARY_LIGHT))
+    picture = QPainterPath()
+    picture.moveTo(8, 27)
+    picture.lineTo(15, 18)
+    picture.lineTo(20, 23)
+    picture.lineTo(25, 16)
+    picture.lineTo(31, 27)
+    picture.closeSubpath()
+    p.drawPath(picture)
+
+    eraser = QPainterPath()
+    eraser.moveTo(22, 9)
+    eraser.lineTo(31, 13)
+    eraser.lineTo(26, 25)
+    eraser.lineTo(17, 21)
+    eraser.closeSubpath()
+    p.setPen(QPen(QColor(ModernColors.TEXT_SECONDARY), 1.5))
+    p.setBrush(QColor(ModernColors.PRIMARY))
+    p.drawPath(eraser)
+
+    p.end()
+    return QIcon(pm)
+
+
 def make_icon_select() -> QIcon:
     pm = _base_pixmap()
     p = QPainter(pm)

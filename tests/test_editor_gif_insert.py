@@ -151,6 +151,7 @@ class EditorGifInsertTests(unittest.TestCase):
         target.unlink(missing_ok=True)
         with (
             patch("editor.ui.canvas.tempfile.mkdtemp", return_value=str(drag_dir)),
+            patch.object(self._win.canvas, "_next_drag_filename", return_value="snap_01.gif"),
             patch("editor.ui.canvas.QDrag.exec", return_value=Qt.CopyAction),
         ):
             self._win.canvas._start_external_drag()

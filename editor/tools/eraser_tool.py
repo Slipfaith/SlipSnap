@@ -19,9 +19,16 @@ from design_tokens import Palette, Metrics
 
 
 class EraserTool(BaseTool):
+    """Brush eraser for either editor elements or screenshot pixels."""
 
-    def __init__(self, canvas):
+    ELEMENTS = "elements"
+    SCREENSHOTS = "screenshots"
+
+    def __init__(self, canvas, target: str = ELEMENTS):
         super().__init__(canvas)
+        if target not in {self.ELEMENTS, self.SCREENSHOTS}:
+            raise ValueError(f"Unsupported eraser target: {target}")
+        self.target = target
         self.eraser_size = Metrics.ERASER_DEFAULT_SIZE
         self.min_size = Metrics.ERASER_MIN_SIZE
         self.max_size = Metrics.ERASER_MAX_SIZE
@@ -115,8 +122,8 @@ class EraserTool(BaseTool):
 
         self.cursor = QCursor(pixmap, center, center)
 
-        # Устанавливаем курсор сразу, если инструмент активен
-        if hasattr(self.canvas, '_tool') and self.canvas._tool == "erase":
+        # Refresh the cursor immediately when this eraser is active.
+        if getattr(self.canvas, "active_tool", None) is self:
             self.canvas.viewport().setCursor(self.cursor)
 
     def _erase_at_position(self, pos: QPointF):
@@ -127,8 +134,20 @@ class EraserTool(BaseTool):
             self.eraser_size
         )
 
+        items = self.canvas.scene.items(erase_rect)
+        if self.target == self.SCREENSHOTS:
+            for item in items:
+                if isinstance(item, QGraphicsPixmapItem) and item.data(0) == "screenshot":
+                    # scene.items() is ordered from top to bottom. Erasing only
+                    # the first screenshot mirrors editing the visible layer
+                    # without punching through every screenshot underneath it.
+                    self._erase_pixmap_item(item, pos)
+                    return
+            self._last_item = None
+            return
+
         handled = False
-        for item in self.canvas.scene.items(erase_rect):
+        for item in items:
             if isinstance(item, QGraphicsPixmapItem) and item.data(0) == "screenshot":
                 continue
             if isinstance(item, QGraphicsPixmapItem):
@@ -182,8 +201,11 @@ class EraserTool(BaseTool):
     def _erase_pixmap_item(self, item, pos: QPointF):
         if item not in self._pending_erase:
             self._pending_erase[item] = QPixmap(item.pixmap())
-        pix = item.pixmap()
-        painter = QPainter(pix)
+
+        source_pixmap = item.pixmap()
+        image = source_pixmap.toImage().convertToFormat(QImage.Format_ARGB32_Premultiplied)
+        image.setDevicePixelRatio(source_pixmap.devicePixelRatio())
+        painter = QPainter(image)
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setCompositionMode(QPainter.CompositionMode_Clear)
         local = item.mapFromScene(pos)
@@ -199,7 +221,7 @@ class EraserTool(BaseTool):
             r = self.eraser_size / 2
             painter.drawEllipse(local, r, r)
         painter.end()
-        item.setPixmap(pix)
+        item.setPixmap(QPixmap.fromImage(image))
         self._last_pos = pos
         self._last_item = item
 
@@ -287,7 +309,7 @@ class _EraseCommand(QUndoCommand):
     """Undo command for eraser changes to pixmap items."""
 
     def __init__(self, changes):
-        super().__init__("Erase")
+        super().__init__("Стереть")
         self._changes = changes
 
     def undo(self):

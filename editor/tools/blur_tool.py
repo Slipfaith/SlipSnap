@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QElapsedTimer, QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QPen, QColor, QImage, QPainter
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsPixmapItem
 from PIL import ImageFilter, ImageDraw, Image
@@ -8,6 +8,20 @@ from logic import pil_to_qpixmap, qimage_to_pil
 from .base_tool import BaseTool
 from editor.undo_commands import AddCommand
 from editor.ui.selection_items import ModernPixmapItem
+
+
+BLUR_PREVIEW_INTERVAL_MS = 33
+BLUR_PREVIEW_MAX_DIMENSION = 480
+
+
+def _preview_target_size(rect: QRectF) -> QSize:
+    width = max(1.0, float(rect.width()))
+    height = max(1.0, float(rect.height()))
+    scale = min(1.0, BLUR_PREVIEW_MAX_DIMENSION / max(width, height))
+    return QSize(
+        max(1, int(round(width * scale))),
+        max(1, int(round(height * scale))),
+    )
 
 
 def _image_rect_for_canvas(canvas) -> QRectF:
@@ -143,9 +157,11 @@ class BlurTool(BaseTool):
         self.preview_color = preview_color
         self.blur_radius = 5
         self.edge_width = 2
+        self._preview_clock = QElapsedTimer()
 
     def press(self, pos: QPointF):
         self._start = pos
+        self._preview_clock.invalidate()
         if self._rect_item is not None:
             self.canvas.scene.removeItem(self._rect_item)
             self._rect_item = None
@@ -169,12 +185,21 @@ class BlurTool(BaseTool):
         else:
             self._rect_item.setRect(clipped_rect)
 
+        if (
+            self._preview_clock.isValid()
+            and self._preview_clock.elapsed() < BLUR_PREVIEW_INTERVAL_MS
+        ):
+            return
+        self._preview_clock.restart()
+
+        target_size = _preview_target_size(clipped_rect)
         result = _generate_blur_pixmap(
             self.canvas,
             clipped_rect,
             self.blur_radius,
             self.edge_width,
             hidden_items=[self._preview_item] if self._preview_item is not None else None,
+            target_size=target_size,
         )
         if result is None:
             if self._preview_item is not None:
@@ -186,6 +211,8 @@ class BlurTool(BaseTool):
                 self._preview_item = self.canvas.scene.addPixmap(pix)
             else:
                 self._preview_item.setPixmap(pix)
+            preview_scale = clipped_rect.width() / max(1.0, float(pix.width()))
+            self._preview_item.setScale(preview_scale)
             max_z = max(
                 (it.zValue() for it in self.canvas.scene.items() if it is not self._preview_item),
                 default=0,
@@ -194,6 +221,7 @@ class BlurTool(BaseTool):
             self._preview_item.setPos(pos)
 
     def release(self, pos: QPointF):
+        self._preview_clock.invalidate()
         if self._rect_item is not None:
             rect = self._rect_item.rect()
             self.canvas.scene.removeItem(self._rect_item)

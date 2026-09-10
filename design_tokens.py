@@ -49,6 +49,7 @@ class Palette:
     TEXT_TOOL_COLOR: Tuple[int, int, int, int] = (255, 80, 80, 255)
     TEXT_TOOL_SELECTION: Tuple[int, int, int, int] = (70, 130, 240, 255)
     TEXT_TOOL_SELECTION_FILL: Tuple[int, int, int, int] = (255, 255, 255, 255)
+    OCR_TEXT_SELECTION: Tuple[int, int, int, int] = (37, 99, 235, 255)
     ERASER_MAIN_COLOR: Tuple[int, int, int, int] = (255, 100, 100, 120)
     ERASER_CENTER_COLOR: Tuple[int, int, int, int] = (255, 50, 50, 180)
 

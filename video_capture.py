@@ -638,7 +638,9 @@ class VideoCaptureController(QObject):
                     continue
 
                 shot = self._grabber._sct.grab(region)
-                encoder.write_frame(shot.rgb)
+                # MSS already exposes the captured frame as BGRA. Passing its
+                # raw buffer avoids a full-frame RGB channel shuffle and copy.
+                encoder.write_frame(shot.raw)
                 captured += 1
                 next_frame_ts = start_ts + (captured / float(fps))
 

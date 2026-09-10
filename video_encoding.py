@@ -114,7 +114,7 @@ def ensure_ffmpeg_available(ffmpeg_bin: Optional[str] = None) -> str:
 
 
 class MP4StreamEncoder:
-    """Stream raw RGB frames to ffmpeg and produce an MP4 file."""
+    """Stream raw BGRA frames to ffmpeg and produce an MP4 file."""
 
     def __init__(
         self,
@@ -143,7 +143,7 @@ class MP4StreamEncoder:
             "-f",
             "rawvideo",
             "-pix_fmt",
-            "rgb24",
+            "bgra",
             "-video_size",
             f"{self.width}x{self.height}",
             "-framerate",
@@ -172,13 +172,13 @@ class MP4StreamEncoder:
             **_windows_hidden_subprocess_kwargs(),
         )
 
-    def write_frame(self, rgb_bytes: bytes) -> None:
+    def write_frame(self, frame_bytes: bytes | bytearray | memoryview) -> None:
         if self._proc is None:
             self.start()
         if self._proc is None or self._proc.stdin is None:
             raise VideoEncodingError("FFmpeg процесс не инициализирован.")
         try:
-            self._proc.stdin.write(rgb_bytes)
+            self._proc.stdin.write(frame_bytes)
         except (BrokenPipeError, OSError) as exc:
             raise VideoEncodingError("Ошибка записи кадра в ffmpeg.") from exc
 

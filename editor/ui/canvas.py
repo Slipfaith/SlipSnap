@@ -76,6 +76,7 @@ from design_tokens import Metrics
 MARKER_ALPHA = Metrics.MARKER_ALPHA
 PENCIL_WIDTH = Metrics.PENCIL_WIDTH
 MARKER_WIDTH = Metrics.MARKER_WIDTH
+ERASER_TOOLS = {"erase", "erase_screenshot"}
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +111,6 @@ class Canvas(QGraphicsView):
         self.setFrameShape(QFrame.NoFrame)
 
         self.pixmap_item: Optional[HighQualityPixmapItem] = HighQualityPixmapItem(image)
-        self.pil_image = qimage_to_pil(image)  # store original PIL image
         self.pixmap_item.setFlag(QGraphicsItem.ItemIsMovable, True)
         self.pixmap_item.setFlag(QGraphicsItem.ItemIsSelectable, True)
         self.pixmap_item.setFlag(QGraphicsItem.ItemIsFocusable, True)
@@ -171,7 +171,8 @@ class Canvas(QGraphicsView):
             "line": LineTool(self),
             "arrow": ArrowTool(self),
             "blur": BlurTool(self, ModernColors.PRIMARY),
-            "erase": EraserTool(self),
+            "erase": EraserTool(self, EraserTool.ELEMENTS),
+            "erase_screenshot": EraserTool(self, EraserTool.SCREENSHOTS),
         }
         self.active_tool = self.tools["select"]
 
@@ -943,7 +944,6 @@ class Canvas(QGraphicsView):
         self.pixmap_item.setData(0, "screenshot")
         self.pixmap_item.setData(1, "base")
         self.scene.addItem(self.pixmap_item)
-        self.pil_image = qimage_to_pil(image)
         self.undo_stack.clear()
         if self._text_manager:
             self._text_manager.finish_current_editing()
@@ -960,15 +960,11 @@ class Canvas(QGraphicsView):
     def handle_item_removed(self, item: QGraphicsItem) -> None:
         if item is self.pixmap_item or item.data(1) == "base":
             self.pixmap_item = None
-            self.pil_image = None
         self._refresh_live_item_animation_state()
 
     def handle_item_restored(self, item: QGraphicsItem) -> None:
         if isinstance(item, QGraphicsPixmapItem) and item.data(1) == "base":
             self.pixmap_item = item
-            qimg = item.pixmap().toImage()
-            if not qimg.isNull():
-                self.pil_image = qimage_to_pil(qimg)
             if isinstance(item, HighQualityPixmapItem):
                 item.reset_scale_tracking()
         self._refresh_live_item_animation_state()
@@ -992,7 +988,7 @@ class Canvas(QGraphicsView):
 
         if tool == "select":
             self.viewport().setCursor(self._select_cursor)
-        elif tool == "erase":
+        elif tool in ERASER_TOOLS:
             if self.active_tool and hasattr(self.active_tool, 'cursor'):
                 self.viewport().setCursor(self.active_tool.cursor)
             else:
@@ -1654,7 +1650,7 @@ class Canvas(QGraphicsView):
         self.undo_stack.redo()
 
     def wheelEvent(self, event):
-        if self._tool == "erase" and hasattr(self.active_tool, 'wheel_event'):
+        if self._tool in ERASER_TOOLS and hasattr(self.active_tool, 'wheel_event'):
             pos = self.mapToScene(event.position().toPoint())
             self.active_tool.wheel_event(event.angleDelta().y(), pos)
             event.accept()
@@ -1705,6 +1701,12 @@ class Canvas(QGraphicsView):
     def keyPressEvent(self, event):
         if event.modifiers() & Qt.ControlModifier:
             key = event.key()
+            if key == Qt.Key_C and self._tool == "ocr" and self.ocr_overlay:
+                text = self.ocr_overlay.selected_text()
+                if text:
+                    QApplication.clipboard().setText(text)
+                event.accept()
+                return
             if key == Qt.Key_Z:
                 if self.undo_stack.canUndo():
                     self.undo_stack.undo()
@@ -1716,6 +1718,10 @@ class Canvas(QGraphicsView):
                 event.accept()
                 return
             if key == Qt.Key_A:
+                if self._tool == "ocr" and self.ocr_overlay:
+                    self.ocr_overlay.select_all()
+                    event.accept()
+                    return
                 focus_item = self.scene.focusItem()
                 if (
                     isinstance(focus_item, QGraphicsTextItem)
@@ -1728,7 +1734,11 @@ class Canvas(QGraphicsView):
                 self.select_all_items()
                 event.accept()
                 return
-        if self._tool == "erase" and hasattr(self.active_tool, 'key_press'):
+        if event.key() == Qt.Key_Escape and self._tool == "ocr" and self.ocr_overlay:
+            self.ocr_overlay.clear_selection()
+            event.accept()
+            return
+        if self._tool in ERASER_TOOLS and hasattr(self.active_tool, 'key_press'):
             self.active_tool.key_press(event.key())
             event.accept()
             return
@@ -1783,10 +1793,13 @@ class Canvas(QGraphicsView):
         if event.button() == Qt.LeftButton and self._tool == "ocr":
             pos = self.mapToScene(event.position().toPoint())
             if self.ocr_overlay:
-                self.ocr_overlay.start_selection(pos)
+                self.ocr_overlay.start_selection(
+                    pos,
+                    extend=bool(event.modifiers() & Qt.ShiftModifier),
+                )
             event.accept()
             return
-        if event.button() == Qt.RightButton and self._tool == "erase":
+        if event.button() == Qt.RightButton and self._tool in ERASER_TOOLS:
             if self.active_tool and hasattr(self.active_tool, "show_size_popup"):
                 global_pos = self.viewport().mapToGlobal(event.position().toPoint())
                 self.active_tool.show_size_popup(global_pos)
@@ -1880,6 +1893,12 @@ class Canvas(QGraphicsView):
         super().mousePressEvent(event)
 
     def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.LeftButton and self._tool == "ocr":
+            pos = self.mapToScene(event.position().toPoint())
+            if self.ocr_overlay:
+                self.ocr_overlay.select_word_at(pos)
+            event.accept()
+            return
         if event.button() == Qt.LeftButton and self._tool == "select":
             clicked = self.itemAt(event.position().toPoint())
             while clicked is not None and clicked.parentItem() is not None and not isinstance(clicked, EditableTextItem):
@@ -2005,6 +2024,9 @@ class Canvas(QGraphicsView):
                 event.accept()
                 return
             if self._tool == "ocr":
+                pos = self.mapToScene(event.position().toPoint())
+                if self.ocr_overlay:
+                    self.ocr_overlay.finish_selection(pos)
                 event.accept()
                 return
             if self._tool == "select" and self._move_snapshot:
@@ -2088,6 +2110,24 @@ class Canvas(QGraphicsView):
         return [clicked_item]
 
     def contextMenuEvent(self, event):
+        if self._tool == "ocr" and self.ocr_overlay and self.ocr_overlay.has_words():
+            menu = QMenu(self)
+            copy_action = menu.addAction("Копировать выделенный текст")
+            copy_action.setEnabled(self.ocr_overlay.has_selection())
+            select_all_action = menu.addAction("Выделить весь текст")
+            clear_action = menu.addAction("Снять выделение")
+            clear_action.setEnabled(self.ocr_overlay.has_selection())
+            chosen = menu.exec(event.globalPos())
+            if chosen is copy_action:
+                text = self.ocr_overlay.selected_text()
+                if text:
+                    QApplication.clipboard().setText(text)
+            elif chosen is select_all_action:
+                self.ocr_overlay.select_all()
+            elif chosen is clear_action:
+                self.ocr_overlay.clear_selection()
+            event.accept()
+            return
         scene_pos = self.mapToScene(event.pos())
         items = self.scene.items(scene_pos)
         if items:

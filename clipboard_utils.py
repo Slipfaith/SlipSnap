@@ -25,6 +25,20 @@ SLIPSNAP_MEME_MIME = "application/x-slipsnap-meme"
 logger = logging.getLogger(__name__)
 
 
+def _qimage_from_pil_rgba(img: Image.Image) -> QImage:
+    """Create an owned QImage directly from RGBA pixels without PNG decoding."""
+    rgba = img if img.mode == "RGBA" else img.convert("RGBA")
+    raw = rgba.tobytes("raw", "RGBA")
+    borrowed = QImage(
+        raw,
+        rgba.width,
+        rgba.height,
+        rgba.width * 4,
+        QImage.Format_RGBA8888,
+    )
+    return borrowed.copy()
+
+
 def _set_qt_clipboard_image(qimg: QImage) -> bool:
     app = QGuiApplication.instance()
     if app is None:
@@ -36,15 +50,19 @@ def _set_qt_clipboard_image(qimg: QImage) -> bool:
     return True
 
 
-def copy_pil_image_to_clipboard(img: Image.Image) -> QImage:
+def copy_pil_image_to_clipboard(
+    img: Image.Image,
+    *,
+    return_png_data: bool = False,
+) -> QImage | tuple[QImage, bytes]:
     """Копирует PIL изображение в буфер с сохранением прозрачности
 
     Кладёт несколько форматов для совместимости:
     - PNG (для Telegram, современных программ)
     - CF_DIBV5 с альфа-каналом (для Teams, Word, Outlook)
 
-    Returns:
-        QImage для совместимости с существующим API
+    ``return_png_data`` lets capture flows reuse the already encoded PNG for
+    background history persistence instead of encoding the image a second time.
     """
 
     # Проверяем и конвертируем в RGBA
@@ -56,20 +74,22 @@ def copy_pil_image_to_clipboard(img: Image.Image) -> QImage:
     img.save(buffer, format="PNG", compress_level=6)
     png_data = buffer.getvalue()
 
-    # Создаём QImage для возврата
-    qimg = QImage.fromData(png_data, "PNG")
-    if qimg.format() != QImage.Format_ARGB32:
-        qimg = qimg.convertToFormat(QImage.Format_ARGB32)
+    # Build the editor image directly from pixels. Decoding the PNG here used
+    # to add a visible delay for 1080p and especially 4K captures.
+    qimg = _qimage_from_pil_rgba(img)
+
+    def result():
+        return (qimg, png_data) if return_png_data else qimg
 
     # Копируем через Win32 API
     if HAS_WIN32 and sys.platform.startswith("win"):
         if _copy_png_and_dibv5_win32(img, png_data):
-            return qimg
+            return result()
         _set_qt_clipboard_image(qimg)
-        return qimg
+        return result()
 
     _set_qt_clipboard_image(qimg)
-    return qimg
+    return result()
 
 
 def copy_gif_file_to_clipboard(path: Path) -> bool:
@@ -248,10 +268,7 @@ def copy_pil_image_to_clipboard_with_fallback(img: Image.Image) -> QImage:
     img.save(buffer, format="PNG")
     png_data = buffer.getvalue()
 
-    # Создаём QImage
-    qimg = QImage.fromData(png_data, "PNG")
-    if qimg.format() != QImage.Format_ARGB32:
-        qimg = qimg.convertToFormat(QImage.Format_ARGB32)
+    qimg = _qimage_from_pil_rgba(img)
 
     if not (HAS_WIN32 and sys.platform.startswith("win")):
         _set_qt_clipboard_image(qimg)

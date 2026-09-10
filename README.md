@@ -4,7 +4,7 @@
 > **RU:** Десктопный инструмент для захвата экрана и записи коротких видео с редактором аннотаций.
 > **EN:** A desktop screenshot and short-video capture tool with a built-in annotation editor.
 
-**Версия / Version:** 3.0
+**Версия / Version:** 3.3
 
 ---
 
@@ -16,7 +16,7 @@
 | Поддержка 1–3+ мониторов с разным DPI | 1–3+ monitor support with mixed DPI |
 | Лончер + режим в трее | Launcher + system tray mode |
 | Редактор с undo/redo, слоями, drag-and-drop | Editor with undo/redo, layers, drag-and-drop |
-| OCR с выбором языка, вставка текста на холст | OCR with language selection, paste to canvas |
+| AI OCR через Mistral или Gemini | AI OCR via Mistral or Gemini |
 | Zoom Lens — лупа как объект сцены | Zoom Lens as a full scene object |
 | Анимации объектов (Draw, Pulse) | Object animations (Draw, Pulse) |
 | Мем-библиотека с анимированными GIF | Meme library with animated GIF support |
@@ -69,6 +69,18 @@
 
 > RU: Доступность ссылки зависит от внешнего сервиса.
 > EN: Link availability depends on the external hosting provider.
+
+---
+
+## OCR
+
+- Левый клик по `OCR` сразу запускает распознавание, правый открывает выбор провайдера и языков.
+- Для `Mistral OCR` или `Google Gemini` откройте `OCR` правой кнопкой → `Настроить API-ключи…` и вставьте свой ключ.
+- API-ключи хранятся в диспетчере учётных данных Windows, а не в файле конфигурации.
+- Распознавание выполняется выбранным AI-провайдером: Mistral или Gemini.
+
+Вместо ввода через интерфейс можно использовать переменные окружения `MISTRAL_API_KEY` и
+`GEMINI_API_KEY` (также поддерживается старое имя `MISTRALAPI`).
 
 ---
 

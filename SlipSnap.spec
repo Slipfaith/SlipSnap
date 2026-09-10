@@ -31,11 +31,11 @@ hiddenimports = [
     "pyqtkeybind.win",
     "pyqtkeybind.win.keybindutil",
     "pyqtkeybind.win.keycodes",
+    "win32cred",
+    "pywintypes",
 ]
 hiddenimports += collect_submodules("editor")
 hiddenimports += collect_submodules("pyqtkeybind")
-# OCR stack (pytesseract pulls optional submodules dynamically)
-hiddenimports += collect_submodules("pytesseract")
 hiddenimports += collect_submodules("PIL")
 # Upload stack (requests is imported dynamically in upload_service.py)
 hiddenimports += collect_submodules("requests")

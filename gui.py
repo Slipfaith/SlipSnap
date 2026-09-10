@@ -43,13 +43,12 @@ from PySide6.QtWidgets import (
     QSystemTrayIcon,
     QMenu,
 )
-from logic import load_config, save_config, qimage_to_pil, save_history
+from logic import load_config, save_config, save_history_png_async
 from clipboard_utils import copy_pil_image_to_clipboard
 from icons import make_icon_capture, make_icon_shape, make_icon_close, make_icon_video
 from pyqtkeybind import keybinder
 
 from editor.series_capture import SeriesCaptureController
-from ocr import configure_tesseract, warm_up_ocr
 from video_capture import VideoCaptureController
 from video_encoding import FFmpegUnavailableError, ensure_ffmpeg_available
 
@@ -77,7 +76,7 @@ class _KeybinderEventFilter(QAbstractNativeEventFilter):
 
 
 class SelectionOverlayBase(QWidget):
-    captured = Signal(QImage)
+    captured = Signal(QImage, object)
     cancel_all = Signal()
 
     def __init__(self, base_img: Image.Image, cfg: dict, geom: QRect):
@@ -199,8 +198,11 @@ class SelectionOverlayBase(QWidget):
                     mask = self._create_selection_mask(w, h)
                     result = crop.copy()
                     result.putalpha(mask)
-                    qimg = copy_pil_image_to_clipboard(result)
-                    self.captured.emit(qimg)
+                    qimg, png_data = copy_pil_image_to_clipboard(
+                        result,
+                        return_png_data=True,
+                    )
+                    self.captured.emit(qimg, png_data)
         self._cancel_selection()
 
     def _create_selection_mask(self, width: int, height: int) -> Image.Image:
@@ -422,7 +424,7 @@ class VirtualOverlay(SelectionOverlayBase):
 
 
 class OverlayManager(QObject):
-    captured = Signal(QImage)
+    captured = Signal(QImage, object)
     finished = Signal()
 
     def __init__(self, cfg: dict, grabber: Optional["ScreenGrabber"] = None):
@@ -496,8 +498,8 @@ class OverlayManager(QObject):
         self._overlays.clear()
         self.finished.emit()
 
-    def _on_captured(self, qimg: QImage):
-        self.captured.emit(qimg)
+    def _on_captured(self, qimg: QImage, png_data: bytes):
+        self.captured.emit(qimg, png_data)
 
 
 class Launcher(QWidget):
@@ -705,8 +707,6 @@ class App(QObject):
         super().__init__()
         init_started = perf_counter()
         self.cfg = load_config()
-        configure_tesseract(self.cfg)
-        warm_up_ocr()
         self.launcher = Launcher(self.cfg)
         self.launcher.start_capture.connect(self.capture_region)
         self.launcher.start_video.connect(self.capture_video)
@@ -749,7 +749,7 @@ class App(QObject):
         app = QApplication.instance()
         if app is not None:
             app.aboutToQuit.connect(self._cleanup_on_exit)
-        perf_counter() - init_started
+        logger.info("Application UI initialized in %.3f s", perf_counter() - init_started)
 
     def _toggle_shape(self):
         if hasattr(self, "ovm"):
@@ -824,7 +824,7 @@ class App(QObject):
         self.capture_video(parent_widget=parent)
         return self._video_capture_in_progress
 
-    def _on_series_captured(self, qimg: QImage):
+    def _on_series_captured(self, qimg: QImage, _png_data: bytes):
         parent = self._series_parent or self.launcher
         result = self._series_controller.save_capture(parent, qimg)
         if result is None and not self._series_controller.is_active():
@@ -1083,7 +1083,10 @@ class App(QObject):
             return
 
         try:
-            qimg = copy_pil_image_to_clipboard(img)
+            qimg, png_data = copy_pil_image_to_clipboard(
+                img,
+                return_png_data=True,
+            )
         except Exception as e:
             self._full_capture_in_progress = False
             self._update_tray_actions()
@@ -1092,7 +1095,7 @@ class App(QObject):
             QMessageBox.critical(None, "SlipSnap", f"Ошибка обработки: {e}")
             return
 
-        self._on_captured(qimg)
+        self._on_captured(qimg, png_data)
         self._restore_hidden_editors()
         self._full_capture_in_progress = False
         self._update_tray_actions()
@@ -1102,10 +1105,8 @@ class App(QObject):
         if not self._captured_once:
             self._show_launcher()
 
-    def _on_captured(self, qimg: QImage):
+    def _on_captured(self, qimg: QImage, png_data: bytes):
         try:
-            img = qimage_to_pil(qimg)
-            save_history(img)
             EditorWindow = self._get_editor_window_class()
             target_window: Optional["EditorWindow"] = None
             candidate = self._capture_target_editor
@@ -1172,6 +1173,7 @@ class App(QObject):
             self._captured_once = True
             self._update_editor_series_buttons()
             self._enter_background()
+            save_history_png_async(png_data)
         except Exception as e:
             QMessageBox.critical(None, "SlipSnap", f"Ошибка обработки: {e}")
             self.launcher.show()

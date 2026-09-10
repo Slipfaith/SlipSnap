@@ -4,7 +4,7 @@
 
 ## Что это
 
-**SlipSnap v3.1** — десктопное приложение на Python/PySide6 для захвата скриншотов и коротких видео с встроенным редактором. Windows-only. Запускается из трея.
+**SlipSnap v3.3** — десктопное приложение на Python/PySide6 для захвата скриншотов и коротких видео с встроенным редактором. Windows-only. Запускается из трея.
 
 ## Стек
 
@@ -13,7 +13,7 @@
 | UI | PySide6 (Qt 6) |
 | Изображения | Pillow (PIL) |
 | Захват экрана | mss |
-| OCR | pytesseract + Tesseract |
+| OCR | Mistral OCR API, Gemini API |
 | Видео | ffmpeg (внешний бинарник) |
 | Win32 API | pywin32 (`win32gui`, `win32com`, `win32con`) |
 | Сборка | PyInstaller + Inno Setup (`.iss`) |
@@ -30,7 +30,9 @@ icons.py                  # SVG-иконки, генерируемые прог�
 collage.py                # Коллаж из истории снимков
 meme_library.py           # Библиотека мемов (GIF/PNG)
 meme_gif_workflow.py      # Вставка GIF-мемов в холст
-ocr.py                    # Обёртка над pytesseract
+ocr_models.py             # Общие модели OCR
+cloud_ocr.py              # REST-клиенты Mistral/Gemini
+api_key_store.py          # API-ключи в Windows Credential Manager
 upload_service.py         # Загрузка файла на внешний сервер
 video_capture.py          # Захват видео с экрана
 video_encoding.py         # Кодирование через ffmpeg
@@ -46,6 +48,7 @@ editor/
     high_quality_pixmap_item.py  # QGraphicsPixmapItem с HQ рендерингом
     zoom_lens_item.py     # Лупа на холсте
     meme_library_dialog.py
+    ocr_cloud_dialog.py   # Настройки облачного OCR и проверка подключения
     icon_factory.py
     window_utils.py
     selection_items.py
@@ -90,7 +93,8 @@ tests/                    # pytest-тесты
 Загрузка: `logic.load_config()` → `DEFAULT_CONFIG` в `logic.py` (там же все ключи)
 Сохранение: `logic.save_config(cfg)`
 
-Версия приложения меняется **только** в `main.py` → `APP_VERSION`.
+Версия приложения меняется в `main.py` → `APP_VERSION`; перед выпуском такое же
+значение указывается в `SlipSnap.iss` → `AppVersion` для метаданных установщика.
 
 ## Именование файлов при сохранении
 
@@ -142,7 +146,8 @@ pyinstaller SlipSnap.spec      # собирает exe
 
 ## Частые задачи
 
-**Поменять версию** → `main.py`, строка `APP_VERSION`
+**Поменять версию** → синхронно обновить `main.py` (`APP_VERSION`) и
+`SlipSnap.iss` (`AppVersion`)
 
 **Добавить инструмент рисования** → создать класс в `editor/tools/`, наследовать от `BaseTool`, зарегистрировать в `Canvas` и `toolbar_factory.py`
 
@@ -151,3 +156,11 @@ pyinstaller SlipSnap.spec      # собирает exe
 **Добавить кнопку в тулбар редактора** → `editor/ui/toolbar_factory.py`
 
 **Изменить цвет/размер UI** → `design_tokens.py` (не хардкодить в виджетах)
+
+## Обязательное правило кнопок инструментов холста
+
+- ЛКМ по кнопке инструмента выполняет её основное или последнее выбранное действие.
+- Все дополнительные режимы и настройки кнопки открываются только через контекстное меню по ПКМ.
+- Не добавлять стрелки, split-кнопки и `QToolButton.MenuButtonPopup`/`InstantPopup` для кнопок холста без прямого требования пользователя.
+- У кнопки с дополнительными режимами `button.menu()` должен оставаться `None`; использовать `Qt.CustomContextMenu`.
+- Для новых и изменённых кнопок добавлять UI-тест, проверяющий отсутствие стрелки и открытие меню по ПКМ.

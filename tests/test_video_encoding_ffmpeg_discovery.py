@@ -4,10 +4,10 @@ from __future__ import annotations
 import os
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import video_encoding
-from video_encoding import find_ffmpeg_binary
+from video_encoding import MP4StreamEncoder, find_ffmpeg_binary
 
 
 class VideoEncodingFFmpegDiscoveryTests(unittest.TestCase):
@@ -50,6 +50,23 @@ class VideoEncodingFFmpegDiscoveryTests(unittest.TestCase):
         ):
             resolved = find_ffmpeg_binary()
         self.assertEqual(Path(resolved), fake)
+
+    def test_encoder_accepts_raw_bgra_frames(self) -> None:
+        process = Mock()
+        process.stdin = Mock()
+        with (
+            patch("video_encoding.ensure_ffmpeg_available", return_value="ffmpeg.exe"),
+            patch("video_encoding.subprocess.Popen", return_value=process) as popen,
+        ):
+            encoder = MP4StreamEncoder(8, 6, 15, Path("clip.mp4"))
+            encoder.start()
+            frame = bytearray(8 * 6 * 4)
+            encoder.write_frame(frame)
+
+        command = popen.call_args.args[0]
+        input_pix_fmt = command[command.index("-pix_fmt") + 1]
+        self.assertEqual(input_pix_fmt, "bgra")
+        process.stdin.write.assert_called_once_with(frame)
 
 
 if __name__ == "__main__":

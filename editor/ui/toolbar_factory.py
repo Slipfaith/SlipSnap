@@ -26,6 +26,7 @@ from .icon_factory import (
     make_icon_text,
     make_icon_blur,
     make_icon_eraser,
+    make_icon_screenshot_eraser,
     make_icon_select,
     make_icon_zoom_lens,
     make_icon_memes,
@@ -435,7 +436,62 @@ def create_tools_toolbar(window, canvas):
     free_btn.setIcon(make_icon_marker() if canvas.pen_mode == "marker" else make_icon_pencil())
 
     add_tool("blur", make_icon_blur(), "Блюр", "B")
-    add_tool("erase", make_icon_eraser(), "Ластик", "E")
+
+    current_eraser_tool = "erase"
+    eraser_btn = QToolButton()
+    eraser_btn.setObjectName("eraserToolButton")
+    eraser_btn.setIcon(make_icon_eraser())
+    eraser_btn.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
+    eraser_btn.setToolTip("Ластик элементов / снимка (E)")
+    eraser_btn.setCheckable(True)
+    eraser_btn.setAutoExclusive(True)
+    eraser_btn.setFixedSize(Metrics.TOOL_BUTTON, Metrics.TOOL_BUTTON)
+    eraser_btn.clicked.connect(lambda _checked=False: canvas.set_tool(current_eraser_tool))
+    tools_tb.addWidget(eraser_btn)
+    tool_buttons.append(eraser_btn)
+
+    eraser_menu = QMenu(eraser_btn)
+    eraser_menu.setObjectName("eraserModeMenu")
+    eraser_group = QActionGroup(eraser_menu)
+    act_erase_elements = eraser_menu.addAction("Ластик элементов")
+    act_erase_screenshot = eraser_menu.addAction("Ластик снимка")
+    act_erase_elements.setObjectName("eraseElementsAction")
+    act_erase_screenshot.setObjectName("eraseScreenshotAction")
+    for act in (act_erase_elements, act_erase_screenshot):
+        act.setCheckable(True)
+        eraser_group.addAction(act)
+    act_erase_elements.setChecked(True)
+
+    def _set_eraser_tool(tool: str):
+        nonlocal current_eraser_tool
+        current_eraser_tool = tool
+        screenshot_mode = tool == "erase_screenshot"
+        canvas.set_tool(tool)
+        eraser_btn.setChecked(True)
+        eraser_btn.setIcon(make_icon_screenshot_eraser() if screenshot_mode else make_icon_eraser())
+        eraser_btn.setToolTip(
+            "Ластик снимка — стирает пиксели в прозрачность (E)"
+            if screenshot_mode
+            else "Ластик элементов — стирает пометки и вставки (E)"
+        )
+        act_erase_elements.setChecked(not screenshot_mode)
+        act_erase_screenshot.setChecked(screenshot_mode)
+
+    act_erase_elements.triggered.connect(lambda _checked=False: _set_eraser_tool("erase"))
+    act_erase_screenshot.triggered.connect(
+        lambda _checked=False: _set_eraser_tool("erase_screenshot")
+    )
+    eraser_btn.setContextMenuPolicy(Qt.CustomContextMenu)
+    eraser_btn.customContextMenuRequested.connect(
+        lambda pos: eraser_menu.exec(eraser_btn.mapToGlobal(pos))
+    )
+
+    act_e = QAction(window)
+    act_e.setShortcut(QKeySequence("E"))
+    act_e.setShortcutContext(Qt.WindowShortcut)
+    act_e.triggered.connect(eraser_btn.click)
+    window.addAction(act_e)
+
     add_tool("text", make_icon_text(), "Текст", "T")
 
     tool_buttons[0].setChecked(True)

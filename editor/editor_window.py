@@ -4,6 +4,7 @@ import logging
 import shutil
 import tempfile
 from pathlib import Path
+from time import monotonic, sleep
 from typing import Callable, Optional
 
 from PySide6.QtCore import Qt, QTimer, QRectF, Signal, QThread, QMimeData, QCoreApplication
@@ -11,6 +12,7 @@ from PySide6.QtGui import QAction, QImage, QPixmap, QPainter, QPainterPath, QKey
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFrame,
@@ -24,28 +26,21 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMenu,
     QMessageBox,
-    QProgressDialog,
+    QPushButton,
     QToolButton,
     QVBoxLayout,
     QWidget,
     QWidgetAction,
 )
 
-from logic import qimage_to_pil, save_history, save_config
+from logic import save_config, save_history_png_async
 from editor.text_tools import TextManager
 from editor.ocr_overlay import OcrCapture
 from editor.editor_logic import EditorLogic
 from editor.image_utils import images_from_mime, gif_paths_from_mime, gif_bytes_from_mime
-from ocr import (
-    OcrError,
-    OcrResult,
-    OcrSettings,
-    get_language_display_name,
-    run_ocr,
-    get_available_languages,
-    download_tesseract_languages,
-    LANGUAGE_DISPLAY_NAMES,
-)
+from ocr_models import OcrResult, OcrSettings, get_language_display_name, LANGUAGE_DISPLAY_NAMES
+from api_key_store import ApiKeyStoreError, get_api_key
+from cloud_ocr import PROVIDER_NAMES, run_ocr_with_provider
 
 from editor.undo_commands import AddCommand, RemoveCommand, ScaleCommand
 
@@ -53,14 +48,15 @@ from .ui.canvas import Canvas
 from .ui.high_quality_pixmap_item import HighQualityPixmapItem
 from .ui.color_widgets import HexColorDialog
 from .ui.toolbar_factory import create_tools_toolbar, create_actions_toolbar
+from .ui.ocr_cloud_dialog import OcrCloudSettingsDialog
 from .ui.styles import ModernColors
 from .ui.window_utils import size_to_image
-from .ui.meme_library_dialog import MemesDialog
 from icons import make_icon_series, make_icon_video
 
 from design_tokens import Metrics, editor_main_stylesheet
 
 logger = logging.getLogger(__name__)
+_MIN_OCR_SCANNER_SECONDS = 0.9
 
 
 class _AnimatedGifItem(QGraphicsPixmapItem):
@@ -103,12 +99,18 @@ class _OcrWorker(QThread):
         self.language_hint = language_hint
 
     def run(self):
+        started_at = monotonic()
         result = None
         error = None
         try:
-            result = run_ocr(self.capture.image.copy(), self.settings, language_hint=self.language_hint)
+            result = run_ocr_with_provider(
+                self.capture.image.copy(), self.settings, language_hint=self.language_hint
+            )
         except Exception as exc:  # noqa: BLE001
             error = exc
+        remaining = _MIN_OCR_SCANNER_SECONDS - (monotonic() - started_at)
+        if remaining > 0:
+            sleep(remaining)
         self.finished.emit(result, error)
 
 
@@ -406,6 +408,9 @@ class EditorWindow(QMainWindow):
         self.setMinimumSize(Metrics.MAIN_WINDOW_MIN_WIDTH, Metrics.MAIN_WINDOW_MIN_HEIGHT)
 
         self.canvas = Canvas(qimg)
+        selection_changed = getattr(self.canvas.ocr_overlay, "selectionChanged", None)
+        if selection_changed is not None:
+            selection_changed.connect(self._on_ocr_selection_changed)
         self.text_manager = TextManager(self.canvas)
         self.canvas.set_text_manager(self.text_manager)
         self.logic = EditorLogic(self.canvas, self.cfg)
@@ -470,8 +475,7 @@ class EditorWindow(QMainWindow):
             5000,
         )
 
-        self._memes_dialog = MemesDialog(self, cfg=self.cfg)
-        self._memes_dialog.memeSelected.connect(self._insert_meme_from_dialog)
+        self._memes_dialog = None
 
         # Меню справки с горячими клавишами
         help_menu = self.menuBar().addMenu("Справка")
@@ -613,14 +617,13 @@ class EditorWindow(QMainWindow):
                 self.text_manager.apply_color_to_selected(selected_items, focus_item)
 
     def copy_to_clipboard(self):
-        ocr_text = ""
-        if self.canvas.ocr_overlay and (
-            self.canvas.ocr_overlay.has_selection() or self.canvas.ocr_overlay.has_words()
-        ):
-            ocr_text = self.canvas.selected_ocr_text().strip()
-        if ocr_text:
-            QApplication.clipboard().setText(ocr_text)
-            self.statusBar().showMessage("✓ Текст OCR скопирован", 2000)
+        if self.canvas._tool == "ocr" and self.canvas.ocr_overlay:
+            ocr_text = self.canvas.ocr_overlay.selected_text()
+            if ocr_text:
+                QApplication.clipboard().setText(ocr_text)
+                self.statusBar().showMessage("✓ Выделенный текст скопирован", 2000)
+            else:
+                self.statusBar().showMessage("Выделите текст или нажмите Ctrl+A", 2500)
             return
 
         self.logic.copy_to_clipboard()
@@ -722,7 +725,8 @@ class EditorWindow(QMainWindow):
     def _setup_ocr_button(self, button: QToolButton) -> None:
         self._ocr_menu = QMenu(button)
         button.setText("OCR")
-        button.setToolTip("Распознать текст (правый клик — выбор языков)")
+        button.setToolTip("Распознать текст (ПКМ — настройки AI OCR)")
+        button.setPopupMode(QToolButton.DelayedPopup)
         button.setContextMenuPolicy(Qt.CustomContextMenu)
         button.customContextMenuRequested.connect(self._open_ocr_menu)
         self._refresh_ocr_menu()
@@ -737,11 +741,10 @@ class EditorWindow(QMainWindow):
         if self._ocr_menu is None:
             return
         self._ocr_menu.clear()
-        try:
-            available = get_available_languages()
-        except OcrError as e:
-            QMessageBox.warning(self, "SlipSnap · OCR", str(e))
-            available = []
+        provider = self.ocr_settings.provider
+        available = sorted(
+            set(LANGUAGE_DISPLAY_NAMES) | set(self.ocr_settings.preferred_languages)
+        )
         preferred = [lang for lang in self.ocr_settings.preferred_languages if lang]
         selected_set = set(preferred)
 
@@ -756,6 +759,34 @@ class EditorWindow(QMainWindow):
         layout = QVBoxLayout(container)
         layout.setContentsMargins(10, 8, 10, 10)
         layout.setSpacing(6)
+
+        settings_button = QPushButton("Настроить API-ключи…", container)
+        settings_button.setToolTip("Открыть ввод ключей Mistral и Gemini")
+        settings_button.clicked.connect(self._schedule_ocr_cloud_settings)
+        layout.addWidget(settings_button)
+
+        provider_label = QLabel("Способ распознавания", container)
+        provider_label.setStyleSheet("font-weight: 600;")
+        layout.addWidget(provider_label)
+
+        provider_row = QHBoxLayout()
+        provider_combo = QComboBox(container)
+        for code, name in PROVIDER_NAMES.items():
+            provider_combo.addItem(name, code)
+        provider_index = provider_combo.findData(provider)
+        provider_combo.setCurrentIndex(max(0, provider_index))
+        provider_combo.activated.connect(
+            lambda _index: self._set_ocr_provider(str(provider_combo.currentData()))
+        )
+        provider_row.addWidget(provider_combo, 1)
+
+        layout.addLayout(provider_row)
+
+        provider_hint = QLabel(container)
+        provider_hint.setWordWrap(True)
+        provider_hint.setStyleSheet("color: #6e7781; font-size: 11px;")
+        provider_hint.setText("Выделенная область будет отправлена выбранному AI-сервису.")
+        layout.addWidget(provider_hint)
 
         quick_row = QHBoxLayout()
         quick_row.setSpacing(6)
@@ -848,29 +879,47 @@ class EditorWindow(QMainWindow):
 
         summary = QLabel(container)
         summary.setStyleSheet("color: #6e7781; font-size: 12px;")
-        summary.setText("Можно выбрать несколько языков")
+        summary.setText("Языки используются как подсказка для AI")
         layout.addWidget(summary)
-
-        download_btn = QToolButton(container)
-        download_btn.setText("Скачать языки…")
-        download_btn.setStyleSheet(
-            "QToolButton {"
-            "  background: #eef2f7;"
-            "  border: 1px solid #d0d7de;"
-            "  border-radius: 8px;"
-            "  padding: 6px 10px;"
-            "}"
-            "QToolButton:hover {"
-            "  background: #e6f1ff;"
-            "  border-color: #4c8bf5;"
-            "}"
-        )
-        download_btn.clicked.connect(self._download_ocr_languages)
-        layout.addWidget(download_btn)
 
         wrapper = QWidgetAction(self._ocr_menu)
         wrapper.setDefaultWidget(container)
         self._ocr_menu.addAction(wrapper)
+
+    def _save_ocr_settings(self) -> None:
+        self.cfg["ocr_settings"] = self.ocr_settings.to_dict()
+        save_config(self.cfg)
+
+    def _set_ocr_provider(self, provider: str) -> None:
+        normalized = str(provider).strip().lower()
+        if normalized not in PROVIDER_NAMES or normalized == self.ocr_settings.provider:
+            return
+        self.ocr_settings.provider = normalized
+        self._save_ocr_settings()
+        if self._ocr_menu is not None:
+            self._ocr_menu.close()
+        try:
+            has_key = bool(get_api_key(normalized))
+        except ApiKeyStoreError as exc:
+            QMessageBox.warning(self, "SlipSnap · OCR", str(exc))
+            has_key = False
+        if not has_key:
+            QTimer.singleShot(0, self._open_ocr_cloud_settings)
+
+    def _open_ocr_cloud_settings(self) -> bool:
+        dialog = OcrCloudSettingsDialog(self)
+        if dialog.exec() != QDialog.Accepted:
+            return False
+        self._save_ocr_settings()
+        self._refresh_ocr_menu()
+        return True
+
+    def _schedule_ocr_cloud_settings(self) -> None:
+        """Close the popup before opening the modal API-key dialog."""
+
+        if self._ocr_menu is not None:
+            self._ocr_menu.close()
+        QTimer.singleShot(0, self._open_ocr_cloud_settings)
 
     def _update_ocr_language_selection(self, language: str, checked: bool, *, refresh_ui: bool = True) -> None:
         languages = [lang for lang in self.ocr_settings.preferred_languages if lang != language]
@@ -888,62 +937,7 @@ class EditorWindow(QMainWindow):
             normalized = ["eng"]
         self.ocr_settings.preferred_languages = list(dict.fromkeys(normalized))
         self.ocr_settings.last_language = "+".join(normalized)
-        self.cfg["ocr_settings"] = self.ocr_settings.to_dict()
-        save_config(self.cfg)
-
-    def _download_ocr_languages(self) -> None:
-        try:
-            available = get_available_languages()
-        except OcrError as exc:
-            QMessageBox.warning(self, "SlipSnap · OCR", str(exc))
-            return
-        known_languages = sorted(set(LANGUAGE_DISPLAY_NAMES.keys()) | set(available))
-        dialog = _OcrLanguageDownloadDialog(self, available, known_languages)
-        if dialog.exec() != QDialog.Accepted:
-            return
-        codes = dialog.selected_languages()
-        if not codes:
-            QMessageBox.information(self, "SlipSnap · OCR", "Не указаны языки для загрузки.")
-            return
-
-        progress = QProgressDialog("Загрузка языков OCR…", "Отмена", 0, len(codes), self)
-        progress.setWindowTitle("SlipSnap · OCR")
-        progress.setWindowModality(Qt.WindowModal)
-        progress.setMinimumDuration(0)
-
-        def _progress(current: int, total: int, code: str) -> bool:
-            progress.setMaximum(total)
-            progress.setValue(current - 1)
-            progress.setLabelText(f"Загружается {code}.traineddata ({current}/{total})")
-            QApplication.processEvents()
-            return not progress.wasCanceled()
-
-        try:
-            result = download_tesseract_languages(codes, progress=_progress, cfg=self.cfg)
-        except OcrError as exc:
-            progress.cancel()
-            QMessageBox.warning(self, "SlipSnap · OCR", str(exc))
-            return
-        finally:
-            progress.setValue(progress.maximum())
-
-        summary_parts = []
-        if result.installed:
-            summary_parts.append("установлено: " + ", ".join(result.installed))
-        if result.skipped:
-            summary_parts.append("уже было: " + ", ".join(result.skipped))
-        if result.failed:
-            summary_parts.append("ошибка: " + ", ".join(result.failed))
-        summary_text = "\n".join(summary_parts) if summary_parts else "Нет изменений."
-        message = QMessageBox(self)
-        message.setWindowTitle("SlipSnap · OCR")
-        message.setIcon(QMessageBox.Information)
-        message.setText(summary_text)
-        if result.failed_details:
-            details = "\n".join(f"{code}: {reason}" for code, reason in result.failed_details)
-            message.setDetailedText(details)
-        message.exec()
-        self._refresh_ocr_menu()
+        self._save_ocr_settings()
 
     def _current_ocr_capture(self) -> Optional[OcrCapture]:
         try:
@@ -1012,6 +1006,19 @@ class EditorWindow(QMainWindow):
         self._ocr_toast.deleteLater()
         self._ocr_toast = None
 
+    def _on_ocr_selection_changed(self, text: str) -> None:
+        if text:
+            preview = " ↵ ".join(part.strip() for part in text.splitlines())
+            if len(preview) > 120:
+                preview = preview[:117] + "…"
+            self.statusBar().showMessage(
+                f"Выделено {len(text)} симв.: {preview}",
+            )
+        elif self.canvas._tool == "ocr":
+            self.statusBar().showMessage(
+                "OCR: тяните мышью для выделения · двойной клик — слово · Ctrl+A/C",
+            )
+
     def _show_ocr_toast(self, result: OcrResult) -> None:
         self._ocr_toast_timer.stop()
         self._clear_ocr_toast()
@@ -1021,17 +1028,20 @@ class EditorWindow(QMainWindow):
         layout.setContentsMargins(14, 8, 14, 8)
         layout.setSpacing(10)
 
-        headline = QLabel(
-            "Текст распознан. Используйте Ctrl+C, чтобы сразу скопировать, или выделите курсором нужный фрагмент.",
-            toast,
-        )
+        headline_text = "Текст распознан и скопирован."
+        if result.words:
+            headline_text += (
+                " Тяните мышью для выделения; двойной клик — слово; Ctrl+A/C — выбрать и копировать."
+            )
+        headline = QLabel(headline_text, toast)
         layout.addWidget(headline)
 
         meta_parts = []
+        if result.provider:
+            provider_name = PROVIDER_NAMES.get(result.provider, result.provider)
+            meta_parts.append(f"OCR: {provider_name}")
         if result.language_tag:
             meta_parts.append(f"языки: {result.language_tag}")
-        if result.fallback_used and result.missing_languages:
-            meta_parts.append("нет пакетов: " + ", ".join(result.missing_languages))
         if meta_parts:
             meta = QLabel(" · ".join(meta_parts), toast)
             meta.setObjectName("metaLabel")
@@ -1070,10 +1080,10 @@ class EditorWindow(QMainWindow):
         clipboard.setText(result.text)
 
         status_parts = ["OCR: текст скопирован"]
+        if result.provider:
+            status_parts.append(PROVIDER_NAMES.get(result.provider, result.provider))
         if result.language_tag:
             status_parts.append(f"язык: {result.language_tag}")
-        if result.fallback_used and result.missing_languages:
-            status_parts.append("нет пакетов: " + ", ".join(result.missing_languages))
         status = " | ".join(status_parts)
         self.statusBar().showMessage(status, 5000)
 
@@ -1101,6 +1111,27 @@ class EditorWindow(QMainWindow):
         if self._ocr_worker:
             return
 
+        provider = self.ocr_settings.provider
+        try:
+            has_key = bool(get_api_key(provider))
+        except ApiKeyStoreError as exc:
+            QMessageBox.warning(self, "SlipSnap · OCR", str(exc))
+            return
+        if not has_key:
+            if not self._open_ocr_cloud_settings():
+                return
+            try:
+                has_key = bool(get_api_key(provider))
+            except ApiKeyStoreError as exc:
+                QMessageBox.warning(self, "SlipSnap · OCR", str(exc))
+                return
+            if not has_key:
+                QMessageBox.warning(
+                    self,
+                    "SlipSnap · OCR",
+                    f"Для {PROVIDER_NAMES[provider]} не задан API-ключ.",
+                )
+                return
         self._reset_ocr_state()
         capture = self._current_ocr_capture()
         if capture is None:
@@ -1182,7 +1213,9 @@ class EditorWindow(QMainWindow):
             from gui import OverlayManager
             self.begin_capture_hide()
             self.overlay_manager = OverlayManager(self.cfg)
-            self.overlay_manager.captured.connect(lambda q: self._on_new_screenshot(q, collage))
+            self.overlay_manager.captured.connect(
+                lambda q, png: self._on_new_screenshot(q, collage, png)
+            )
             QTimer.singleShot(25, self.overlay_manager.start)
         except Exception as e:
             self.show()
@@ -1292,6 +1325,11 @@ class EditorWindow(QMainWindow):
         return inserted
 
     def open_memes_dialog(self):
+        if self._memes_dialog is None:
+            from .ui.meme_library_dialog import MemesDialog
+
+            self._memes_dialog = MemesDialog(self, cfg=self.cfg)
+            self._memes_dialog.memeSelected.connect(self._insert_meme_from_dialog)
         self._memes_dialog.show()
         self._memes_dialog.raise_()
         self._memes_dialog.activateWindow()
@@ -1313,19 +1351,15 @@ class EditorWindow(QMainWindow):
 
     def notify_meme_saved(self, path: Path):
         self.statusBar().showMessage(f"◉ Мем сохранён: {path.name}", 2500)
-        self._memes_dialog.refresh_if_visible()
+        if self._memes_dialog is not None:
+            self._memes_dialog.refresh_if_visible()
 
-    def _on_new_screenshot(self, qimg: QImage, collage: bool):
+    def _on_new_screenshot(self, qimg: QImage, collage: bool, png_data: bytes):
         try:
             self.overlay_manager.close_all()
         except Exception:
             pass
         self.restore_from_capture()
-        try:
-            save_history(qimage_to_pil(qimg))
-        except Exception:
-            pass
-
         if collage:
             self._insert_screenshot_item(qimg)
             self.statusBar().showMessage(
@@ -1333,6 +1367,7 @@ class EditorWindow(QMainWindow):
             )
         else:
             self.load_base_screenshot(qimg)
+        save_history_png_async(png_data)
 
     # ---- collage ----
     def open_collage(self):

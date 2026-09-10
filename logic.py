@@ -8,6 +8,7 @@ import math
 import os
 import uuid
 import tempfile
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from typing import Tuple, Optional
@@ -22,6 +23,7 @@ logger = logging.getLogger(__name__)
 CONFIG_PATH = Path.home() / ".slipsnap_config.json"
 HISTORY_DIR = Path(tempfile.gettempdir()) / "slipsnap_history"
 HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+_HISTORY_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="slipsnap-history")
 
 
 def _resolve_app_data_dir() -> Path:
@@ -55,8 +57,6 @@ DEFAULT_CONFIG = {
     "ffmpeg_path": "",
     "series_prefix": "Series",
     "series_folder": str(Path.home()),
-    "tesseract_path": "",
-    "tessdata_prefix": "",
     "meme_dialog_width": Metrics.MEME_DIALOG_MIN_WIDTH,
     "meme_dialog_height": Metrics.MEME_DIALOG_MIN_HEIGHT,
     "zoom_lens_size": 90,
@@ -64,9 +64,8 @@ DEFAULT_CONFIG = {
     "ocr_settings": {
         "preferred_languages": ["eng"],
         "last_language": "auto",
-        "auto_config": True,
-        "psm": None,
-        "oem": None,
+        "provider": "mistral",
+        "cloud_consents": [],
     },
 }
 
@@ -238,6 +237,31 @@ def save_history(img: Image.Image) -> Path:
     img.save(p, format="PNG")
     _prune_history(keep=10)
     return p
+
+
+def save_history_png(png_data: bytes) -> Path:
+    """Persist PNG bytes that were already produced for the clipboard."""
+    if not png_data:
+        raise ValueError("History PNG payload is empty")
+    p = HISTORY_DIR / f"shot_{uuid.uuid4().hex}.png"
+    p.write_bytes(png_data)
+    _prune_history(keep=10)
+    return p
+
+
+def _log_history_save_result(future: Future[Path]) -> None:
+    try:
+        future.result()
+    except Exception:
+        logger.warning("Failed to save screenshot history in background", exc_info=True)
+
+
+def save_history_png_async(png_data: bytes) -> Future[Path]:
+    """Queue an already encoded capture without blocking the GUI thread."""
+    future = _HISTORY_EXECUTOR.submit(save_history_png, bytes(png_data))
+    future.add_done_callback(_log_history_save_result)
+    return future
+
 
 def _prune_history(keep: int = 10) -> None:
     files = sorted(
