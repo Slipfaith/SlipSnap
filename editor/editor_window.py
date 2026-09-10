@@ -7,7 +7,7 @@ from pathlib import Path
 from time import monotonic, sleep
 from typing import Callable, Optional
 
-from PySide6.QtCore import Qt, QTimer, QRectF, Signal, QThread, QMimeData, QCoreApplication
+from PySide6.QtCore import QCoreApplication, QEvent, QMimeData, QRectF, QThread, QTimer, Qt, Signal
 from PySide6.QtGui import QAction, QImage, QPixmap, QPainter, QPainterPath, QKeySequence, QShortcut, QColor, QMovie
 from PySide6.QtWidgets import (
     QApplication,
@@ -26,7 +26,6 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMenu,
     QMessageBox,
-    QPushButton,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -728,8 +727,19 @@ class EditorWindow(QMainWindow):
         button.setToolTip("Распознать текст (ПКМ — настройки AI OCR)")
         button.setPopupMode(QToolButton.DelayedPopup)
         button.setContextMenuPolicy(Qt.CustomContextMenu)
-        button.customContextMenuRequested.connect(self._open_ocr_menu)
+        button.installEventFilter(self)
         self._refresh_ocr_menu()
+
+    def eventFilter(self, watched, event):
+        if watched is self._ocr_button and event.type() in {
+            QEvent.MouseButtonPress,
+            QEvent.MouseButtonRelease,
+        }:
+            if event.button() == Qt.RightButton:
+                if event.type() == QEvent.MouseButtonRelease:
+                    self._open_ocr_menu(event.position().toPoint())
+                return True
+        return super().eventFilter(watched, event)
 
     def _open_ocr_menu(self, pos) -> None:
         if self._ocr_menu is None or self._ocr_button is None:
@@ -741,6 +751,10 @@ class EditorWindow(QMainWindow):
         if self._ocr_menu is None:
             return
         self._ocr_menu.clear()
+        settings_action = self._ocr_menu.addAction("Настроить API-ключи…")
+        settings_action.triggered.connect(self._schedule_ocr_cloud_settings)
+        self._ocr_menu.addSeparator()
+
         provider = self.ocr_settings.provider
         available = sorted(
             set(LANGUAGE_DISPLAY_NAMES) | set(self.ocr_settings.preferred_languages)
@@ -759,11 +773,6 @@ class EditorWindow(QMainWindow):
         layout = QVBoxLayout(container)
         layout.setContentsMargins(10, 8, 10, 10)
         layout.setSpacing(6)
-
-        settings_button = QPushButton("Настроить API-ключи…", container)
-        settings_button.setToolTip("Открыть ввод ключей Mistral и Gemini")
-        settings_button.clicked.connect(self._schedule_ocr_cloud_settings)
-        layout.addWidget(settings_button)
 
         provider_label = QLabel("Способ распознавания", container)
         provider_label.setStyleSheet("font-weight: 600;")
@@ -907,8 +916,18 @@ class EditorWindow(QMainWindow):
             QTimer.singleShot(0, self._open_ocr_cloud_settings)
 
     def _open_ocr_cloud_settings(self) -> bool:
-        dialog = OcrCloudSettingsDialog(self)
-        if dialog.exec() != QDialog.Accepted:
+        try:
+            dialog = OcrCloudSettingsDialog(self)
+            result = dialog.exec()
+        except Exception as exc:  # noqa: BLE001 - never hide a broken settings action
+            logger.exception("Failed to open OCR API settings")
+            QMessageBox.critical(
+                self,
+                "SlipSnap · OCR",
+                f"Не удалось открыть настройки OCR:\n{exc}",
+            )
+            return False
+        if result != QDialog.Accepted:
             return False
         self._save_ocr_settings()
         self._refresh_ocr_menu()
@@ -919,6 +938,7 @@ class EditorWindow(QMainWindow):
 
         if self._ocr_menu is not None:
             self._ocr_menu.close()
+        logger.info("Opening OCR API settings")
         QTimer.singleShot(0, self._open_ocr_cloud_settings)
 
     def _update_ocr_language_selection(self, language: str, checked: bool, *, refresh_ui: bool = True) -> None:
@@ -1112,6 +1132,7 @@ class EditorWindow(QMainWindow):
             return
 
         provider = self.ocr_settings.provider
+        logger.info("Starting OCR with provider=%s", provider)
         try:
             has_key = bool(get_api_key(provider))
         except ApiKeyStoreError as exc:
@@ -1142,10 +1163,16 @@ class EditorWindow(QMainWindow):
         self._last_ocr_language_hint = lang_choice
         self._start_ocr_scan(capture)
 
-        worker = _OcrWorker(capture, self.ocr_settings, lang_choice)
-        worker.finished.connect(self._on_ocr_worker_finished)
-        self._ocr_worker = worker
-        worker.start()
+        try:
+            worker = _OcrWorker(capture, self.ocr_settings, lang_choice)
+            worker.finished.connect(self._on_ocr_worker_finished)
+            self._ocr_worker = worker
+            worker.start()
+        except Exception as exc:  # noqa: BLE001 - surface packaged runtime failures
+            self._ocr_worker = None
+            self._stop_ocr_scan(success=False)
+            logger.exception("Failed to start OCR worker")
+            QMessageBox.warning(self, "SlipSnap · OCR", str(exc))
 
     # ---- key events ----
     def keyPressEvent(self, event):

@@ -32,6 +32,7 @@ hiddenimports = [
     "pyqtkeybind.win.keybindutil",
     "pyqtkeybind.win.keycodes",
     "win32cred",
+    "win32timezone",
     "pywintypes",
 ]
 hiddenimports += collect_submodules("editor")
@@ -45,6 +46,8 @@ hiddenimports += collect_submodules("requests")
 # ----------------------------------------------------------------------
 pathex = [str(project_dir)]
 icon_path = project_dir / "SlipSnap.ico"
+if not icon_path.is_file():
+    raise FileNotFoundError(f"Application icon not found: {icon_path}")
 ffmpeg_candidates = [
     project_dir / "ffmpeg.exe",
     project_dir / "ffmpeg" / "ffmpeg.exe",
@@ -65,7 +68,10 @@ a = Analysis(
     [str(project_dir / "main.py")],
     pathex=pathex,
     binaries=bundled_binaries,
-    datas=[],  # можно добавить ресурсы: [("assets", "assets")]
+    # Keep the same multi-resolution icon available to Qt at runtime.  The
+    # EXE icon below is a Windows resource; this data entry is what lets the
+    # application window and tray load SlipSnap.ico from a one-file build.
+    datas=[(str(icon_path), ".")],
     hiddenimports=hiddenimports,
     hookspath=[],
     runtime_hooks=[],
@@ -100,6 +106,6 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=str(icon_path) if icon_path.exists() else None,
+    icon=str(icon_path),
     onefile=True,  # ✅ один .exe-файл
 )

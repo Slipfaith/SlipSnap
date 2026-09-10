@@ -12,7 +12,7 @@ from PySide6.QtCore import QLockFile, QDir
 from gui import App
 
 APP_NAME = "SlipSnap"
-APP_VERSION = "3.3"  # Меняй версию программы только здесь.
+APP_VERSION = "3.3.2"  # Меняй версию программы только здесь.
 APP_DESCRIPTION = "Современный редактор скриншотов"
 APP_AUTHOR = "slipfaith"
 
@@ -54,7 +54,7 @@ def _configure_logging() -> None:
     )
 
 
-def main():
+def main() -> int:
     _configure_logging()
 
     app = QApplication(sys.argv)
@@ -65,6 +65,21 @@ def main():
     app.setProperty("app_description", APP_DESCRIPTION)
     app.setProperty("app_author", APP_AUTHOR)
 
+    icon_path = Path(__file__).resolve().with_name("SlipSnap.ico")
+    if icon_path.exists():
+        app.setWindowIcon(QIcon(str(icon_path)))
+
+    if "--self-test-ocr" in sys.argv:
+        try:
+            from packaged_selftest import run_ocr_self_test
+
+            run_ocr_self_test(app)
+        except Exception:  # noqa: BLE001 - must produce a failing packaged exit code
+            logging.getLogger(__name__).exception("Packaged OCR self-test failed")
+            return 1
+        logging.getLogger(__name__).info("Packaged OCR self-test passed")
+        return 0
+
     lock_file_path = Path(QDir.tempPath()) / f"{APP_NAME}.lock"
     lock_file = QLockFile(str(lock_file_path))
     lock_file.setStaleLockTime(0)
@@ -74,17 +89,14 @@ def main():
             f"{APP_NAME} уже запущен",
             f"Нельзя запустить вторую копию приложения, так как {APP_NAME} уже работает.",
         )
-        return
+        return 0
 
     global _LOCK_FILE
     _LOCK_FILE = lock_file
 
-    icon_path = Path(__file__).resolve().with_name("SlipSnap.ico")
-    if icon_path.exists():
-        app.setWindowIcon(QIcon(str(icon_path)))
     global _APP_CTX
     _APP_CTX = App()
-    sys.exit(app.exec())
+    return app.exec()
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

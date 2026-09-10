@@ -124,6 +124,7 @@ tests/.tmp*
 # Images / Assets (unnecessary in repo)
 # =========================
 *.ico
+!SlipSnap.ico
 *.icns
 *.db
 NUL

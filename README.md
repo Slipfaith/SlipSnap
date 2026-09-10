@@ -4,7 +4,7 @@
 > **RU:** Десктопный инструмент для захвата экрана и записи коротких видео с редактором аннотаций.
 > **EN:** A desktop screenshot and short-video capture tool with a built-in annotation editor.
 
-**Версия / Version:** 3.3
+**Версия / Version:** 3.3.2
 
 ---
 

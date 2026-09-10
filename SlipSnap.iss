@@ -1,8 +1,9 @@
-[Setup]
+﻿[Setup]
 AppName=SlipSnap
-AppVersion=3.3
+AppVersion=3.3.2
 AppPublisher=slipfaith
-DefaultDirName={pf}\SlipSnap
+SetupIconFile=SlipSnap.ico
+DefaultDirName={autopf}\SlipSnap
 DefaultGroupName=SlipSnap
 UninstallDisplayIcon={app}\SlipSnap.exe
 OutputDir={#SourcePath}\installer
@@ -25,7 +26,8 @@ Name: "autostart"; Description: "{cm:AutoStartTask}"; GroupDescription: "{cm:Add
 
 [Files]
 ; Файлы программы SlipSnap
-Source: "{#SourcePath}\dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SourcePath}\dist\SlipSnap.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourcePath}\SlipSnap.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\SlipSnap"; Filename: "{app}\SlipSnap.exe"; IconFilename: "{app}\SlipSnap.ico"

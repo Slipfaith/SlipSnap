@@ -13,6 +13,22 @@ The format is inspired by Keep a Changelog and follows Semantic Versioning.
 
 - Подготовка к следующим улучшениям стабильности и UX.
 
+### [3.3.2] - 2026-09-11
+
+#### Added
+
+- Самопроверка упакованного приложения и тесты доступности настроек AI OCR.
+
+#### Changed
+
+- Улучшено контекстное меню OCR: настройки API-ключей открываются по ПКМ без изменения основного действия кнопки.
+- Обновлены метаданные, иконка и сборочные настройки Windows-версии.
+
+#### Fixed
+
+- Автозапуск в установщике создаётся для текущего пользователя.
+- Ошибки открытия настроек или запуска OCR теперь показываются пользователю и записываются в журнал.
+
 ### [3.2.0] - 2026-04-08
 
 #### Added
@@ -71,6 +87,22 @@ The format is inspired by Keep a Changelog and follows Semantic Versioning.
 ### [Unreleased]
 
 - Preparations for upcoming stability and UX improvements.
+
+### [3.3.2] - 2026-09-11
+
+#### Added
+
+- Packaged-app self-check and AI OCR settings access tests.
+
+#### Changed
+
+- Improved OCR context menu: API key settings open on right-click without changing the button's primary action.
+- Updated Windows build metadata, icon, and packaging settings.
+
+#### Fixed
+
+- The installer creates the autostart entry for the current user.
+- Failures opening OCR settings or starting OCR are now shown to the user and logged.
 
 ### [3.2.0] - 2026-04-08
 
