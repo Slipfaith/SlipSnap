@@ -79,11 +79,15 @@ class SelectionOverlayBase(QWidget):
     captured = Signal(QImage, object)
     cancel_all = Signal()
 
-    def __init__(self, base_img: Image.Image, cfg: dict, geom: QRect):
+    def __init__(self, base_img: Image.Image, cfg: dict, geom: QRect, screen=None):
         super().__init__(None, Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setCursor(Qt.CrossCursor)
         self.setFocusPolicy(Qt.StrongFocus)
+        if screen is not None:
+            # Create the native window on its target screen right away so it
+            # gets that screen's DPI instead of the primary one.
+            self.setScreen(screen)
         self.setGeometry(geom)
 
         self.cfg = cfg
@@ -92,9 +96,10 @@ class SelectionOverlayBase(QWidget):
 
         self.base_img = base_img.convert("RGBA")
         self._blur_factor = max(1, cfg.get("blur_radius", 2) * 2)
+        # Backgrounds stay at the screenshot's native resolution; paintEvent maps
+        # widget-local rects onto them, so they never depend on screen scaling.
         self._bg_original = QPixmap.fromImage(ImageQt.ImageQt(self.base_img))
-        self._bg_original_scaled = self._bg_original.scaled(self.size(), Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
-        self._bg_blurred_scaled = self._blur_pixmap(self._bg_original_scaled)
+        self._bg_blurred = self._blur_pixmap(self._bg_original)
 
         self.origin = QPoint()
         self.current = QPoint()
@@ -143,11 +148,6 @@ class SelectionOverlayBase(QWidget):
         self.raise_()
         self.grabKeyboard()
 
-    def resizeEvent(self, e):
-        self._bg_original_scaled = self._bg_original.scaled(self.size(), Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
-        self._bg_blurred_scaled = self._blur_pixmap(self._bg_original_scaled)
-        super().resizeEvent(e)
-
     def keyPressEvent(self, e):
         if e.key() == Qt.Key_Escape:
             self._cancel_selection()
@@ -170,7 +170,7 @@ class SelectionOverlayBase(QWidget):
     def mousePressEvent(self, e):
         if e.button() == Qt.LeftButton:
             self.selecting = True
-            self.origin = e.globalPosition().toPoint()
+            self.origin = self._local_point(e)
             self.current = self.origin
             try:
                 self.grabMouse()
@@ -181,7 +181,7 @@ class SelectionOverlayBase(QWidget):
 
     def mouseMoveEvent(self, e):
         if self.selecting:
-            self.current = e.globalPosition().toPoint()
+            self.current = self._local_point(e)
             self._update_hint_visibility()
             self.update()
 
@@ -240,6 +240,18 @@ class SelectionOverlayBase(QWidget):
         bits = bytes(mask_img.constBits())
         return Image.frombytes("L", (width, height), bits, "raw", "L", stride, 1)
 
+    def _local_point(self, e) -> QPoint:
+        """Cursor position in this window's own coordinates, clamped to it.
+
+        Widget-local coordinates always match what is painted, unlike global
+        ones, which are not continuous across screens with different scaling.
+        """
+        p = e.position().toPoint()
+        return QPoint(
+            max(0, min(self.width(), p.x())),
+            max(0, min(self.height(), p.y())),
+        )
+
     def _norm(self, p1: QPoint, p2: QPoint) -> QRect:
         x1, y1 = p1.x(), p1.y()
         x2, y2 = p2.x(), p2.y()
@@ -257,18 +269,19 @@ class SelectionOverlayBase(QWidget):
     def paintEvent(self, e):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        p.drawPixmap(self.rect(), self._bg_blurred_scaled)
+        p.setRenderHint(QPainter.SmoothPixmapTransform)
+        p.drawPixmap(QRectF(self.rect()), self._bg_blurred, QRectF(self._bg_blurred.rect()))
 
         if self.selecting:
-            gr = self._norm(self.origin, self.current)
-            loc = QRect(gr.x() - self.geometry().x(), gr.y() - self.geometry().y(), gr.width(), gr.height())
+            loc = self._norm(self.origin, self.current)
+            src = self._image_rect_f(loc)
 
             if self.shape == "rect":
                 path = QPainterPath()
                 path.addRoundedRect(QRectF(loc), 12, 12)
                 p.save()
                 p.setClipPath(path)
-                p.drawPixmap(loc, self._bg_original_scaled, loc)
+                p.drawPixmap(QRectF(loc), self._bg_original, src)
                 p.restore()
                 p.setBrush(Qt.NoBrush)
                 # Более стильная рамка
@@ -280,7 +293,7 @@ class SelectionOverlayBase(QWidget):
                 path.addEllipse(QRectF(loc))
                 p.save()
                 p.setClipPath(path)
-                p.drawPixmap(loc, self._bg_original_scaled, loc)
+                p.drawPixmap(QRectF(loc), self._bg_original, src)
                 p.restore()
                 p.setBrush(Qt.NoBrush)
                 # Более стильная рамка для эллипса
@@ -289,8 +302,20 @@ class SelectionOverlayBase(QWidget):
                 p.drawEllipse(QRectF(loc))
         p.end()
 
+    def _image_rect_f(self, loc: QRect) -> QRectF:
+        """Map a widget-local rect to base image pixels."""
+        sx = float(self.base_img.width) / max(1.0, float(self.width()))
+        sy = float(self.base_img.height) / max(1.0, float(self.height()))
+        return QRectF(loc.x() * sx, loc.y() * sy, loc.width() * sx, loc.height() * sy)
+
     def _map_rect_to_image_coords(self, gr: QRect) -> Tuple[int, int, int, int]:
-        raise NotImplementedError
+        r = self._image_rect_f(gr)
+        img_w, img_h = self.base_img.width, self.base_img.height
+        left = max(0, min(img_w - 1, int(round(r.left()))))
+        top = max(0, min(img_h - 1, int(round(r.top()))))
+        right = max(left + 1, min(img_w, int(round(r.right()))))
+        bottom = max(top + 1, min(img_h, int(round(r.bottom()))))
+        return left, top, right - left, bottom - top
 
     def _shape_display_name(self) -> str:
         return "Прямоугольник" if self.shape == "rect" else "Круг"
@@ -304,10 +329,6 @@ class SelectionOverlayBase(QWidget):
         self.shape_hint.move(help_geo.x(), help_geo.bottom() + spacing)
         self._update_hint_visibility()
 
-    def _widget_global_rect(self, widget: QWidget) -> QRect:
-        top_left = widget.mapToGlobal(QPoint(0, 0))
-        return QRect(top_left, widget.size())
-
     def _update_hint_visibility(self):
         if not self.selecting:
             self.help.show()
@@ -315,112 +336,34 @@ class SelectionOverlayBase(QWidget):
             return
 
         selection_rect = self._norm(self.origin, self.current)
-        overlaps_help = selection_rect.intersects(self._widget_global_rect(self.help))
-        overlaps_shape = selection_rect.intersects(self._widget_global_rect(self.shape_hint))
+        overlaps_help = selection_rect.intersects(self.help.geometry())
+        overlaps_shape = selection_rect.intersects(self.shape_hint.geometry())
         visible = not (overlaps_help or overlaps_shape)
         self.help.setVisible(visible)
         self.shape_hint.setVisible(visible)
 
 
 class ScreenOverlay(SelectionOverlayBase):
+    """Overlay covering exactly one screen with that screen's own screenshot."""
+
     def __init__(self, screen, base_img: Image.Image, cfg: dict):
-        super().__init__(base_img, cfg, screen.geometry())
+        super().__init__(base_img, cfg, screen.geometry(), screen=screen)
         self._screen = screen
 
-    def _map_rect_to_image_coords(self, gr: QRect) -> Tuple[int, int, int, int]:
-        g = self._screen.geometry()
-        screen_w = max(1.0, float(g.width()))
-        screen_h = max(1.0, float(g.height()))
-        img_w = float(max(1, self.base_img.width))
-        img_h = float(max(1, self.base_img.height))
-        scale_x = img_w / screen_w
-        scale_y = img_h / screen_h
-        lx = max(0.0, min(screen_w, float(gr.x() - g.x())))
-        ly = max(0.0, min(screen_h, float(gr.y() - g.y())))
-        left = int(round(lx * scale_x))
-        top = int(round(ly * scale_y))
-        w = int(round(float(gr.width()) * scale_x))
-        h = int(round(float(gr.height()) * scale_y))
-        return left, top, max(1, w), max(1, h)
+    def showEvent(self, e):
+        # Windows may rescale a window while moving it to a screen with another
+        # DPI; pin it back to exactly cover its screen.
+        if self.geometry() != self._screen.geometry():
+            self.setGeometry(self._screen.geometry())
+        super().showEvent(e)
 
 
 class VirtualOverlay(SelectionOverlayBase):
-    def __init__(
-        self,
-        base_img: Image.Image,
-        cfg: dict,
-        virt_geom: QRect,
-        screen_map: List[Tuple[object, dict]],
-        base_origin: Tuple[int, int],
-    ):
-        super().__init__(base_img, cfg, virt_geom)
-        self._screen_map = screen_map
-        self._base_left, self._base_top = base_origin
+    """Single overlay spanning all screens, so a selection can cross monitors.
 
-    @staticmethod
-    def _nearest_screen(point: QPoint):
-        screens = QGuiApplication.screens()
-        if not screens:
-            return QGuiApplication.primaryScreen()
-        best = screens[0]
-        best_dist = float("inf")
-        px, py = point.x(), point.y()
-        for screen in screens:
-            g = screen.geometry()
-            dx = 0
-            if px < g.left():
-                dx = g.left() - px
-            elif px > g.right():
-                dx = px - g.right()
-            dy = 0
-            if py < g.top():
-                dy = g.top() - py
-            elif py > g.bottom():
-                dy = py - g.bottom()
-            dist = float(dx * dx + dy * dy)
-            if dist < best_dist:
-                best = screen
-                best_dist = dist
-        return best
-
-    def _screen_for_point(self, p: QPoint):
-        s = QGuiApplication.screenAt(p)
-        if s is not None:
-            return s
-        return self._nearest_screen(p)
-
-    def _find_mon(self, screen) -> dict:
-        for sc, mon in self._screen_map:
-            if sc is screen:
-                return mon
-        return self._screen_map[0][1]
-
-    def _logical_to_phys(self, p: QPoint) -> Tuple[int, int]:
-        s = self._screen_for_point(p)
-        if s is None:
-            return 0, 0
-        mon = self._find_mon(s)
-        g = s.geometry()
-        screen_w = max(1.0, float(g.width()))
-        screen_h = max(1.0, float(g.height()))
-        scale_x = float(mon["width"]) / screen_w
-        scale_y = float(mon["height"]) / screen_h
-        lx = max(0.0, min(screen_w, float(p.x() - g.x())))
-        ly = max(0.0, min(screen_h, float(p.y() - g.y())))
-        ax = int(round(float(mon["left"]) + lx * scale_x))
-        ay = int(round(float(mon["top"]) + ly * scale_y))
-        return ax - self._base_left, ay - self._base_top
-
-    def _map_rect_to_image_coords(self, gr: QRect) -> Tuple[int, int, int, int]:
-        p1 = self._logical_to_phys(gr.topLeft())
-        p2 = self._logical_to_phys(QPoint(gr.x() + gr.width(), gr.y() + gr.height()))
-        left = min(p1[0], p2[0])
-        top = min(p1[1], p2[1])
-        right = max(p1[0], p2[0])
-        bottom = max(p1[1], p2[1])
-        w = max(1, right - left)
-        h = max(1, bottom - top)
-        return left, top, w, h
+    Only valid when Qt logical coordinates equal physical pixels on every
+    screen (see ``ScreenGrabber.is_virtual_desktop_uniform``).
+    """
 
 
 class OverlayManager(QObject):
@@ -455,38 +398,46 @@ class OverlayManager(QObject):
             self._start_virtual()
 
     def _start_virtual(self):
+        mapping = self._match_monitors()
+        if not mapping:
+            raise RuntimeError("Не удалось получить список физических мониторов MSS.")
+        grabber = self._ensure_grabber()
+        if len(mapping) < 2 or not grabber.is_virtual_desktop_uniform(mapping):
+            # Scaling differs from 100% somewhere: Qt's logical desktop is not
+            # one continuous space then, so each screen gets its own overlay.
+            self._start_per_screen(mapping)
+            return
         primary = QGuiApplication.primaryScreen()
         if primary is None:
             raise RuntimeError("Не удалось определить основной экран.")
         virt = primary.virtualGeometry()
-        grabber = self._ensure_grabber()
         img = grabber.grab_virtual()
-        mapping = self._match_monitors()
-        if not mapping:
-            raise RuntimeError("Не удалось получить список физических мониторов MSS.")
-        monitors = grabber._sct.monitors
-        if not monitors:
-            raise RuntimeError("Не удалось получить список мониторов MSS.")
-        base_origin = (monitors[0]["left"], monitors[0]["top"])
-        ov = VirtualOverlay(img, self.cfg, virt, mapping, base_origin)
+        if (img.width, img.height) != (virt.width(), virt.height()):
+            self._start_per_screen(mapping)
+            return
+        ov = VirtualOverlay(img, self.cfg, virt)
         ov.captured.connect(self._on_captured)
         ov.cancel_all.connect(self.close_all)
         self._overlays = [ov]
         ov.show()
         ov.raise_()
 
-    def _start_per_screen(self):
-        mapping = self._match_monitors()
+    def _start_per_screen(self, mapping: Optional[List[Tuple[object, dict]]] = None):
+        if mapping is None:
+            mapping = self._match_monitors()
         if not mapping:
             raise RuntimeError("Не удалось получить список физических мониторов MSS.")
         grabber = self._ensure_grabber()
-        for s, mon in mapping:
-            img = grabber.grab(s)
-            ov = ScreenOverlay(s, img, self.cfg)
+        # One snapshot for all screens, taken before any overlay is shown.
+        images = grabber.grab_screens(mapping)
+        for (screen, _mon), img in zip(mapping, images):
+            ov = ScreenOverlay(screen, img, self.cfg)
             ov.captured.connect(self._on_captured)
             ov.cancel_all.connect(self.close_all)
-            ov.showFullScreen()
             self._overlays.append(ov)
+        for ov in self._overlays:
+            ov.show()
+            ov.raise_()
 
     def set_shape(self, shape: str):
         for ov in self._overlays:

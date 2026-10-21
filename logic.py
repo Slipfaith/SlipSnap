@@ -332,6 +332,69 @@ class ScreenGrabber:
 
         return center_score + (aspect_score * 0.2) + (scale_score * 0.1)
 
+    @staticmethod
+    def screen_native_rect(screen) -> tuple[int, int, int, int]:
+        """Physical (left, top, width, height) of a QScreen.
+
+        Qt 6 on Windows keeps each screen's top-left at its native position and
+        divides only the size by the screen's device pixel ratio, so logical
+        coordinates of different screens are *not* one continuous space when
+        scale factors differ (e.g. laptop 125% + external 100%).
+        """
+        g = screen.geometry()
+        dpr = float(screen.devicePixelRatio() or 1.0)
+        return (
+            g.x(),
+            g.y(),
+            int(round(g.width() * dpr)),
+            int(round(g.height() * dpr)),
+        )
+
+    @classmethod
+    def _exact_match(cls, screens: list, monitors: list[dict]) -> Optional[dict[int, int]]:
+        """Match screens to MSS monitors by native rect; None if ambiguous."""
+        mapping: dict[int, int] = {}
+        used: set[int] = set()
+        for si, s in enumerate(screens):
+            left, top, width, height = cls.screen_native_rect(s)
+            found = None
+            for mi, mon in enumerate(monitors):
+                if mi in used:
+                    continue
+                if (
+                    abs(int(mon["left"]) - left) <= 1
+                    and abs(int(mon["top"]) - top) <= 1
+                    and abs(int(mon["width"]) - width) <= 2
+                    and abs(int(mon["height"]) - height) <= 2
+                ):
+                    found = mi
+                    break
+            if found is None:
+                return None
+            mapping[si] = found
+            used.add(found)
+        return mapping
+
+    def is_virtual_desktop_uniform(self, mapping: list[tuple[object, dict]]) -> bool:
+        """True when Qt logical coordinates equal physical pixels on every screen.
+
+        Only then can a single overlay window safely span all monitors.
+        """
+        if not mapping:
+            return False
+        for screen, mon in mapping:
+            if abs(float(screen.devicePixelRatio() or 1.0) - 1.0) > 1e-6:
+                return False
+            g = screen.geometry()
+            if (g.x(), g.y(), g.width(), g.height()) != (
+                int(mon["left"]),
+                int(mon["top"]),
+                int(mon["width"]),
+                int(mon["height"]),
+            ):
+                return False
+        return True
+
     def match_screens_to_monitors(self) -> list[tuple[object, dict]]:
         from PySide6.QtGui import QGuiApplication
 
@@ -340,6 +403,10 @@ class ScreenGrabber:
         monitors = list(self._monitors)
         if not screens or not monitors:
             return []
+
+        exact = self._exact_match(screens, monitors)
+        if exact is not None:
+            return [(screens[si], monitors[exact[si]]) for si in range(len(screens))]
 
         primary = QGuiApplication.primaryScreen()
         if primary is not None:
@@ -421,6 +488,20 @@ class ScreenGrabber:
             raise RuntimeError("Не удалось сопоставить монитор MSS с QScreen")
         shot = self._sct.grab(mon)
         return Image.frombytes("RGB", (shot.width, shot.height), shot.rgb)
+
+    def grab_screens(self, mapping: list[tuple[object, dict]]) -> list[Image.Image]:
+        """Grab every mapped monitor from one virtual-desktop snapshot."""
+        monitors = self._sct.monitors
+        if not monitors:
+            raise RuntimeError("Не удалось получить список мониторов MSS")
+        virt = monitors[0]
+        full = self.grab_virtual()
+        images = []
+        for _screen, mon in mapping:
+            left = int(mon["left"]) - int(virt["left"])
+            top = int(mon["top"]) - int(virt["top"])
+            images.append(full.crop((left, top, left + int(mon["width"]), top + int(mon["height"]))))
+        return images
 
     def grab_virtual(self) -> Image.Image:
         self._refresh_monitors()

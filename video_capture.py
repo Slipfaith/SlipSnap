@@ -79,21 +79,26 @@ def _exclude_widget_from_capture(widget: QWidget) -> bool:
 
 
 class RegionSelectionOverlay(QWidget):
+    """Region picker covering exactly one screen.
+
+    One overlay per screen keeps every window on a single DPI, so widget-local
+    coordinates map to that monitor's physical pixels by a plain scale factor
+    even when screens use different scaling.
+    """
+
     region_selected = Signal(dict)
     canceled = Signal()
 
-    def __init__(self, screen_map: List[Tuple[object, dict]]):
+    def __init__(self, screen, monitor: dict):
         super().__init__(None, Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setCursor(Qt.CrossCursor)
         self.setFocusPolicy(Qt.StrongFocus)
-        primary = QGuiApplication.primaryScreen()
-        if primary is None:
-            raise RuntimeError("Не удалось определить основной экран для overlay.")
-        virt = primary.virtualGeometry()
-        self.setGeometry(virt)
+        self.setScreen(screen)
+        self.setGeometry(screen.geometry())
 
-        self._screen_map = screen_map
+        self._screen = screen
+        self._monitor = monitor
         self._done = False
         self._selecting = False
         self._origin = QPoint()
@@ -107,6 +112,8 @@ class RegionSelectionOverlay(QWidget):
         self._help.move(offset_x, offset_y)
 
     def showEvent(self, event):
+        if self.geometry() != self._screen.geometry():
+            self.setGeometry(self._screen.geometry())
         super().showEvent(event)
         self.activateWindow()
         self.raise_()
@@ -121,7 +128,7 @@ class RegionSelectionOverlay(QWidget):
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             self._selecting = True
-            self._origin = event.globalPosition().toPoint()
+            self._origin = self._local_point(event)
             self._current = self._origin
             try:
                 self.grabMouse()
@@ -131,7 +138,7 @@ class RegionSelectionOverlay(QWidget):
 
     def mouseMoveEvent(self, event):
         if self._selecting:
-            self._current = event.globalPosition().toPoint()
+            self._current = self._local_point(event)
             self.update()
 
     def mouseReleaseEvent(self, event):
@@ -154,13 +161,7 @@ class RegionSelectionOverlay(QWidget):
         painter.fillRect(self.rect(), QColor(0, 0, 0, 100))
 
         if self._selecting:
-            global_rect = self._norm(self._origin, self._current)
-            local_rect = QRect(
-                global_rect.x() - self.geometry().x(),
-                global_rect.y() - self.geometry().y(),
-                global_rect.width(),
-                global_rect.height(),
-            )
+            local_rect = self._norm(self._origin, self._current)
             painter.save()
             painter.setCompositionMode(QPainter.CompositionMode_Clear)
             painter.fillRect(local_rect, Qt.transparent)
@@ -169,6 +170,13 @@ class RegionSelectionOverlay(QWidget):
             primary = Palette.OVERLAY_DRAW_PRIMARY
             painter.setPen(QPen(QColor(*primary), 2, Qt.SolidLine))
             painter.drawRect(local_rect)
+
+    def _local_point(self, event) -> QPoint:
+        point = event.position().toPoint()
+        return QPoint(
+            max(0, min(self.width(), point.x())),
+            max(0, min(self.height(), point.y())),
+        )
 
     def _norm(self, p1: QPoint, p2: QPoint) -> QRect:
         x1, y1 = p1.x(), p1.y()
@@ -184,74 +192,30 @@ class RegionSelectionOverlay(QWidget):
         except Exception as exc:
             logger.debug("Unable to release mouse grab for selection overlay: %s", exc)
 
-    @staticmethod
-    def _nearest_screen(point: QPoint):
-        screens = QGuiApplication.screens()
-        if not screens:
-            return QGuiApplication.primaryScreen()
-        best = screens[0]
-        best_dist = float("inf")
-        px, py = point.x(), point.y()
-        for screen in screens:
-            g = screen.geometry()
-            dx = 0
-            if px < g.left():
-                dx = g.left() - px
-            elif px > g.right():
-                dx = px - g.right()
-            dy = 0
-            if py < g.top():
-                dy = g.top() - py
-            elif py > g.bottom():
-                dy = py - g.bottom()
-            dist = float(dx * dx + dy * dy)
-            if dist < best_dist:
-                best = screen
-                best_dist = dist
-        return best
-
-    def _screen_for_point(self, point: QPoint):
-        screen = QGuiApplication.screenAt(point)
-        if screen is not None:
-            return screen
-        nearest = self._nearest_screen(point)
-        if nearest is not None:
-            return nearest
-        raise RuntimeError("Не удалось определить экран для координат выделения.")
-
-    def _find_monitor(self, screen) -> dict:
-        for sc, mon in self._screen_map:
-            if sc is screen:
-                return mon
-        return self._screen_map[0][1]
-
-    def _logical_to_phys(self, point: QPoint) -> Tuple[int, int]:
-        screen = self._screen_for_point(point)
-        monitor = self._find_monitor(screen)
-        geom = screen.geometry()
-        screen_w = max(1.0, float(geom.width()))
-        screen_h = max(1.0, float(geom.height()))
-        scale_x = float(monitor["width"]) / screen_w
-        scale_y = float(monitor["height"]) / screen_h
-        local_x = max(0.0, min(screen_w, float(point.x() - geom.x())))
-        local_y = max(0.0, min(screen_h, float(point.y() - geom.y())))
-        phys_x = int(round(float(monitor["left"]) + local_x * scale_x))
-        phys_y = int(round(float(monitor["top"]) + local_y * scale_y))
-        return phys_x, phys_y
-
     def _map_rect_to_phys(self, rect: QRect) -> dict:
-        p1 = self._logical_to_phys(rect.topLeft())
-        p2 = self._logical_to_phys(QPoint(rect.x() + rect.width(), rect.y() + rect.height()))
-        left = min(p1[0], p2[0])
-        top = min(p1[1], p2[1])
-        right = max(p1[0], p2[0])
-        bottom = max(p1[1], p2[1])
+        mon_w = int(self._monitor["width"])
+        mon_h = int(self._monitor["height"])
+        scale_x = float(mon_w) / max(1.0, float(self.width()))
+        scale_y = float(mon_h) / max(1.0, float(self.height()))
+        left = max(0, min(mon_w - 1, int(round(rect.x() * scale_x))))
+        top = max(0, min(mon_h - 1, int(round(rect.y() * scale_y))))
+        right = max(left + 1, min(mon_w, int(round((rect.x() + rect.width()) * scale_x))))
+        bottom = max(top + 1, min(mon_h, int(round((rect.y() + rect.height()) * scale_y))))
         return {
-            "left": left,
-            "top": top,
-            "width": max(1, right - left),
-            "height": max(1, bottom - top),
+            "left": int(self._monitor["left"]) + left,
+            "top": int(self._monitor["top"]) + top,
+            "width": right - left,
+            "height": bottom - top,
         }
+
+    def finish(self) -> None:
+        """Close without emitting (another screen's overlay handled it)."""
+        if self._done:
+            return
+        self._done = True
+        self._release_mouse_grab()
+        self.releaseKeyboard()
+        self.close()
 
     def _emit_region(self, region: dict) -> None:
         if self._done:
@@ -535,7 +499,7 @@ class VideoCaptureController(QObject):
         self._grabber = grabber
         self._ffmpeg_bin = ffmpeg_bin
         self._parent_widget = parent_widget
-        self._overlay: Optional[RegionSelectionOverlay] = None
+        self._overlays: List[RegionSelectionOverlay] = []
         self._cancel_requested = False
         self._active = False
 
@@ -547,11 +511,13 @@ class VideoCaptureController(QObject):
             mapping = self._match_monitors()
             if not mapping:
                 raise RuntimeError("Не удалось сопоставить мониторы для выбора области.")
-            self._overlay = RegionSelectionOverlay(mapping)
-            self._overlay.region_selected.connect(self._on_region_selected)
-            self._overlay.canceled.connect(self._on_overlay_canceled)
-            self._overlay.show()
-            self._overlay.raise_()
+            self._overlays = [RegionSelectionOverlay(screen, mon) for screen, mon in mapping]
+            for overlay in self._overlays:
+                overlay.region_selected.connect(self._on_region_selected)
+                overlay.canceled.connect(self._on_overlay_canceled)
+            for overlay in self._overlays:
+                overlay.show()
+                overlay.raise_()
         except Exception as exc:
             self._active = False
             self.failed.emit(str(exc))
@@ -560,14 +526,23 @@ class VideoCaptureController(QObject):
     def cancel_recording(self) -> None:
         self._cancel_requested = True
 
+    def _close_overlays(self) -> None:
+        overlays, self._overlays = self._overlays, []
+        for overlay in overlays:
+            overlay.finish()
+
     def _on_overlay_canceled(self) -> None:
-        self._overlay = None
+        if not self._overlays:
+            return
+        self._close_overlays()
         self._active = False
         self.canceled.emit()
         self.finished.emit()
 
     def _on_region_selected(self, region: dict) -> None:
-        self._overlay = None
+        if not self._overlays:
+            return
+        self._close_overlays()
         try:
             output_path = self._record_and_save(region)
         except _CaptureCanceled:
