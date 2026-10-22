@@ -78,6 +78,59 @@ def _exclude_widget_from_capture(widget: QWidget) -> bool:
         return False
 
 
+def _logical_to_physical_rect(screen, rect: QRect) -> QRect:
+    """Map a logical rect on ``screen`` to physical desktop pixels (MSS space).
+
+    Qt 6 on Windows keeps each screen's top-left at its native position and
+    scales only offsets within the screen by its device pixel ratio.
+    """
+    g = screen.geometry()
+    dpr = float(screen.devicePixelRatio() or 1.0)
+    return QRect(
+        int(round(g.x() + (rect.x() - g.x()) * dpr)),
+        int(round(g.y() + (rect.y() - g.y()) * dpr)),
+        int(round(rect.width() * dpr)),
+        int(round(rect.height() * dpr)),
+    )
+
+
+def hud_position(width: int, height: int, avoid_region: Optional[dict], screens: list) -> Optional[QPoint]:
+    """Top-left for the recording HUD that keeps it out of the recorded area.
+
+    Display affinity normally hides the HUD from capture, but it is silently
+    ignored on older Windows 10 builds, over RDP and in some VMs. Placing the
+    HUD outside the region guarantees it never ends up in the video. Screens
+    are tried in order (primary first); the first spot clear of the region
+    wins, otherwise the default top-centre of the first screen is kept.
+    """
+    if not screens:
+        return None
+    margin = 16
+    candidates: List[Tuple[object, QPoint]] = []
+    for screen in screens:
+        ag = screen.availableGeometry()
+        cx = ag.center().x() - width // 2
+        left = ag.left() + margin
+        right = ag.right() - width - margin
+        top = ag.top() + Metrics.LAUNCHER_SCREEN_TOP_OFFSET
+        bottom = ag.bottom() - height - margin
+        for x, y in ((cx, top), (cx, bottom), (left, top), (right, top), (left, bottom), (right, bottom)):
+            candidates.append((screen, QPoint(x, y)))
+    if avoid_region is None:
+        return candidates[0][1]
+    region = QRect(
+        int(avoid_region["left"]),
+        int(avoid_region["top"]),
+        int(avoid_region["width"]),
+        int(avoid_region["height"]),
+    ).adjusted(-8, -8, 8, 8)
+    for screen, pos in candidates:
+        phys = _logical_to_physical_rect(screen, QRect(pos.x(), pos.y(), width, height))
+        if not phys.intersects(region):
+            return pos
+    return candidates[0][1]
+
+
 class RegionSelectionOverlay(QWidget):
     """Region picker covering exactly one screen.
 
@@ -239,11 +292,12 @@ class RegionSelectionOverlay(QWidget):
 class RecordingStatusWindow(QWidget):
     canceled = Signal()
 
-    def __init__(self, total_frames: int):
+    def __init__(self, total_frames: int, avoid_region: Optional[dict] = None):
         super().__init__(None, Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setFocusPolicy(Qt.StrongFocus)
         self._total_frames = max(1, int(total_frames))
+        self._avoid_region = avoid_region
         self._capture_exclusion_applied = False
 
         root = QVBoxLayout(self)
@@ -361,11 +415,10 @@ class RecordingStatusWindow(QWidget):
         primary = QGuiApplication.primaryScreen()
         if primary is None:
             return
-        geom = primary.availableGeometry()
-        self.move(
-            geom.center().x() - self.width() // 2,
-            geom.top() + Metrics.LAUNCHER_SCREEN_TOP_OFFSET,
-        )
+        screens = [primary] + [s for s in QGuiApplication.screens() if s is not primary]
+        pos = hud_position(self.width(), self.height(), self._avoid_region, screens)
+        if pos is not None:
+            self.move(pos)
 
 
 class VideoSaveOptionsDialog(QDialog):
@@ -590,7 +643,7 @@ class VideoCaptureController(QObject):
             ffmpeg_bin=self._ffmpeg_bin,
         )
 
-        progress = RecordingStatusWindow(total_frames=total_frames)
+        progress = RecordingStatusWindow(total_frames=total_frames, avoid_region=region)
         progress.canceled.connect(self.cancel_recording)
         progress.update_progress(captured=0, remaining_seconds=duration)
         progress.show()
