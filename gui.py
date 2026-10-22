@@ -3,7 +3,8 @@ from typing import List, Tuple, Optional, TYPE_CHECKING, Type
 from pathlib import Path
 from time import perf_counter
 import logging
-from PIL import Image, ImageQt
+import sys
+from PIL import Image, ImageChops, ImageQt
 from PySide6.QtCore import (
     Qt,
     QRect,
@@ -75,6 +76,26 @@ class _KeybinderEventFilter(QAbstractNativeEventFilter):
         return handled, 0
 
 
+def _physical_cursor_pos() -> Optional[QPoint]:
+    """Cursor position in physical desktop pixels (same space as MSS monitors).
+
+    Qt's global coordinates are not continuous across screens with different
+    scaling, so per-screen overlays track a shared selection via Win32.
+    """
+    if sys.platform != "win32":
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        pt = wintypes.POINT()
+        if ctypes.windll.user32.GetCursorPos(ctypes.byref(pt)):
+            return QPoint(pt.x, pt.y)
+    except Exception:
+        logger.debug("GetCursorPos failed", exc_info=True)
+    return None
+
+
 class SelectionOverlayBase(QWidget):
     captured = Signal(QImage, object)
     cancel_all = Signal()
@@ -104,6 +125,12 @@ class SelectionOverlayBase(QWidget):
         self.origin = QPoint()
         self.current = QPoint()
         self.selecting = False
+
+        # Per-screen mode: the manager owns one selection in physical pixels
+        # shared by all overlays, so it can span monitors.
+        self._group: Optional["OverlayManager"] = None
+        self._phys_rect: Optional[QRect] = None
+        self._shared_sel: Optional[QRect] = None
 
         self.help = QLabel(self)
         self.help.setText(overlay_hint_text())
@@ -141,6 +168,52 @@ class SelectionOverlayBase(QWidget):
         self._update_shape_hint()
         self.update()
 
+    def attach_group(self, group: "OverlayManager", phys_rect: QRect) -> None:
+        """Join a shared cross-screen selection; ``phys_rect`` is this screen in physical pixels."""
+        self._group = group
+        self._phys_rect = QRect(phys_rect)
+
+    def set_shared_selection(self, rect: Optional[QRect]) -> None:
+        self._shared_sel = QRect(rect) if rect is not None else None
+        self._update_hint_visibility()
+        self.update()
+
+    def _image_scale(self) -> Tuple[float, float]:
+        sx = float(self.base_img.width) / max(1.0, float(self.width()))
+        sy = float(self.base_img.height) / max(1.0, float(self.height()))
+        return sx, sy
+
+    def _local_to_physical(self, p: QPoint) -> QPoint:
+        sx, sy = self._image_scale()
+        return QPoint(
+            self._phys_rect.x() + int(round(p.x() * sx)),
+            self._phys_rect.y() + int(round(p.y() * sy)),
+        )
+
+    def _physical_to_local_rect(self, r: QRect) -> QRectF:
+        sx, sy = self._image_scale()
+        return QRectF(
+            (r.x() - self._phys_rect.x()) / sx,
+            (r.y() - self._phys_rect.y()) / sy,
+            r.width() / sx,
+            r.height() / sy,
+        )
+
+    def _physical_point(self, e) -> QPoint:
+        pos = _physical_cursor_pos()
+        if pos is None:
+            pos = self._local_to_physical(self._local_point(e))
+        return pos
+
+    def _selection_local_rectf(self) -> Optional[QRectF]:
+        if self._group is not None:
+            if self._shared_sel is None:
+                return None
+            return self._physical_to_local_rect(self._shared_sel)
+        if not self.selecting:
+            return None
+        return QRectF(self._norm(self.origin, self.current))
+
     def showEvent(self, e):
         super().showEvent(e)
         self.activateWindow()
@@ -153,9 +226,11 @@ class SelectionOverlayBase(QWidget):
             self._cancel_selection()
             return
         if e.key() == Qt.Key_Space:
-            self.shape = "ellipse" if self.shape == "rect" else "rect"
-            self._update_shape_hint()
-            self.update()
+            shape = "ellipse" if self.shape == "rect" else "rect"
+            if self._group is not None:
+                self._group.set_shape(shape)
+            else:
+                self.set_shape(shape)
 
     def _cancel_selection(self) -> None:
         if self._cancel_emitted:
@@ -173,14 +248,21 @@ class SelectionOverlayBase(QWidget):
             self.origin = self._local_point(e)
             self.current = self.origin
             try:
+                # Keeps mouse events coming here even over other screens.
                 self.grabMouse()
             except Exception:
                 logger.debug("Failed to grab mouse in selection overlay", exc_info=True)
+            if self._group is not None:
+                self._group.begin_selection(self._physical_point(e))
+                return
             self._update_hint_visibility()
             self.update()
 
     def mouseMoveEvent(self, e):
         if self.selecting:
+            if self._group is not None:
+                self._group.update_selection(self._physical_point(e))
+                return
             self.current = self._local_point(e)
             self._update_hint_visibility()
             self.update()
@@ -189,6 +271,10 @@ class SelectionOverlayBase(QWidget):
         if e.button() == Qt.LeftButton and self.selecting:
             self.selecting = False
             self._release_mouse_grab()
+            if self._group is not None:
+                self._group.finish_selection(self._physical_point(e))
+                self._cancel_selection()
+                return
             self._update_hint_visibility()
             gr = self._norm(self.origin, self.current)
             if gr.width() > 5 and gr.height() > 5:
@@ -272,40 +358,28 @@ class SelectionOverlayBase(QWidget):
         p.setRenderHint(QPainter.SmoothPixmapTransform)
         p.drawPixmap(QRectF(self.rect()), self._bg_blurred, QRectF(self._bg_blurred.rect()))
 
-        if self.selecting:
-            loc = self._norm(self.origin, self.current)
-            src = self._image_rect_f(loc)
-
+        loc = self._selection_local_rectf()
+        if loc is not None:
+            # The selection may extend past this screen; the widget clips it,
+            # so each screen shows its own piece of one continuous shape.
+            path = QPainterPath()
             if self.shape == "rect":
-                path = QPainterPath()
-                path.addRoundedRect(QRectF(loc), 12, 12)
-                p.save()
-                p.setClipPath(path)
-                p.drawPixmap(QRectF(loc), self._bg_original, src)
-                p.restore()
-                p.setBrush(Qt.NoBrush)
-                # Более стильная рамка
-                primary = Palette.OVERLAY_DRAW_PRIMARY
-                p.setPen(QPen(QColor(*primary), 3, Qt.SolidLine))
-                p.drawPath(path)
+                path.addRoundedRect(loc, 12, 12)
             else:
-                path = QPainterPath()
-                path.addEllipse(QRectF(loc))
-                p.save()
-                p.setClipPath(path)
-                p.drawPixmap(QRectF(loc), self._bg_original, src)
-                p.restore()
-                p.setBrush(Qt.NoBrush)
-                # Более стильная рамка для эллипса
-                primary = Palette.OVERLAY_DRAW_PRIMARY
-                p.setPen(QPen(QColor(*primary), 3, Qt.SolidLine))
-                p.drawEllipse(QRectF(loc))
+                path.addEllipse(loc)
+            p.save()
+            p.setClipPath(path)
+            p.drawPixmap(QRectF(self.rect()), self._bg_original, QRectF(self._bg_original.rect()))
+            p.restore()
+            p.setBrush(Qt.NoBrush)
+            primary = Palette.OVERLAY_DRAW_PRIMARY
+            p.setPen(QPen(QColor(*primary), 3, Qt.SolidLine))
+            p.drawPath(path)
         p.end()
 
     def _image_rect_f(self, loc: QRect) -> QRectF:
         """Map a widget-local rect to base image pixels."""
-        sx = float(self.base_img.width) / max(1.0, float(self.width()))
-        sy = float(self.base_img.height) / max(1.0, float(self.height()))
+        sx, sy = self._image_scale()
         return QRectF(loc.x() * sx, loc.y() * sy, loc.width() * sx, loc.height() * sy)
 
     def _map_rect_to_image_coords(self, gr: QRect) -> Tuple[int, int, int, int]:
@@ -330,14 +404,14 @@ class SelectionOverlayBase(QWidget):
         self._update_hint_visibility()
 
     def _update_hint_visibility(self):
-        if not self.selecting:
+        selection_rect = self._selection_local_rectf()
+        if selection_rect is None:
             self.help.show()
             self.shape_hint.show()
             return
 
-        selection_rect = self._norm(self.origin, self.current)
-        overlaps_help = selection_rect.intersects(self.help.geometry())
-        overlaps_shape = selection_rect.intersects(self.shape_hint.geometry())
+        overlaps_help = selection_rect.intersects(QRectF(self.help.geometry()))
+        overlaps_shape = selection_rect.intersects(QRectF(self.shape_hint.geometry()))
         visible = not (overlaps_help or overlaps_shape)
         self.help.setVisible(visible)
         self.shape_hint.setVisible(visible)
@@ -375,6 +449,8 @@ class OverlayManager(QObject):
         self.cfg = cfg
         self._grabber: Optional["ScreenGrabber"] = grabber
         self._overlays: List[SelectionOverlayBase] = []
+        self._sel_origin: Optional[QPoint] = None
+        self._sel_current: Optional[QPoint] = None
 
     def _ensure_grabber(self) -> "ScreenGrabber":
         if self._grabber is None:
@@ -430,8 +506,12 @@ class OverlayManager(QObject):
         grabber = self._ensure_grabber()
         # One snapshot for all screens, taken before any overlay is shown.
         images = grabber.grab_screens(mapping)
-        for (screen, _mon), img in zip(mapping, images):
+        for (screen, mon), img in zip(mapping, images):
             ov = ScreenOverlay(screen, img, self.cfg)
+            ov.attach_group(
+                self,
+                QRect(int(mon["left"]), int(mon["top"]), img.width, img.height),
+            )
             ov.captured.connect(self._on_captured)
             ov.cancel_all.connect(self.close_all)
             self._overlays.append(ov)
@@ -443,10 +523,80 @@ class OverlayManager(QObject):
         for ov in self._overlays:
             ov.set_shape(shape)
 
+    def _clamp_physical(self, p: QPoint) -> QPoint:
+        rects = [ov._phys_rect for ov in self._overlays if ov._phys_rect is not None]
+        if not rects:
+            return QPoint(p)
+        left = min(r.x() for r in rects)
+        top = min(r.y() for r in rects)
+        right = max(r.x() + r.width() for r in rects)
+        bottom = max(r.y() + r.height() for r in rects)
+        return QPoint(max(left, min(right, p.x())), max(top, min(bottom, p.y())))
+
+    def _selection_rect(self) -> Optional[QRect]:
+        if self._sel_origin is None or self._sel_current is None:
+            return None
+        left, right = sorted([self._sel_origin.x(), self._sel_current.x()])
+        top, bottom = sorted([self._sel_origin.y(), self._sel_current.y()])
+        return QRect(left, top, right - left, bottom - top)
+
+    def _broadcast_selection(self) -> None:
+        rect = self._selection_rect()
+        for ov in self._overlays:
+            ov.set_shared_selection(rect)
+
+    def begin_selection(self, phys: QPoint) -> None:
+        self._sel_origin = self._clamp_physical(phys)
+        self._sel_current = QPoint(self._sel_origin)
+        self._broadcast_selection()
+
+    def update_selection(self, phys: QPoint) -> None:
+        if self._sel_origin is None:
+            return
+        self._sel_current = self._clamp_physical(phys)
+        self._broadcast_selection()
+
+    def finish_selection(self, phys: QPoint) -> None:
+        self.update_selection(phys)
+        sel = self._selection_rect()
+        self._sel_origin = self._sel_current = None
+        self._broadcast_selection()
+        if sel is None or sel.width() <= 5 or sel.height() <= 5:
+            return
+        result = self.compose_selection(sel)
+        if result is None:
+            return
+        qimg, png_data = copy_pil_image_to_clipboard(result, return_png_data=True)
+        self._on_captured(qimg, png_data)
+
+    def compose_selection(self, sel: QRect) -> Optional[Image.Image]:
+        """Stitch the physical-pixel selection from every screen's snapshot.
+
+        Areas outside all monitors (gaps in uneven layouts) stay transparent.
+        """
+        if not self._overlays:
+            return None
+        w, h = sel.width(), sel.height()
+        canvas = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        for ov in self._overlays:
+            if ov._phys_rect is None:
+                continue
+            part = sel.intersected(ov._phys_rect)
+            if part.isEmpty():
+                continue
+            ix = part.x() - ov._phys_rect.x()
+            iy = part.y() - ov._phys_rect.y()
+            crop = ov.base_img.crop((ix, iy, ix + part.width(), iy + part.height()))
+            canvas.paste(crop, (part.x() - sel.x(), part.y() - sel.y()))
+        mask = self._overlays[0]._create_selection_mask(w, h)
+        canvas.putalpha(ImageChops.darker(mask, canvas.getchannel("A")))
+        return canvas
+
     def close_all(self):
         for ov in self._overlays:
             ov.close()
         self._overlays.clear()
+        self._sel_origin = self._sel_current = None
         self.finished.emit()
 
     def _on_captured(self, qimg: QImage, png_data: bytes):
