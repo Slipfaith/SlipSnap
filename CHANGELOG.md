@@ -13,6 +13,12 @@ The format is inspired by Keep a Changelog and follows Semantic Versioning.
 
 - Подготовка к следующим улучшениям стабильности и UX.
 
+### [3.3.3] - 2026-10-22
+
+#### Fixed
+
+- Выделение области экрана совпадает с курсором на конфигурациях из нескольких мониторов с разным масштабом (DPI).
+
 ### [3.3.2] - 2026-09-11
 
 #### Added
@@ -87,6 +93,12 @@ The format is inspired by Keep a Changelog and follows Semantic Versioning.
 ### [Unreleased]
 
 - Preparations for upcoming stability and UX improvements.
+
+### [3.3.3] - 2026-10-22
+
+#### Fixed
+
+- Screen selection now lines up with the cursor on multi-monitor setups with mixed DPI scaling.
 
 ### [3.3.2] - 2026-09-11
 
