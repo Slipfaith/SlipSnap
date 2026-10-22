@@ -57,6 +57,7 @@ editor/
     shape_tools.py        # RectangleTool, EllipseTool
     blur_tool.py
     eraser_tool.py
+    scissors_tool.py      # Ножницы: разрез снимков, удаление кусков с рваным краем
     line_arrow_tool.py
     selection_tool.py
   undo_commands.py        # QUndoCommand-субклассы (Add, Move, Resize, …)

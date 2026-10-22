@@ -7,6 +7,7 @@ from .shape_tools import RectangleTool, EllipseTool
 from .blur_tool import BlurTool
 from .eraser_tool import EraserTool
 from .line_arrow_tool import LineTool, ArrowTool
+from .scissors_tool import ScissorsTool
 
 __all__ = [
     "SelectionTool",
@@ -17,4 +18,5 @@ __all__ = [
     "EraserTool",
     "LineTool",
     "ArrowTool",
+    "ScissorsTool",
 ]

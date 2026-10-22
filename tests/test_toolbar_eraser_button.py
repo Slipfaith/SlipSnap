@@ -6,15 +6,18 @@ import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QPoint, QTimer, Qt
+from PySide6.QtCore import QObject, QPoint, QTimer, Qt, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QApplication, QMainWindow, QMenu, QToolButton
 
 from editor.ui.toolbar_factory import create_tools_toolbar
 
 
-class _CanvasStub:
+class _CanvasStub(QObject):
+    toolChanged = Signal(str)
+
     def __init__(self) -> None:
+        super().__init__()
         self.pen_mode = "pencil"
         self.tool_calls: list[str] = []
 

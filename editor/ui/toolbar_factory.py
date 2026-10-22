@@ -29,6 +29,7 @@ from .icon_factory import (
     make_icon_screenshot_eraser,
     make_icon_select,
     make_icon_zoom_lens,
+    make_icon_scissors,
     make_icon_memes,
     # New icons for top toolbar
     make_icon_new,
@@ -309,7 +310,10 @@ def create_tools_toolbar(window, canvas):
             window.addAction(act)
         return btn
 
-    add_tool("select", make_icon_select(), "Выделение", "V")
+    select_btn = add_tool("select", make_icon_select(), "Выделение", "V")
+    # Tools may hand control back to selection on their own (e.g. scissors
+    # after deleting a piece); keep the toolbar in step.
+    canvas.toolChanged.connect(lambda tool: select_btn.setChecked(True) if tool == "select" else None)
     add_tool("zoom_lens", make_icon_zoom_lens(), "Лупа", "G")
     shape_btn = QToolButton()
     shape_btn.setIcon(make_icon_rect())
@@ -492,6 +496,12 @@ def create_tools_toolbar(window, canvas):
     act_e.triggered.connect(eraser_btn.click)
     window.addAction(act_e)
 
+    add_tool(
+        "scissors",
+        make_icon_scissors(),
+        "Ножницы — проведите разрез, ПКМ по куску — удалить",
+        "X",
+    )
     add_tool("text", make_icon_text(), "Текст", "T")
 
     tool_buttons[0].setChecked(True)

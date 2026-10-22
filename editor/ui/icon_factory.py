@@ -257,6 +257,40 @@ def make_icon_eraser() -> QIcon:
     return QIcon(pm)
 
 
+def make_icon_scissors() -> QIcon:
+    pm = _base_pixmap()
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+
+    # Torn cut line under the blades
+    tear = QPainterPath()
+    tear.moveTo(6, 30)
+    for i, x in enumerate(range(9, 34, 3)):
+        tear.lineTo(x, 30 + (2 if i % 2 == 0 else -1))
+    p.setPen(QPen(QColor(ModernColors.PRIMARY), 1.6, Qt.DashLine, Qt.RoundCap))
+    p.setBrush(Qt.NoBrush)
+    p.drawPath(tear)
+
+    # Blades crossing at the pivot
+    p.setPen(QPen(QColor(ModernColors.TEXT_SECONDARY), 2.4, Qt.SolidLine, Qt.RoundCap))
+    p.drawLine(QPointF(13, 22), QPointF(30, 6))
+    p.drawLine(QPointF(13, 10), QPointF(30, 24))
+
+    # Finger rings
+    p.setPen(QPen(QColor(ModernColors.TEXT_SECONDARY), 2.2))
+    p.setBrush(QColor(ModernColors.SURFACE))
+    p.drawEllipse(QPointF(10, 8), 4, 4)
+    p.drawEllipse(QPointF(10, 24), 4, 4)
+
+    # Pivot
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor(ModernColors.PRIMARY))
+    p.drawEllipse(QPointF(20.5, 15.5), 1.8, 1.8)
+
+    p.end()
+    return QIcon(pm)
+
+
 def make_icon_screenshot_eraser() -> QIcon:
     """Eraser icon with an image frame for screenshot-pixel mode."""
     pm = _base_pixmap()
@@ -298,25 +332,20 @@ def make_icon_select() -> QIcon:
     p = QPainter(pm)
     p.setRenderHint(QPainter.Antialiasing)
 
-    # Dashed selection box
-    pen = QPen(QColor(ModernColors.TEXT_SECONDARY), 2, Qt.DashLine)
-    p.setPen(pen)
-    p.drawRect(8, 10, 20, 18)
+    # Classic pointer arrow
+    arrow = QPainterPath()
+    arrow.moveTo(12, 6)
+    arrow.lineTo(12, 30)
+    arrow.lineTo(17.5, 24.5)
+    arrow.lineTo(21.5, 33)   # tail, left edge
+    arrow.lineTo(25.5, 31.2)  # tail, right edge
+    arrow.lineTo(21.5, 22.8)
+    arrow.lineTo(29, 22.8)
+    arrow.closeSubpath()
 
-    # Cursor
-    cursor_path = QPainterPath()
-    cursor_path.moveTo(22, 22)
-    cursor_path.lineTo(22, 32)
-    cursor_path.lineTo(25, 29)
-    cursor_path.lineTo(28, 34) # Leg 1
-    cursor_path.lineTo(30, 33) # Leg width
-    cursor_path.lineTo(27, 28)
-    cursor_path.lineTo(32, 28)
-    cursor_path.closeSubpath()
-
-    p.setPen(QPen(QColor(ModernColors.SURFACE), 1))
+    p.setPen(QPen(QColor(ModernColors.SURFACE), 1.6, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
     p.setBrush(QColor(ModernColors.TEXT_PRIMARY))
-    p.drawPath(cursor_path)
+    p.drawPath(arrow)
 
     p.end()
     return QIcon(pm)

@@ -67,6 +67,7 @@ from editor.tools.shape_tools import RectangleTool, EllipseTool
 from editor.tools.blur_tool import BlurTool
 from editor.tools.eraser_tool import EraserTool
 from editor.tools.line_arrow_tool import LineTool, ArrowTool
+from editor.tools.scissors_tool import ScissorsTool
 from editor.undo_commands import AddCommand, MoveCommand, ResizeCommand, ScaleCommand, ZValueCommand, RemoveCommand, RotateCommand
 from editor.image_utils import images_from_mime
 from meme_library import save_meme_image
@@ -173,6 +174,7 @@ class Canvas(QGraphicsView):
             "blur": BlurTool(self, ModernColors.PRIMARY),
             "erase": EraserTool(self, EraserTool.ELEMENTS),
             "erase_screenshot": EraserTool(self, EraserTool.SCREENSHOTS),
+            "scissors": ScissorsTool(self),
         }
         self.active_tool = self.tools["select"]
 
@@ -261,6 +263,8 @@ class Canvas(QGraphicsView):
             painter.restore()
 
         self._draw_zoom_lens_overlay(painter)
+        if self._tool == "scissors":
+            self.tools["scissors"].paint_overlay(painter)
 
     def _zoom_lens_items(self, only_items=None) -> list[ZoomLensItem]:
         allowed = self._expanded_item_set(only_items) if only_items is not None else None
@@ -936,6 +940,7 @@ class Canvas(QGraphicsView):
         self._stop_live_item_animation()
         self.scene.clear()
         self.ocr_overlay.clear()
+        self.tools["scissors"].clear()
         self.pixmap_item = HighQualityPixmapItem(image)
         self.pixmap_item.setFlag(QGraphicsItem.ItemIsMovable, True)
         self.pixmap_item.setFlag(QGraphicsItem.ItemIsSelectable, True)
@@ -993,7 +998,7 @@ class Canvas(QGraphicsView):
                 self.viewport().setCursor(self.active_tool.cursor)
             else:
                 self.viewport().setCursor(Qt.ArrowCursor)
-        elif tool in {"rect", "ellipse", "line", "arrow", "blur"}:
+        elif tool in {"rect", "ellipse", "line", "arrow", "blur", "scissors"}:
             self.viewport().setCursor(Qt.CrossCursor)
         elif tool == "free":
             self.viewport().setCursor(self._pencil_cursor)
@@ -1013,7 +1018,7 @@ class Canvas(QGraphicsView):
                 self._zoom_lens_cursor_vp = self.viewport().rect().center()
         else:
             self._zoom_lens_cursor_vp = None
-        if tool == "zoom_lens" or previous_tool == "zoom_lens":
+        if {tool, previous_tool} & {"zoom_lens", "scissors"}:
             self.viewport().update()
         self.toolChanged.emit(tool)
         self._apply_lock_state()
@@ -2139,6 +2144,10 @@ class Canvas(QGraphicsView):
             event.accept()
             return
         scene_pos = self.mapToScene(event.pos())
+        if self._tool == "scissors":
+            self.tools["scissors"].show_context_menu(scene_pos, event.globalPos())
+            event.accept()
+            return
         items = self.scene.items(scene_pos)
         if items:
             item = items[0]
