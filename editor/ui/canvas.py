@@ -1447,11 +1447,9 @@ class Canvas(QGraphicsView):
                 focus_item.setFocus()
 
     def _render_rect_to_qimage(self, rect: QRectF, only_items=None):
-        dpr = getattr(self.window().windowHandle(), "devicePixelRatio", lambda: 1.0)()
-        try:
-            dpr = float(dpr)
-        except Exception:
-            dpr = 1.0
+        # One scene unit is one screenshot pixel. Rendering at the window's DPR
+        # (e.g. 1.25 on a 125% screen) would upscale the raster and blur it.
+        dpr = 1.0
         w = max(1, int(math.ceil(rect.width() * dpr)))
         h = max(1, int(math.ceil(rect.height() * dpr)))
         img = QImage(w, h, QImage.Format_RGBA8888)
