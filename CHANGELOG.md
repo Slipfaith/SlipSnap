@@ -13,6 +13,24 @@ The format is inspired by Keep a Changelog and follows Semantic Versioning.
 
 - Подготовка к следующим улучшениям стабильности и UX.
 
+### [3.4.0] - 2026-10-22
+
+#### Added
+
+- Инструмент «Ножницы» (X) в редакторе: проведите разрез через один или несколько снимков, затем ПКМ по куску → «Удалить кусок». На его месте остаётся прозрачность, а край выглядит как рваная бумага (кромка, волокна, мягкая тень). Разрезы и удаление отменяются через Ctrl+Z.
+
+#### Changed
+
+- После удаления куска ножницами редактор сам возвращается к инструменту выделения.
+- Иконка инструмента выделения теперь — стрелка-курсор.
+
+#### Fixed
+
+- Выделение области для скриншота можно вести через несколько мониторов с разным масштабом; снимок склеивается в одно изображение.
+- Копирование и сохранение из редактора больше не замыливают снимок на экранах с масштабом больше 100%.
+- Плашка записи видео (кадры и время) больше не попадает в видео на Windows 10: она размещается вне записываемой области.
+- Из requirements.txt убрана лишняя зависимость pyqtkeybind, которая тянула PyQt5.
+
 ### [3.3.3] - 2026-10-22
 
 #### Fixed
@@ -93,6 +111,24 @@ The format is inspired by Keep a Changelog and follows Semantic Versioning.
 ### [Unreleased]
 
 - Preparations for upcoming stability and UX improvements.
+
+### [3.4.0] - 2026-10-22
+
+#### Added
+
+- Scissors tool (X) in the editor: draw a cut across one or several images, then right-click a piece → "Удалить кусок". It leaves transparency behind with a torn-paper edge (paper rim, fibres, soft shadow). Cuts and deletions can be undone with Ctrl+Z.
+
+#### Changed
+
+- After deleting a piece with the scissors, the editor switches back to the selection tool.
+- The selection tool icon is now a pointer arrow.
+
+#### Fixed
+
+- A screenshot selection can now span monitors with different scaling; the capture is stitched into one image.
+- Copying and saving from the editor no longer blurs the image on screens scaled above 100%.
+- The video recording HUD (frames and time) no longer ends up in videos on Windows 10: it is placed outside the recorded area.
+- Removed the redundant pyqtkeybind dependency from requirements.txt, which pulled in PyQt5.
 
 ### [3.3.3] - 2026-10-22
 

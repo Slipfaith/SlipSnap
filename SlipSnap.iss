@@ -1,6 +1,6 @@
 ﻿[Setup]
 AppName=SlipSnap
-AppVersion=3.3.3
+AppVersion=3.4.0
 AppPublisher=slipfaith
 SetupIconFile=SlipSnap.ico
 DefaultDirName={autopf}\SlipSnap
